@@ -47,12 +47,18 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user sources here
+    ${CMAKE_SOURCE_DIR}/../Core/Boot/Src/app/boot_entry.c
+    ${CMAKE_SOURCE_DIR}/../Core/Boot/Src/app/boot_flow.c
+    ${CMAKE_SOURCE_DIR}/../Core/Boot/Src/domain/boot_context.c
+    ${CMAKE_SOURCE_DIR}/../Core/Boot/Src/ports/boot_ports_stub.c
+    ${CMAKE_SOURCE_DIR}/../Core/Boot/Src/diag/boot_diag.c
+    ${CMAKE_SOURCE_DIR}/../Core/Boot/Src/diag/boot_porting.c
+    ${CMAKE_SOURCE_DIR}/../Core/Boot/Src/ui/boot_visual.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
-    # Add user defined include paths
+    ${CMAKE_SOURCE_DIR}/../Core/Boot/Inc
 )
 
 # Add project symbols (macros)

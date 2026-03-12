@@ -1,0 +1,16 @@
+#ifndef BOOT_CONFIG_H
+#define BOOT_CONFIG_H
+
+#define BOOT_CFG_WORK_BUFFER_BYTES      (4096U)
+#define BOOT_CFG_TRACE_DEPTH            (128U)
+#define BOOT_CFG_VISUAL_PROGRESS_MAX    (100U)
+#define BOOT_CFG_USB_SCAN_INTERVAL_MS   (200U)
+#define BOOT_CFG_MAX_RETRY_COUNT        (3U)
+
+#define BOOT_CFG_UPDATE_FILE_PATH       "/update/app.bin"
+
+#define BOOT_CFG_XIP_BASE_ADDR          (0x90000000UL)
+#define BOOT_CFG_APP_VECTOR_ADDR        (BOOT_CFG_XIP_BASE_ADDR)
+#define BOOT_CFG_EXT_FLASH_SLOT0_ADDR   (0x00000000UL)
+
+#endif /* BOOT_CONFIG_H */

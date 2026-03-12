@@ -24,6 +24,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "boot/boot_entry.h"
 
 /* USER CODE END Includes */
 
@@ -663,10 +664,12 @@ void StartDefaultTask(void *argument)
   /* init code for USB_HOST */
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 5 */
+  boot_entry_init();
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+    boot_entry_process();
+    osDelay(20);
   }
   /* USER CODE END 5 */
 }

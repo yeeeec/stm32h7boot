@@ -1,0 +1,20 @@
+flowchart TD
+    A[Power On / Reset] --> B[Boot Entry Init]
+    B --> C[INIT]
+    C --> D[Porting Check and Gap Report]
+    D --> E[WAIT_USB]
+    E -->|USB Ready| F[LOAD_PACKAGE]
+    E -->|Timeout / Not Ready| E
+    F --> G[VERIFY_PACKAGE]
+    G --> H[PROGRAM_EXT_FLASH]
+    H --> I[MAP_XIP]
+    I --> J[JUMP_APP]
+    J --> K[Application Start]
+
+    F --> X[ERROR]
+    G --> X
+    H --> X
+    I --> X
+    J --> X
+
+    X --> Y[Diagnostics Snapshot + Gap Mask]

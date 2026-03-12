@@ -1,0 +1,35 @@
+#ifndef BOOT_TYPES_H
+#define BOOT_TYPES_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+typedef enum
+{
+    BOOT_RESULT_OK = 0,
+    BOOT_RESULT_IN_PROGRESS = 1,
+    BOOT_RESULT_NOT_READY = 2,
+    BOOT_RESULT_RETRY = 3,
+
+    BOOT_RESULT_FAIL = -1,
+    BOOT_RESULT_INVALID_PARAM = -2,
+    BOOT_RESULT_IO_ERROR = -3,
+    BOOT_RESULT_VERIFY_ERROR = -4,
+    BOOT_RESULT_NOT_IMPLEMENTED = -5
+} boot_result_t;
+
+typedef enum
+{
+    BOOT_STAGE_IDLE = 0,
+    BOOT_STAGE_INIT,
+    BOOT_STAGE_WAIT_USB,
+    BOOT_STAGE_LOAD_PACKAGE,
+    BOOT_STAGE_VERIFY_PACKAGE,
+    BOOT_STAGE_PROGRAM_EXT_FLASH,
+    BOOT_STAGE_MAP_XIP,
+    BOOT_STAGE_JUMP_APP,
+    BOOT_STAGE_DONE,
+    BOOT_STAGE_ERROR
+} boot_stage_t;
+
+#endif /* BOOT_TYPES_H */
