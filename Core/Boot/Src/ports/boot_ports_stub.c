@@ -361,7 +361,7 @@ boot_result_t boot_port_usb_load_package(const char *path,
                                          uint32_t capacity,
                                          boot_image_metadata_t *metadata)
 {
-    FIL file;
+    FIL *file = &USBHFile;
     char full_path[64];
     UINT bytes_read = 0U;
     FRESULT fr = FR_OK;
@@ -407,7 +407,7 @@ boot_result_t boot_port_usb_load_package(const char *path,
         return (fr == FR_NO_FILESYSTEM) ? BOOT_RESULT_VERIFY_ERROR : BOOT_RESULT_NOT_READY;
     }
 
-    fr = f_open(&file, full_path, FA_READ);
+    fr = f_open(file, full_path, FA_READ);
     if (fr != FR_OK)
     {
         if ((fr == FR_NO_FILE) || (fr == FR_NO_PATH) || (fr == FR_NOT_READY))
@@ -417,15 +417,15 @@ boot_result_t boot_port_usb_load_package(const char *path,
         return BOOT_RESULT_IO_ERROR;
     }
 
-    file_size = f_size(&file);
+    file_size = f_size(file);
     if ((file_size == 0U) || (file_size > (FSIZE_t)capacity))
     {
-        (void)f_close(&file);
+        (void)f_close(file);
         return BOOT_RESULT_INVALID_PARAM;
     }
 
-    fr = f_read(&file, buffer, (UINT)file_size, &bytes_read);
-    (void)f_close(&file);
+    fr = f_read(file, buffer, (UINT)file_size, &bytes_read);
+    (void)f_close(file);
     if ((fr != FR_OK) || (bytes_read != (UINT)file_size))
     {
         return BOOT_RESULT_IO_ERROR;
