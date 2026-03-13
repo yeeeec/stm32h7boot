@@ -1,0 +1,23 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    
+    {
+      "name": "Debug PC J-Link",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "jlink",
+      "device": "STM32H743XI",
+      "interface": "swd",
+      "runToEntryPoint": "main",
+      "gdbPath": "C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/14.2 rel1/bin/arm-none-eabi-gdb",
+      "executable": "${command:cmake.launchTargetPath}",
+      "svdFile": "${workspaceFolder}/STM32H743.svd",
+      "cwd": "${workspaceFolder}",
+      "showDevDebugOutput": "raw",
+      "postLaunchCommands": [
+        "monitor reset halt"
+      ]
+    }
+  ]
+}
