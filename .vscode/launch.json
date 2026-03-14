@@ -17,7 +17,24 @@
       "showDevDebugOutput": "raw",
       "postLaunchCommands": [
         "monitor reset halt"
-      ]
+      ],
+            "liveWatch": {
+                "enabled": true,
+                "samplesPerSecond": 4
+            },
+            "rttConfig": {
+                "enabled": true,
+                "address": "auto",
+                "rtt_start_retry": 1000,
+                "decoders": [
+                    {
+                        "port": 0,
+                        "type": "console",
+                        "label": "RTT Channel 0",
+                        "timestamp": true
+                    }
+                ]
+            }
     }
   ]
 }

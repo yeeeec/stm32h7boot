@@ -435,10 +435,9 @@ manifest 中应包含：
 /boot/
     manifest.json
     device.cfg
-    app1.bin
-    app2.bin
+    app.bin
     config.bin
-    extflash.bin
+    resource.bin
     signature.sig
     /log/
 ```
@@ -449,13 +448,11 @@ manifest 中应包含：
   - 升级动作描述文件
 - `device.cfg`
   - 设备级附加配置，可选
-- `app1.bin`
-  - 写入 App1 的镜像文件
-- `app2.bin`
-  - 写入 App2 的镜像文件
+- `app.bin`
+  - 写入 App 的镜像文件
 - `config.bin`
   - 配置区数据文件
-- `extflash.bin`
+- `resource.bin`
   - 外置 Flash 数据文件
 - `signature.sig`
   - 升级包签名文件，可选
@@ -541,8 +538,8 @@ Manifest 是升级流程的调度核心。
 
 #### 示例
 
-- 若当前确认运行槽为 App1，则新镜像默认写入 App2。
-- 若当前确认运行槽为 App2，则新镜像默认写入 App1。
+- 若当前确认运行槽为 App1，则新镜像默认写入 App。
+- 若当前确认运行槽为 App2，则新镜像默认写入 App。
 
 ### 16.2 原因
 

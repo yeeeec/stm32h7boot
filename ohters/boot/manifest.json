@@ -1,0 +1,71 @@
+{
+  "format_version": 1,
+
+  "vendor": "ACME",
+  "product": "stm32h743_device",
+  "board": "stm32h743_board",
+
+  "bundle_version": "1.0.3",
+  "bundle_id": "release_20260314",
+
+  "serial_limit": "",
+
+  "policy": {
+    "allow_downgrade": false,
+    "require_signature": false,
+    "max_boot_attempts": 3
+  },
+
+  "operations": [
+
+    {
+      "type": "write_app",
+      "file": "app.bin",
+      "target_slot": "inactive",
+      "offset": 0,
+      "size": 524288,
+      "crc32": 305419896
+    },
+
+    {
+      "type": "write_config",
+      "file": "config.bin",
+      "target_region": "sys_config",
+      "size": 4096,
+      "crc32": 12345678,
+      "preserve": [
+        "device_id",
+        "factory_key",
+        "calibration_data"
+      ]
+    },
+
+    {
+      "type": "write_resource0",
+      "file": "resource0.bin",
+      "offset": 1048576,
+      "size": 65536,
+      "crc32": 87654321
+    },
+
+    {
+      "type": "write_resource1",
+      "file": "resource1.bin",
+      "offset": 1048576,
+      "size": 65536,
+      "crc32": 87654321
+    },
+
+    {
+      "type": "set_boot_flag",
+      "flag": "request_upgrade",
+      "value": 1
+    }
+
+  ],
+
+  "signature": {
+    "file": "signature.sig",
+    "algo": "sha256+rsa2048"
+  }
+}
