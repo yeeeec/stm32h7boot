@@ -23,6 +23,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "boot_app.h"
 
 /* USER CODE END Includes */
 
@@ -133,6 +134,7 @@ int main(void)
   MX_FATFS_Init();
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */
+  Boot_App_Init();
 
   /* USER CODE END 2 */
 
@@ -144,6 +146,7 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
+    Boot_App_Process();
   }
   /* USER CODE END 3 */
 }
