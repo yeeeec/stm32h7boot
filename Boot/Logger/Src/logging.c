@@ -52,18 +52,6 @@ static uint32_t get_tick(void)
 
 /* ================= level ================= */
 
-static const char *lvl_str(LogLevel_t l)
-{
-    switch(l)
-    {
-        case LOG_LVL_ERROR: return "ERROR";
-        case LOG_LVL_WARN:  return "WARN ";
-        case LOG_LVL_INFO:  return "INFO ";
-        case LOG_LVL_DEBUG: return "DEBUG";
-        default: return "LOG  ";
-    }
-}
-
 static const char *lvl_color(LogLevel_t l)
 {
 #if LOG_ENABLE_COLOR
@@ -163,35 +151,31 @@ void logging_write(LogLevel_t lvl,
 #if LOG_ENABLE_TIMESTAMP && LOG_ENABLE_COLOR
 
     len = snprintf(buf,sizeof(buf),
-    "[%s][%s%s%s][%s] ",
+    "[%s][%s%s%s] ",
     time,
     lvl_color(lvl),
-    lvl_str(lvl),
-    C_RST,
-    tag?tag:"SYS");
+    tag?tag:"SYS",
+    C_RST);
 
 #elif LOG_ENABLE_TIMESTAMP
 
     len = snprintf(buf,sizeof(buf),
-    "[%s][%s][%s] ",
+    "[%s][%s] ",
     time,
-    lvl_str(lvl),
     tag?tag:"SYS");
 
 #elif LOG_ENABLE_COLOR
 
     len = snprintf(buf,sizeof(buf),
-    "[%s%s%s][%s] ",
+    "[%s%s%s] ",
     lvl_color(lvl),
-    lvl_str(lvl),
-    C_RST,
-    tag?tag:"SYS");
+    tag?tag:"SYS",
+    C_RST);
 
 #else
 
     len = snprintf(buf,sizeof(buf),
-    "[%s][%s] ",
-    lvl_str(lvl),
+    "[%s] ",
     tag?tag:"SYS");
 
 #endif

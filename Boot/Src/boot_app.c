@@ -87,8 +87,8 @@ void Boot_App_Process(void)
       Boot_Flash_Init();
       Boot_Log_Init();
       Boot_Usb_Init();
-      Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "Boot framework init");
-      Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: INIT -> LOAD_CTRL");
+      BOOT_LOGI("Boot framework init");
+      BOOT_LOGI("State transition: INIT -> LOAD_CTRL");
       Boot_App_EnterState(BOOT_STATE_LOAD_CTRL);
       break;
 
@@ -97,11 +97,11 @@ void Boot_App_Process(void)
       if (error != BOOT_ERR_NONE)
       {
         g_boot_context.last_error = (uint32_t)error;
-        Boot_Log_Write(BOOT_LOG_WARN, error, "Control block load fallback");
+        BOOT_LOGW_ERR(error, "Control block load fallback");
         Boot_Ctrl_InitDefault(&g_boot_context.ctrl);
         (void)Boot_Ctrl_Save(&g_boot_context.ctrl);
       }
-      Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: LOAD_CTRL -> USB_WAIT");
+      BOOT_LOGI("State transition: LOAD_CTRL -> USB_WAIT");
       Boot_App_EnterState(BOOT_STATE_USB_WAIT);
       break;
 
@@ -115,8 +115,8 @@ void Boot_App_Process(void)
       if (scan_result == BOOT_USB_SCAN_UPGRADE_READY)
       {
         g_boot_context.mode = BOOT_MODE_UPGRADE;
-        Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "Upgrade media detected");
-        Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: USB_WAIT -> MANIFEST_PARSE");
+        BOOT_LOGI("Upgrade media detected");
+        BOOT_LOGI("State transition: USB_WAIT -> MANIFEST_PARSE");
         Boot_App_EnterState(BOOT_STATE_MANIFEST_PARSE);
         break;
       }
@@ -124,10 +124,10 @@ void Boot_App_Process(void)
       if (scan_result == BOOT_USB_SCAN_ERROR)
       {
         g_boot_context.last_error = (uint32_t)error;
-        Boot_Log_Write(BOOT_LOG_WARN, error, "USB scan failed");
+        BOOT_LOGW_ERR(error, "USB scan failed");
       }
 
-      Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: USB_WAIT -> ARBITRATE");
+      BOOT_LOGI("State transition: USB_WAIT -> ARBITRATE");
       Boot_App_EnterState(BOOT_STATE_ARBITRATE);
       break;
 
@@ -136,14 +136,14 @@ void Boot_App_Process(void)
       if (error != BOOT_ERR_NONE)
       {
         g_boot_context.last_error = (uint32_t)error;
-        Boot_Log_Write(BOOT_LOG_WARN, error, "Manifest not ready");
-        Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: MANIFEST_PARSE -> ARBITRATE");
+        BOOT_LOGW_ERR(error, "Manifest not ready");
+        BOOT_LOGI("State transition: MANIFEST_PARSE -> ARBITRATE");
         Boot_App_EnterState(BOOT_STATE_ARBITRATE);
         break;
       }
 
-      Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "Manifest parsed");
-      Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: MANIFEST_PARSE -> UPGRADE_EXECUTE");
+      BOOT_LOGI("Manifest parsed");
+      BOOT_LOGI("State transition: MANIFEST_PARSE -> UPGRADE_EXECUTE");
       Boot_App_EnterState(BOOT_STATE_UPGRADE_EXECUTE);
       break;
 
@@ -157,14 +157,14 @@ void Boot_App_Process(void)
       if (error != BOOT_ERR_NONE)
       {
         g_boot_context.last_error = (uint32_t)error;
-        Boot_Log_Write(BOOT_LOG_ERROR, error, "Upgrade execute failed");
+        BOOT_LOGE_ERR(error, "Upgrade execute failed");
       }
       else
       {
-        Boot_Log_Write(BOOT_LOG_RESULT, BOOT_ERR_NONE, "Upgrade execute finished");
+        BOOT_LOGI("Upgrade execute finished");
       }
 
-      Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: UPGRADE_EXECUTE -> ARBITRATE");
+      BOOT_LOGI("State transition: UPGRADE_EXECUTE -> ARBITRATE");
       Boot_App_EnterState(BOOT_STATE_ARBITRATE);
       break;
 
@@ -178,7 +178,7 @@ void Boot_App_Process(void)
           {
             Boot_Ctrl_IncrementPendingAttempts(&g_boot_context.ctrl);
             (void)Boot_Ctrl_Save(&g_boot_context.ctrl);
-            Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: ARBITRATE -> JUMP (pending slot)");
+            BOOT_LOGI("State transition: ARBITRATE -> JUMP (pending slot)");
             Boot_App_EnterState(BOOT_STATE_JUMP);
             break;
           }
@@ -196,7 +196,7 @@ void Boot_App_Process(void)
       error = Boot_App_TryBootSlot((BootSlot)g_boot_context.ctrl.active_slot);
       if (error == BOOT_ERR_NONE)
       {
-        Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: ARBITRATE -> JUMP (active slot)");
+        BOOT_LOGI("State transition: ARBITRATE -> JUMP (active slot)");
         Boot_App_EnterState(BOOT_STATE_JUMP);
         break;
       }
@@ -205,7 +205,7 @@ void Boot_App_Process(void)
       error = Boot_App_TryBootSlot(other_slot);
       if (error == BOOT_ERR_NONE)
       {
-        Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: ARBITRATE -> JUMP (fallback slot)");
+        BOOT_LOGI("State transition: ARBITRATE -> JUMP (fallback slot)");
         Boot_App_EnterState(BOOT_STATE_JUMP);
         break;
       }
@@ -214,18 +214,18 @@ void Boot_App_Process(void)
       break;
 
     case BOOT_STATE_JUMP:
-      Boot_Log_Write(BOOT_LOG_RESULT, BOOT_ERR_NONE, "Jump to selected slot");
+      BOOT_LOGI("Jump to selected slot");
       error = Boot_Jump_ToSlot(g_boot_context.slot_to_boot);
       g_boot_context.last_error = (uint32_t)error;
-      Boot_Log_Write(BOOT_LOG_ERROR, error, "Jump failed");
+      BOOT_LOGE_ERR(error, "Jump failed");
       Boot_App_EnterRecovery(error);
       break;
 
     case BOOT_STATE_RECOVERY:
       if (Boot_Recovery_Process(&g_boot_context) == BOOT_STATE_MANIFEST_PARSE)
       {
-        Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "Recovery media detected");
-        Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, "State transition: RECOVERY -> MANIFEST_PARSE");
+        BOOT_LOGI("Recovery media detected");
+        BOOT_LOGI("State transition: RECOVERY -> MANIFEST_PARSE");
         Boot_App_EnterState(BOOT_STATE_MANIFEST_PARSE);
       }
       break;

@@ -56,12 +56,12 @@ void Boot_Recovery_Enter(BootContext *context, BootError reason)
 
   context->mode = BOOT_MODE_RECOVERY;
   context->last_error = (uint32_t)reason;
-  Boot_Log_Write(BOOT_LOG_ERROR, reason, "Enter recovery mode");
+  BOOT_LOGE_ERR(reason, "Enter recovery mode");
   (void)snprintf(log_message,
                  sizeof(log_message),
                  "Recovery retry delay: %lu ms",
                  (unsigned long)retry_delay_ms);
-  Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, log_message);
+  BOOT_LOGI("%s", log_message);
 }
 
 BootState Boot_Recovery_Process(BootContext *context)

@@ -170,7 +170,7 @@ static BootError Boot_Upgrade_ExecuteWriteApp(const BootControlBlock *ctrl,
                  "write_app begin: slot=%lu size=%lu",
                  (unsigned long)target_slot,
                  (unsigned long)operation->size);
-  Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, log_message);
+  BOOT_LOGI("%s", log_message);
 
   source_crc32 = 0xFFFFFFFFUL;
   remaining = operation->size;
@@ -218,7 +218,7 @@ static BootError Boot_Upgrade_ExecuteWriteApp(const BootControlBlock *ctrl,
                  "write_app done: slot=%lu crc=0x%08lx",
                  (unsigned long)target_slot,
                  (unsigned long)verify_crc32);
-  Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, log_message);
+  BOOT_LOGI("%s", log_message);
   *written_slot = target_slot;
   return BOOT_ERR_NONE;
 }
@@ -369,7 +369,7 @@ BootError Boot_Upgrade_Execute(BootControlBlock *ctrl, const BootManifest *manif
                      "upgrade op%lu failed: type=%lu",
                      (unsigned long)i,
                      (unsigned long)manifest->operations[i].type);
-      Boot_Log_Write(BOOT_LOG_ERROR, error, log_message);
+      BOOT_LOGE_ERR(error, "%s", log_message);
       return error;
     }
   }
@@ -379,7 +379,7 @@ BootError Boot_Upgrade_Execute(BootControlBlock *ctrl, const BootManifest *manif
     error = Boot_Image_ValidateSlot(execution_result.written_slot, &record);
     if (error != BOOT_ERR_NONE)
     {
-      Boot_Log_Write(BOOT_LOG_ERROR, error, "new image validation failed");
+      BOOT_LOGE_ERR(error, "new image validation failed");
       return error;
     }
 
@@ -404,7 +404,7 @@ BootError Boot_Upgrade_Execute(BootControlBlock *ctrl, const BootManifest *manif
                    sizeof(log_message),
                    "pending slot prepared: %lu",
                    (unsigned long)execution_result.written_slot);
-    Boot_Log_Write(BOOT_LOG_INFO, BOOT_ERR_NONE, log_message);
+    BOOT_LOGI("%s", log_message);
   }
 
   return BOOT_ERR_NONE;
