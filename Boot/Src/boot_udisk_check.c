@@ -132,6 +132,45 @@ static int Boot_Udisk_StrCaseEqual(const char *left, const char *right)
   return (*left == '\0') && (*right == '\0');
 }
 
+static int Boot_Udisk_StrCaseStartsWith(const char *text, const char *prefix)
+{
+  if ((text == NULL) || (prefix == NULL))
+  {
+    return 0;
+  }
+
+  while (*prefix != '\0')
+  {
+    if (*text == '\0')
+    {
+      return 0;
+    }
+    if (toupper((unsigned char)(*text)) != toupper((unsigned char)(*prefix)))
+    {
+      return 0;
+    }
+    ++text;
+    ++prefix;
+  }
+  return 1;
+}
+
+static const char *Boot_Udisk_NormalizeSerialView(const char *serial)
+{
+  if (serial == NULL)
+  {
+    return "";
+  }
+
+  /* Windows PNP path may include "MSFT30" prefix while device string descriptor does not. */
+  if (Boot_Udisk_StrCaseStartsWith(serial, "MSFT30") != 0)
+  {
+    return serial + 6;
+  }
+
+  return serial;
+}
+
 static int Boot_Udisk_CopyString(char *dest, size_t dest_size, const char *src)
 {
   size_t src_length;
@@ -520,7 +559,9 @@ static BootError Boot_Udisk_CompareCodeAndMedia(const BootUdiskCode *code, const
     return BOOT_ERR_UDISK_INFO_MISMATCH;
   }
 
-  if ((code->usb_serial[0] != '\0') && (strcmp(code->usb_serial, info->usb_serial) != 0))
+  if ((code->usb_serial[0] != '\0') &&
+      (Boot_Udisk_StrCaseEqual(Boot_Udisk_NormalizeSerialView(code->usb_serial),
+                               Boot_Udisk_NormalizeSerialView(info->usb_serial)) == 0))
   {
     return BOOT_ERR_UDISK_INFO_MISMATCH;
   }
@@ -792,46 +833,36 @@ static void Boot_Udisk_HexUpper(const uint8_t *input, size_t input_size, char *o
   output[input_size * 2U] = '\0';
 }
 
-static BootError Boot_Udisk_CheckHash(const BootUdiskCode *code, const BootUdiskMediaInfo *info)
+static BootError Boot_Udisk_CheckHash(const BootUdiskCode *code)
 {
   char hash_source[BOOT_UDISK_MAX_HASH_SOURCE_LENGTH];
-  char volume_id_text[16];
   char hash_hex[BOOT_UDISK_HASH_HEX_LENGTH + 1U];
   uint8_t digest[32];
-  const char *hash_vid;
-  const char *hash_pid;
-  const char *hash_serial;
   int length;
 
-  if ((code == NULL) || (info == NULL))
+  if (code == NULL)
   {
     return BOOT_ERR_INVALID_ARGUMENT;
   }
 
-  hash_vid = (code->usb_vid[0] != '\0') ? info->usb_vid : "";
-  hash_pid = (code->usb_pid[0] != '\0') ? info->usb_pid : "";
-  hash_serial = (code->usb_serial[0] != '\0') ? info->usb_serial : "";
-
-  (void)snprintf(volume_id_text, sizeof(volume_id_text), "%08lX", (unsigned long)info->fat_volume_id);
-
   length = snprintf(
       hash_source,
       sizeof(hash_source),
-      "USB_VID=%s|USB_PID=%s|USB_SERIAL=%s|CAPACITY_BYTES=%llu|FAT_BYTES_PER_SECTOR=%lu|"
-      "FAT_SECTORS_PER_CLUSTER=%lu|FAT_RESERVED_SECTORS=%lu|FAT_NUM_FATS=%lu|FAT_SIZE_32=%lu|"
-      "FAT_ROOT_CLUSTER=%lu|FAT_VOLUME_ID=%s|FAT_FS_TYPE=%s",
-      hash_vid,
-      hash_pid,
-      hash_serial,
-      (unsigned long long)info->capacity_bytes,
-      (unsigned long)info->fat_bytes_per_sector,
-      (unsigned long)info->fat_sectors_per_cluster,
-      (unsigned long)info->fat_reserved_sectors,
-      (unsigned long)info->fat_num_fats,
-      (unsigned long)info->fat_size_32,
-      (unsigned long)info->fat_root_cluster,
-      volume_id_text,
-      "FAT32");
+      "USB_VID=%s|USB_PID=%s|USB_SERIAL=%s|CAPACITY_BYTES=%s|FAT_BYTES_PER_SECTOR=%s|"
+      "FAT_SECTORS_PER_CLUSTER=%s|FAT_RESERVED_SECTORS=%s|FAT_NUM_FATS=%s|FAT_SIZE_32=%s|"
+      "FAT_ROOT_CLUSTER=%s|FAT_VOLUME_ID=%s|FAT_FS_TYPE=%s",
+      code->usb_vid,
+      code->usb_pid,
+      code->usb_serial,
+      code->capacity_bytes,
+      code->fat_bytes_per_sector,
+      code->fat_sectors_per_cluster,
+      code->fat_reserved_sectors,
+      code->fat_num_fats,
+      code->fat_size_32,
+      code->fat_root_cluster,
+      code->fat_volume_id,
+      code->fat_fs_type);
 
   if ((length <= 0) || ((size_t)length >= sizeof(hash_source)))
   {
@@ -880,5 +911,5 @@ BootError Boot_Udisk_Check(void)
     return error;
   }
 
-  return Boot_Udisk_CheckHash(&code, &info);
+  return Boot_Udisk_CheckHash(&code);
 }

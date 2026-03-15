@@ -75,7 +75,7 @@
 #define BOOT_LOG_DIR_PATH                   "/boot/log"
 #define BOOT_LOG_FILE_PATH                  "/boot/log/boot.log"
 #define BOOT_UDISK_CHECK_ENABLE             1U
-#define BOOT_UDISK_CHECK_PATH               "/udisk.cck"
+#define BOOT_UDISK_CHECK_PATH               "/check/udisk.cck"
 #define BOOT_UDISK_CHECK_FORMAT_VERSION     3U
 
 #define BOOT_LOG_MESSAGE_MAX_LENGTH         96U
