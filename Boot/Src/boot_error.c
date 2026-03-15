@@ -32,6 +32,16 @@ const char *Boot_ErrorToString(BootError error)
       return "file_crc";
     case BOOT_ERR_FILE_WRITE:
       return "file_write";
+    case BOOT_ERR_UDISK_CODE_NOT_FOUND:
+      return "udisk_code_not_found";
+    case BOOT_ERR_UDISK_CODE_PARSE:
+      return "udisk_code_parse";
+    case BOOT_ERR_UDISK_NOT_FAT32:
+      return "udisk_not_fat32";
+    case BOOT_ERR_UDISK_INFO_MISMATCH:
+      return "udisk_info_mismatch";
+    case BOOT_ERR_UDISK_HASH_MISMATCH:
+      return "udisk_hash_mismatch";
     case BOOT_ERR_PRODUCT_MISMATCH:
       return "product_mismatch";
     case BOOT_ERR_BOARD_MISMATCH:

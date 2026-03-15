@@ -14,6 +14,7 @@ set(BOOT_FRAMEWORK_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/boot_recovery.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/boot_upgrade.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/boot_usb.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/boot_udisk_check.c
 )
 
 add_library(boot_framework STATIC)

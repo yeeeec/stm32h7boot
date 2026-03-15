@@ -7,6 +7,7 @@
 #include "stm32h7xx_hal.h"
 #include "usb_host.h"
 #include "boot_config.h"
+#include "boot_udisk_check.h"
 
 extern ApplicationTypeDef Appli_state;
 
@@ -165,6 +166,22 @@ BootUsbScanResult Boot_Usb_PollForUpgradeMedia(uint32_t window_ms, BootError *er
     }
     return BOOT_USB_SCAN_MEDIA_INVALID;
   }
+
+#if (BOOT_UDISK_CHECK_ENABLE == 1U)
+  {
+    BootError udisk_error;
+
+    udisk_error = Boot_Udisk_Check();
+    if (udisk_error != BOOT_ERR_NONE)
+    {
+      if (error != NULL)
+      {
+        *error = udisk_error;
+      }
+      return BOOT_USB_SCAN_MEDIA_INVALID;
+    }
+  }
+#endif
 
   return BOOT_USB_SCAN_UPGRADE_READY;
 }
