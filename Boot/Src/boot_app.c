@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "boot_handoff.h"
 #include "boot_log.h"
 #include "boot_platform.h"
 #include "boot_simple_jump.h"
@@ -36,6 +37,8 @@ static void Boot_App_FeedWatchdogForever(void) {
 static void Boot_App_EnterFatal(BootError error) {
     g_boot_app.state      = BOOT_APP_STATE_FATAL;
     g_boot_app.last_error = error;
+    Boot_Handoff_SetError((uint32_t) error);
+    Boot_Handoff_LogCurrent("Fatal handoff");
     LOG_ERROR(BOOT_LOG_TAG, "Fatal boot error: %s", Boot_ErrorToString(error));
     Boot_App_FeedWatchdogForever();
 }
@@ -51,6 +54,7 @@ void Boot_App_Process(void) {
     switch (g_boot_app.state) {
         case BOOT_APP_STATE_INIT:
             Boot_Log_Init();
+            Boot_Handoff_InitBoot();
             Boot_Usb_Init();
             LOG_INFO(BOOT_LOG_TAG, "Minimal boot flow init");
             g_boot_app.state = BOOT_APP_STATE_USB_SCAN;

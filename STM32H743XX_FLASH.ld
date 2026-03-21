@@ -62,7 +62,8 @@ _Min_Stack_Size = 0x4000; /* required amount of stack */
 MEMORY
 {
 DTCMRAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
-RAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 512K
+RAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 504K
+BOOTKEEP (xrw) : ORIGIN = 0x2407E000, LENGTH = 8K
 RAM_D2 (xrw)      : ORIGIN = 0x30000000, LENGTH = 288K
 RAM_D3 (xrw)      : ORIGIN = 0x38000000, LENGTH = 64K
 ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K
@@ -195,6 +196,19 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >DTCMRAM
+
+  .boot_keep (NOLOAD) :
+  {
+    . = ALIGN(32);
+    __boot_keep_start__ = .;
+    KEEP(*(.boot_keep*))
+    . = ALIGN(32);
+    KEEP(*(.rtt_cb))
+    . = ALIGN(32);
+    KEEP(*(.rtt_buf))
+    . = ALIGN(32);
+    __boot_keep_end__ = .;
+  } >BOOTKEEP
 
 
 

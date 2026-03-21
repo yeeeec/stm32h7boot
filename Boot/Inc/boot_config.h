@@ -47,6 +47,8 @@
 #define BOOT_DTCM_SIZE                      (128UL * 1024UL)
 #define BOOT_AXI_SRAM_BASE                  0x24000000UL
 #define BOOT_AXI_SRAM_SIZE                  (512UL * 1024UL)
+#define BOOT_KEEP_RAM_SIZE                  (8UL * 1024UL)
+#define BOOT_KEEP_RAM_BASE                  (BOOT_AXI_SRAM_BASE + BOOT_AXI_SRAM_SIZE - BOOT_KEEP_RAM_SIZE)
 #define BOOT_SRAM_D2_BASE                   0x30000000UL
 #define BOOT_SRAM_D2_SIZE                   (288UL * 1024UL)
 #define BOOT_SRAM_D3_BASE                   0x38000000UL

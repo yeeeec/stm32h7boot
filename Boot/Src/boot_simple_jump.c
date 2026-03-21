@@ -1,6 +1,8 @@
 #include "boot_simple_jump.h"
 
 #include "boot_config.h"
+#include "boot_handoff.h"
+#include "boot_log.h"
 #include "boot_platform.h"
 #include "boot_simple_flash.h"
 
@@ -51,13 +53,26 @@ bool Boot_SimpleJump_IsAppValid(void) {
 BootError Boot_SimpleJump_ToApp(void) {
     uint32_t stack_pointer;
     uint32_t reset_handler;
-
-    if (Boot_SimpleJump_IsAppValid() == false) {
-        return BOOT_ERR_IMAGE_VECTOR;
-    }
+    bool app_valid;
 
     stack_pointer = *(const uint32_t *) BOOT_APP_BASE;
     reset_handler = *(const uint32_t *) (BOOT_APP_BASE + sizeof(uint32_t));
+    app_valid     = Boot_SimpleJump_IsAppValid();
+
+    Boot_Handoff_RecordVector(BOOT_APP_BASE, stack_pointer, reset_handler, app_valid);
+    LOG_INFO(BOOT_LOG_TAG, "App vector sp=0x%08lX reset=0x%08lX", (unsigned long) stack_pointer,
+             (unsigned long) reset_handler);
+
+    if (app_valid == false) {
+        LOG_ERROR(BOOT_LOG_TAG, "App vector invalid for base=0x%08lX",
+                  (unsigned long) BOOT_APP_BASE);
+        return BOOT_ERR_IMAGE_VECTOR;
+    }
+
+    Boot_Handoff_SetStage(BOOT_HANDOFF_STAGE_JUMP_READY);
+    Boot_Handoff_LogCurrent("Jump handoff");
+    LOG_INFO(BOOT_LOG_TAG, "Jumping to app");
+    Boot_Handoff_SetStage(BOOT_HANDOFF_STAGE_JUMPING);
 
     Boot_Platform_PrepareForJump();
 

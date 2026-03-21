@@ -4,6 +4,7 @@
 
 #include "boot_config.h"
 #include "boot_crc32.h"
+#include "boot_handoff.h"
 #include "boot_log.h"
 #include "boot_platform.h"
 #include "boot_simple_flash.h"
@@ -13,6 +14,31 @@ typedef struct {
     uint32_t magic;
     uint32_t payload_crc32;
 } BootUpgradePacketHeader;
+
+static void Boot_SimpleUpgrade_LogProgress(const BootManifestOperation *operation,
+                                           uint32_t completed_bytes,
+                                           uint32_t total_bytes,
+                                           uint32_t *last_reported_percent,
+                                           uint32_t max_percent) {
+    uint32_t current_percent;
+    uint32_t percent;
+
+    if ((operation == NULL) || (last_reported_percent == NULL) || (total_bytes == 0U)) {
+        return;
+    }
+
+    current_percent = (completed_bytes * 100U) / total_bytes;
+    if (current_percent > max_percent) {
+        current_percent = max_percent;
+    }
+
+    for (percent = *last_reported_percent + 1U; percent <= current_percent; ++percent) {
+        LOG_INFO(BOOT_LOG_TAG, "Upgrade %s progress %lu%%", operation->file,
+                 (unsigned long) percent);
+    }
+
+    *last_reported_percent = current_percent;
+}
 
 static uint32_t Boot_SimpleUpgrade_ReadLe32(const uint8_t *data) {
     return (uint32_t) data[0] | ((uint32_t) data[1] << 8U) | ((uint32_t) data[2] << 16U) |
@@ -49,6 +75,7 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation
     uint32_t source_crc    = 0xFFFFFFFFUL;
     uint32_t flash_crc     = 0xFFFFFFFFUL;
     uint32_t total_written = 0U;
+    uint32_t last_reported_percent = 0U;
     uint32_t write_address;
     uint32_t expected_file_size;
     BootError error;
@@ -94,11 +121,14 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation
         return BOOT_ERR_FILE_CRC;
     }
 
+    LOG_INFO(BOOT_LOG_TAG, "Erase Flash");
     error = Boot_SimpleFlash_EraseApp();
     if (error != BOOT_ERR_NONE) {
         Boot_Platform_FileClose(&file);
         return error;
     }
+
+    LOG_INFO(BOOT_LOG_TAG, "Upgrade %s progress 0%%", operation->file);
 
     write_address = app_region->base;
     while (total_written < operation->size) {
@@ -137,6 +167,8 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation
         flash_crc = Boot_Crc32_Mpeg2Update(flash_crc, verify_buffer, bytes_read);
         write_address += bytes_read;
         total_written += bytes_read;
+        Boot_SimpleUpgrade_LogProgress(operation, total_written, operation->size,
+                                       &last_reported_percent, 99U);
         Boot_Platform_FeedWatchdog();
     }
 
@@ -153,6 +185,13 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation
     if (Boot_SimpleJump_IsAppValid() == false) {
         return BOOT_ERR_IMAGE_VECTOR;
     }
+
+    Boot_Handoff_RecordUpgrade(operation->size, operation->crc32, source_crc, flash_crc);
+    LOG_INFO(BOOT_LOG_TAG, "Upgrade verify src=0x%08lX flash=0x%08lX",
+             (unsigned long) source_crc, (unsigned long) flash_crc);
+    Boot_Handoff_LogCurrent("Upgrade handoff");
+    Boot_SimpleUpgrade_LogProgress(operation, operation->size, operation->size,
+                                   &last_reported_percent, 100U);
 
     return BOOT_ERR_NONE;
 }
