@@ -23,6 +23,8 @@
 
 #define BOOT_APP1_BASE                      0x08020000UL
 #define BOOT_APP1_SIZE                      (896UL * 1024UL)
+#define BOOT_APP_BASE                       BOOT_APP1_BASE
+#define BOOT_APP_SIZE                       BOOT_APP1_SIZE
 
 #define BOOT_CONFIG_BASE                    0x08100000UL
 #define BOOT_CONFIG_SIZE                    (128UL * 1024UL)
@@ -66,6 +68,8 @@
 #define BOOT_BUILD_TIME_LENGTH              20U
 
 #define BOOT_USB_BOOT_DIR                   "/boot"
+#define BOOT_USB_OTHERS_INPUT_DIR           "/boot/crc"
+#define BOOT_USB_CRC_DIR                    BOOT_USB_OTHERS_INPUT_DIR
 #define BOOT_MANIFEST_PATH                  "/boot/manifest.json"
 #define BOOT_DEVICE_CONFIG_PATH             "/boot/device.cfg"
 #define BOOT_APP1_IMAGE_PATH                "/boot/app.bin"
@@ -75,8 +79,14 @@
 #define BOOT_LOG_DIR_PATH                   "/boot/log"
 #define BOOT_LOG_FILE_PATH                  "/boot/log/boot.log"
 #define BOOT_UDISK_CHECK_ENABLE             1U
-#define BOOT_UDISK_CHECK_PATH               "/check/udisk.cck"
-#define BOOT_UDISK_CHECK_FORMAT_VERSION     3U
+#define BOOT_UDISK_CHECK_PATH               "/cck"
+#define BOOT_UDISK_CHECK_SALT               "MySecretSalt2024"
+#define BOOT_UDISK_CCK_SIZE                 4U
+
+#define BOOT_UPGRADE_PACKET_FLAG            0xA5A55A5AUL
+#define BOOT_UPGRADE_PACKET_HEADER_SIZE     8U
+#define BOOT_UPGRADE_READ_CHUNK_SIZE        1024U
+#define BOOT_UPGRADE_MAX_RETRIES            3U
 
 #define BOOT_LOG_MESSAGE_MAX_LENGTH         96U
 #define BOOT_LOG_BUFFER_DEPTH               24U
