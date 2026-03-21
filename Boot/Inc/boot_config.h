@@ -67,17 +67,17 @@
 #define BOOT_MANIFEST_TEXT_LENGTH           32U
 #define BOOT_BUILD_TIME_LENGTH              20U
 
-#define BOOT_USB_BOOT_DIR                   "/boot"
-#define BOOT_USB_OTHERS_INPUT_DIR           "/boot/crc"
+#define BOOT_USB_BOOT_DIR                   "/bin"
+#define BOOT_USB_OTHERS_INPUT_DIR           "/bin/crc"
 #define BOOT_USB_CRC_DIR                    BOOT_USB_OTHERS_INPUT_DIR
-#define BOOT_MANIFEST_PATH                  "/boot/manifest.json"
-#define BOOT_DEVICE_CONFIG_PATH             "/boot/device.cfg"
-#define BOOT_APP1_IMAGE_PATH                "/boot/app.bin"
-#define BOOT_CONFIG_IMAGE_PATH              "/boot/config.bin"
-#define BOOT_EXTFLASH_IMAGE_PATH            "/boot/resource.bin"
-#define BOOT_SIGNATURE_PATH                 "/boot/signature.sig"
-#define BOOT_LOG_DIR_PATH                   "/boot/log"
-#define BOOT_LOG_FILE_PATH                  "/boot/log/boot.log"
+#define BOOT_MANIFEST_PATH                  "/bin/manifest.json"
+#define BOOT_DEVICE_CONFIG_PATH             "/bin/device.cfg"
+#define BOOT_APP1_IMAGE_PATH                "/bin/app.bin"
+#define BOOT_CONFIG_IMAGE_PATH              "/bin/config.bin"
+#define BOOT_EXTFLASH_IMAGE_PATH            "/bin/resource.bin"
+#define BOOT_SIGNATURE_PATH                 "/bin/signature.sig"
+#define BOOT_LOG_DIR_PATH                   "/bin/log"
+#define BOOT_LOG_FILE_PATH                  "/bin/log/boot.log"
 #define BOOT_UDISK_CHECK_ENABLE             1U
 #define BOOT_UDISK_CHECK_PATH               "/cck"
 #define BOOT_UDISK_CHECK_SALT               "MySecretSalt2024"

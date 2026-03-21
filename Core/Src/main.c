@@ -128,9 +128,9 @@ int main(void)
   MX_FMC_Init();
   MX_CRC_Init();
   MX_TIM1_Init();
-  MX_LTDC_Init();
-  MX_DMA2D_Init();
-  MX_QUADSPI_Init();
+  // MX_LTDC_Init();
+  // MX_DMA2D_Init();
+  // MX_QUADSPI_Init();
   MX_FATFS_Init();
   MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */

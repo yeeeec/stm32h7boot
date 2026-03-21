@@ -2,8 +2,7 @@
 
 #include "boot_platform.h"
 
-void Boot_Log_Init(void)
-{
-  logging_register_tick_provider(Boot_Platform_GetTickMs);
-  logging_init();
+void Boot_Log_Init(void) {
+    logging_register_tick_provider(Boot_Platform_GetTickMs);
+    logging_init();
 }
