@@ -4,6 +4,7 @@
 
 #include "boot_config.h"
 #include "boot_crc32.h"
+#include "boot_info.h"
 #include "boot_handoff.h"
 #include "boot_log.h"
 #include "boot_platform.h"
@@ -16,6 +17,7 @@ typedef struct {
 } BootUpgradePacketHeader;
 
 static void Boot_SimpleUpgrade_LogProgress(const BootManifestOperation *operation,
+                                           uint8_t target_slot,
                                            uint32_t completed_bytes,
                                            uint32_t total_bytes,
                                            uint32_t *last_reported_percent,
@@ -33,7 +35,8 @@ static void Boot_SimpleUpgrade_LogProgress(const BootManifestOperation *operatio
     }
 
     for (percent = *last_reported_percent + 1U; percent <= current_percent; ++percent) {
-        LOG_INFO(BOOT_LOG_TAG, "Upgrade %s progress %lu%%", operation->file,
+        LOG_INFO(BOOT_LOG_TAG, "Upgrade slot=%s %s progress %lu%%",
+                 Boot_Info_SlotToString(target_slot), operation->file,
                  (unsigned long) percent);
     }
 
@@ -65,9 +68,10 @@ static BootError Boot_SimpleUpgrade_ReadHeader(BootPlatformFile *file,
     return BOOT_ERR_NONE;
 }
 
-static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation *operation) {
+static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation *operation,
+                                                     uint8_t target_slot) {
     BootPlatformFile file;
-    const BootSimpleFlashRegion *app_region;
+    const BootSimpleFlashRegion *slot_region;
     BootUpgradePacketHeader header;
     uint8_t read_buffer[BOOT_UPGRADE_READ_CHUNK_SIZE];
     uint8_t verify_buffer[BOOT_UPGRADE_READ_CHUNK_SIZE];
@@ -84,8 +88,12 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation
         return BOOT_ERR_INVALID_ARGUMENT;
     }
 
-    app_region = Boot_SimpleFlash_GetAppRegion();
-    if (operation->size > app_region->size) {
+    slot_region = Boot_SimpleFlash_GetSlotRegion(target_slot);
+    if (slot_region == NULL) {
+        return BOOT_ERR_IMAGE_SLOT;
+    }
+
+    if (operation->size > slot_region->size) {
         return BOOT_ERR_IMAGE_SIZE;
     }
 
@@ -121,16 +129,17 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation
         return BOOT_ERR_FILE_CRC;
     }
 
-    LOG_INFO(BOOT_LOG_TAG, "Erase Flash");
-    error = Boot_SimpleFlash_EraseApp();
+    LOG_INFO(BOOT_LOG_TAG, "Erase slot=%s", Boot_Info_SlotToString(target_slot));
+    error = Boot_SimpleFlash_EraseSlot(target_slot);
     if (error != BOOT_ERR_NONE) {
         Boot_Platform_FileClose(&file);
         return error;
     }
 
-    LOG_INFO(BOOT_LOG_TAG, "Upgrade %s progress 0%%", operation->file);
+    LOG_INFO(BOOT_LOG_TAG, "Upgrade slot=%s %s progress 0%%", Boot_Info_SlotToString(target_slot),
+             operation->file);
 
-    write_address = app_region->base;
+    write_address = slot_region->base;
     while (total_written < operation->size) {
         uint32_t chunk_size = operation->size - total_written;
         uint32_t bytes_read = 0U;
@@ -167,7 +176,7 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation
         flash_crc = Boot_Crc32_Mpeg2Update(flash_crc, verify_buffer, bytes_read);
         write_address += bytes_read;
         total_written += bytes_read;
-        Boot_SimpleUpgrade_LogProgress(operation, total_written, operation->size,
+        Boot_SimpleUpgrade_LogProgress(operation, target_slot, total_written, operation->size,
                                        &last_reported_percent, 99U);
         Boot_Platform_FeedWatchdog();
     }
@@ -182,21 +191,22 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootManifestOperation
         return BOOT_ERR_FLASH_VERIFY;
     }
 
-    if (Boot_SimpleJump_IsAppValid() == false) {
+    if (Boot_SimpleJump_IsSlotValid(target_slot) == false) {
         return BOOT_ERR_IMAGE_VECTOR;
     }
 
     Boot_Handoff_RecordUpgrade(operation->size, operation->crc32, source_crc, flash_crc);
-    LOG_INFO(BOOT_LOG_TAG, "Upgrade verify src=0x%08lX flash=0x%08lX",
-             (unsigned long) source_crc, (unsigned long) flash_crc);
+    LOG_INFO(BOOT_LOG_TAG, "Upgrade slot=%s verify src=0x%08lX flash=0x%08lX",
+             Boot_Info_SlotToString(target_slot), (unsigned long) source_crc,
+             (unsigned long) flash_crc);
     Boot_Handoff_LogCurrent("Upgrade handoff");
-    Boot_SimpleUpgrade_LogProgress(operation, operation->size, operation->size,
+    Boot_SimpleUpgrade_LogProgress(operation, target_slot, operation->size, operation->size,
                                    &last_reported_percent, 100U);
 
     return BOOT_ERR_NONE;
 }
 
-BootError Boot_SimpleUpgrade_Run(const BootManifestOperation *operation) {
+BootError Boot_SimpleUpgrade_Run(const BootManifestOperation *operation, uint8_t target_slot) {
     BootError last_error = BOOT_ERR_INVALID_ARGUMENT;
     uint32_t attempt;
 
@@ -205,17 +215,20 @@ BootError Boot_SimpleUpgrade_Run(const BootManifestOperation *operation) {
     }
 
     for (attempt = 0U; attempt < BOOT_UPGRADE_MAX_RETRIES; ++attempt) {
-        LOG_INFO(BOOT_LOG_TAG, "Upgrade %s attempt %lu/%u", operation->file,
+        LOG_INFO(BOOT_LOG_TAG, "Upgrade slot=%s %s attempt %lu/%u",
+                 Boot_Info_SlotToString(target_slot), operation->file,
                  (unsigned long) (attempt + 1U), (unsigned int) BOOT_UPGRADE_MAX_RETRIES);
 
-        last_error = Boot_SimpleUpgrade_RunSingleAttempt(operation);
+        last_error = Boot_SimpleUpgrade_RunSingleAttempt(operation, target_slot);
         if (last_error == BOOT_ERR_NONE) {
-            LOG_INFO(BOOT_LOG_TAG, "Upgrade %s success, size=%lu crc=0x%08lX", operation->file,
+            LOG_INFO(BOOT_LOG_TAG, "Upgrade slot=%s %s success, size=%lu crc=0x%08lX",
+                     Boot_Info_SlotToString(target_slot), operation->file,
                      (unsigned long) operation->size, (unsigned long) operation->crc32);
             return BOOT_ERR_NONE;
         }
 
-        LOG_WARN(BOOT_LOG_TAG, "Upgrade %s failed: %s", operation->file,
+        LOG_WARN(BOOT_LOG_TAG, "Upgrade slot=%s %s failed: %s",
+                 Boot_Info_SlotToString(target_slot), operation->file,
                  Boot_ErrorToString(last_error));
     }
 

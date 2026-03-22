@@ -59,6 +59,8 @@ BootError Boot_Platform_FlashEraseSectors(uint32_t bank, uint32_t start_sector, 
 BootError Boot_Platform_FlashProgramFlashWord(uint32_t address, const void *data);
 void Boot_Platform_FlashRefreshCache(void);
 
+uint32_t Boot_Platform_ReadResetFlags(void);
+void Boot_Platform_ClearResetFlags(void);
 void Boot_Platform_PrepareForJump(void);
 void Boot_Platform_FeedWatchdog(void);
 

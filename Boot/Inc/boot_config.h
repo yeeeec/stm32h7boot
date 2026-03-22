@@ -17,31 +17,25 @@
 
 #define BOOT_INTERNAL_FLASH_BASE            0x08000000UL
 #define BOOT_INTERNAL_FLASH_SIZE            (2048UL * 1024UL)
+#define BOOT_INTERNAL_FLASH_END             (BOOT_INTERNAL_FLASH_BASE + BOOT_INTERNAL_FLASH_SIZE)
 
 #define BOOT_BOOT_BASE                      0x08000000UL
 #define BOOT_BOOT_SIZE                      (128UL * 1024UL)
 
-#define BOOT_APP1_BASE                      0x08020000UL
-#define BOOT_APP1_SIZE                      (896UL * 1024UL)
-#define BOOT_APP_BASE                       BOOT_APP1_BASE
-#define BOOT_APP_SIZE                       BOOT_APP1_SIZE
+#define BOOT_INFO_BASE                      0x08020000UL
+#define BOOT_INFO_SIZE                      (128UL * 1024UL)
 
-#define BOOT_CONFIG_BASE                    0x08100000UL
-#define BOOT_CONFIG_SIZE                    (128UL * 1024UL)
+#define BOOT_DEFAULT_APP1_BASE              0x08040000UL
+#define BOOT_DEFAULT_APP1_SIZE              (896UL * 1024UL)
 
-#define BOOT_APP2_BASE                      0x08120000UL
-#define BOOT_APP2_SIZE                      (896UL * 1024UL)
+#define BOOT_DEFAULT_APP2_BASE              0x08120000UL
+#define BOOT_DEFAULT_APP2_SIZE              (896UL * 1024UL)
 
-#define BOOT_CTRL_A_BASE                    0x08100000UL
-#define BOOT_CTRL_A_SIZE                    (8UL * 1024UL)
-#define BOOT_CTRL_B_BASE                    0x08102000UL
-#define BOOT_CTRL_B_SIZE                    (8UL * 1024UL)
-#define BOOT_SYSCONFIG_BASE                 0x08104000UL
-#define BOOT_SYSCONFIG_SIZE                 (16UL * 1024UL)
-#define BOOT_CONFIG_BACKUP_BASE             0x08108000UL
-#define BOOT_CONFIG_BACKUP_SIZE             (16UL * 1024UL)
-#define BOOT_SUMMARY_LOG_BASE               0x0810C000UL
-#define BOOT_SUMMARY_LOG_SIZE               (32UL * 1024UL)
+#define BOOT_DEFAULT_APP_BASE               BOOT_DEFAULT_APP1_BASE
+#define BOOT_DEFAULT_APP_SIZE               BOOT_DEFAULT_APP1_SIZE
+#define BOOT_APP_SLOT_COUNT                 2U
+#define BOOT_CONFIG_MAGIC                   0x42434647UL
+#define BOOT_CONFIG_STRUCT_VERSION          0x0001U
 
 #define BOOT_DTCM_BASE                      0x20000000UL
 #define BOOT_DTCM_SIZE                      (128UL * 1024UL)
@@ -89,6 +83,11 @@
 #define BOOT_UPGRADE_PACKET_HEADER_SIZE     8U
 #define BOOT_UPGRADE_READ_CHUNK_SIZE        1024U
 #define BOOT_UPGRADE_MAX_RETRIES            3U
+#define BOOT_INFO_RECORD_SIZE               64U
+#define BOOT_CONFIG_RECORD_SIZE             BOOT_INFO_RECORD_SIZE
+#define BOOT_CONFIG_BASE                    (BOOT_INFO_BASE + BOOT_INFO_SIZE - BOOT_CONFIG_RECORD_SIZE)
+#define BOOT_INFO_JOURNAL_SIZE              (BOOT_INFO_SIZE - BOOT_CONFIG_RECORD_SIZE)
+#define BOOT_INFO_RECORD_COUNT              (BOOT_INFO_JOURNAL_SIZE / BOOT_INFO_RECORD_SIZE)
 
 #define BOOT_LOG_MESSAGE_MAX_LENGTH         96U
 #define BOOT_LOG_BUFFER_DEPTH               24U

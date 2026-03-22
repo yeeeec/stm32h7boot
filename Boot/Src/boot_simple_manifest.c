@@ -264,6 +264,8 @@ static BootError Boot_SimpleManifest_ParseOperation(const char *begin, const cha
             error = Boot_SimpleManifest_ParseU32Value(&cursor, end, &operation->size);
         } else if (strcmp(key, "crc32") == 0) {
             error = Boot_SimpleManifest_ParseU32Value(&cursor, end, &operation->crc32);
+        } else if (strcmp(key, "version") == 0) {
+            error = Boot_SimpleManifest_ParseU32Value(&cursor, end, &operation->version);
         } else {
             error = Boot_SimpleManifest_SkipValue(&cursor, end);
         }

@@ -2,8 +2,8 @@
 
 #include <string.h>
 
-#include "boot_config.h"
 #include "boot_log.h"
+#include "boot_simple_flash.h"
 #include "stm32h7xx_hal.h"
 
 static BootHandoffInfo g_boot_handoff
@@ -108,6 +108,7 @@ const char *Boot_Handoff_FaultToString(uint32_t fault_type) {
 
 void Boot_Handoff_InitBoot(void) {
     BootHandoffInfo previous;
+    const BootSimpleFlashRegion *slot_region;
     uint32_t next_session = 1U;
 
     memcpy(&previous, &g_boot_handoff, sizeof(previous));
@@ -135,7 +136,8 @@ void Boot_Handoff_InitBoot(void) {
     g_boot_handoff.session     = next_session;
     g_boot_handoff.stage       = BOOT_HANDOFF_STAGE_BOOT_START;
     g_boot_handoff.boot_tick_ms = HAL_GetTick();
-    g_boot_handoff.app_base    = BOOT_APP_BASE;
+    slot_region                = Boot_SimpleFlash_GetSlotRegion(SLOT_A);
+    g_boot_handoff.app_base    = (slot_region != NULL) ? slot_region->base : BOOT_DEFAULT_APP_BASE;
     Boot_Handoff_FlushCache();
 
     Boot_Handoff_LogSnapshot("Boot handoff", &g_boot_handoff);

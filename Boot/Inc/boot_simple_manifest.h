@@ -12,6 +12,7 @@ typedef struct
   char file[BOOT_FILE_NAME_LENGTH];
   uint32_t size;
   uint32_t crc32;
+  uint32_t version;
   uint8_t present_in_crc_dir;
 } BootManifestOperation;
 

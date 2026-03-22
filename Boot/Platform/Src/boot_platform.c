@@ -347,6 +347,18 @@ void Boot_Platform_FlashRefreshCache(void)
   }
 }
 
+uint32_t Boot_Platform_ReadResetFlags(void)
+{
+  return RCC->RSR;
+}
+
+void Boot_Platform_ClearResetFlags(void)
+{
+  SET_BIT(RCC->RSR, RCC_RSR_RMVF);
+  __DSB();
+  __ISB();
+}
+
 void Boot_Platform_PrepareForJump(void)
 {
   Boot_Platform_DisableInterrupts();
