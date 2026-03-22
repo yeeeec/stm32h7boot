@@ -1,75 +1,17 @@
 #include "boot_simple_flash.h"
 
-#include <stddef.h>
 #include <string.h>
 
-#include "boot_crc32.h"
+#include "boot_extflash.h"
 #include "platform/boot_platform.h"
+#include "stm32h7xx_hal.h"
 
 #define BOOT_SIMPLE_FLASHWORD_SIZE    32U
 #define BOOT_SIMPLE_FLASH_SECTOR_SIZE (128UL * 1024UL)
 
-typedef struct
-{
-    BootSimpleFlashLayout layout;
-    uint8_t padding[BOOT_CONFIG_RECORD_SIZE - sizeof(BootSimpleFlashLayout)];
-} BootSimpleFlashLayoutRecord;
-
-_Static_assert(sizeof(BootSimpleFlashLayout) <= BOOT_CONFIG_RECORD_SIZE,
-               "BootSimpleFlashLayout must fit in BOOT_CONFIG_RECORD_SIZE");
-
-static const BootSimpleFlashRegion g_boot_boot_region = {BOOT_BOOT_BASE, BOOT_BOOT_SIZE};
 static const BootSimpleFlashRegion g_boot_info_region = {BOOT_INFO_BASE, BOOT_INFO_SIZE};
-static BootSimpleFlashLayout g_boot_layout;
-static uint8_t g_boot_layout_loaded;
-
-static uint32_t Boot_SimpleFlash_CalcLayoutCrc(const BootSimpleFlashLayout *layout) {
-    if (layout == NULL) {
-        return 0U;
-    }
-
-    return Boot_Crc32_IsoCalc(layout, offsetof(BootSimpleFlashLayout, crc));
-}
-
-static bool Boot_SimpleFlash_IsRegionBlank(uint32_t address, uint32_t size) {
-    const uint8_t *data = (const uint8_t *) (uintptr_t) address;
-    uint32_t index;
-
-    for (index = 0U; index < size; ++index) {
-        if (data[index] != 0xFFU) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
-static bool Boot_SimpleFlash_IsRegionSectorAligned(const BootSimpleFlashRegion *region) {
-    if (region == NULL) {
-        return false;
-    }
-
-    return ((region->base % BOOT_SIMPLE_FLASH_SECTOR_SIZE) == 0U) &&
-           ((region->size % BOOT_SIMPLE_FLASH_SECTOR_SIZE) == 0U);
-}
-
-static bool Boot_SimpleFlash_DoRegionsOverlap(const BootSimpleFlashRegion *lhs,
-                                              const BootSimpleFlashRegion *rhs) {
-    uint32_t lhs_end;
-    uint32_t rhs_end;
-
-    if ((lhs == NULL) || (rhs == NULL) || (lhs->size == 0U) || (rhs->size == 0U)) {
-        return false;
-    }
-
-    lhs_end = lhs->base + lhs->size;
-    rhs_end = rhs->base + rhs->size;
-    if ((lhs_end < lhs->base) || (rhs_end < rhs->base)) {
-        return true;
-    }
-
-    return (lhs->base < rhs_end) && (rhs->base < lhs_end);
-}
+static const BootSimpleFlashRegion g_boot_slot_a_region = {BOOT_APP_SLOT_A_BASE, BOOT_APP_SLOT_SIZE};
+static const BootSimpleFlashRegion g_boot_slot_b_region = {BOOT_APP_SLOT_B_BASE, BOOT_APP_SLOT_SIZE};
 
 bool Boot_SimpleFlash_IsInternalFlashRange(uint32_t address, uint32_t size) {
     uint32_t end_address;
@@ -86,86 +28,8 @@ bool Boot_SimpleFlash_IsInternalFlashRange(uint32_t address, uint32_t size) {
     return (address >= BOOT_INTERNAL_FLASH_BASE) && (end_address <= BOOT_INTERNAL_FLASH_END);
 }
 
-static bool Boot_SimpleFlash_IsSlotRegionValid(const BootSimpleFlashRegion *region) {
-    if ((region == NULL) || (Boot_SimpleFlash_IsInternalFlashRange(region->base, region->size) == false)) {
-        return false;
-    }
-
-    if (Boot_SimpleFlash_IsRegionSectorAligned(region) == false) {
-        return false;
-    }
-
-    if (Boot_SimpleFlash_DoRegionsOverlap(region, &g_boot_boot_region) != false) {
-        return false;
-    }
-
-    if (Boot_SimpleFlash_DoRegionsOverlap(region, &g_boot_info_region) != false) {
-        return false;
-    }
-
-    return true;
-}
-
-static void Boot_SimpleFlash_NormalizeLayout(BootSimpleFlashLayout *layout) {
-    if (layout == NULL) {
-        return;
-    }
-
-    layout->magic      = BOOT_CONFIG_MAGIC;
-    layout->version    = BOOT_CONFIG_STRUCT_VERSION;
-    layout->slot_count = BOOT_APP_SLOT_COUNT;
-    layout->crc        = Boot_SimpleFlash_CalcLayoutCrc(layout);
-}
-
-static bool Boot_SimpleFlash_IsLayoutValid(const BootSimpleFlashLayout *layout) {
-    uint32_t slot_index;
-
-    if (layout == NULL) {
-        return false;
-    }
-
-    if ((layout->magic != BOOT_CONFIG_MAGIC) || (layout->version != BOOT_CONFIG_STRUCT_VERSION) ||
-        (layout->slot_count != BOOT_APP_SLOT_COUNT)) {
-        return false;
-    }
-
-    if (layout->crc != Boot_SimpleFlash_CalcLayoutCrc(layout)) {
-        return false;
-    }
-
-    for (slot_index = 0U; slot_index < BOOT_APP_SLOT_COUNT; ++slot_index) {
-        if (Boot_SimpleFlash_IsSlotRegionValid(&layout->slot_regions[slot_index]) == false) {
-            return false;
-        }
-    }
-
-    return Boot_SimpleFlash_DoRegionsOverlap(&layout->slot_regions[SLOT_A],
-                                             &layout->slot_regions[SLOT_B]) == false;
-}
-
-static void Boot_SimpleFlash_SetCachedLayout(const BootSimpleFlashLayout *layout) {
-    if (layout == NULL) {
-        return;
-    }
-
-    g_boot_layout        = *layout;
-    g_boot_layout_loaded = 1U;
-}
-
-static void Boot_SimpleFlash_EnsureLayoutLoaded(void) {
-    BootSimpleFlashLayout layout;
-
-    if (g_boot_layout_loaded != 0U) {
-        return;
-    }
-
-    if (Boot_SimpleFlash_LoadLayout(&layout) == BOOT_ERR_NONE) {
-        Boot_SimpleFlash_SetCachedLayout(&layout);
-        return;
-    }
-
-    Boot_SimpleFlash_InitDefaultLayout(&layout);
-    Boot_SimpleFlash_SetCachedLayout(&layout);
+bool Boot_SimpleFlash_IsExtFlashRange(uint32_t address, uint32_t size) {
+    return Boot_ExtFlash_IsRangeValid(address, size);
 }
 
 bool Boot_SimpleFlash_IsRangeInRegion(const BootSimpleFlashRegion *region, uint32_t address,
@@ -187,12 +51,9 @@ bool Boot_SimpleFlash_IsRangeInRegion(const BootSimpleFlashRegion *region, uint3
 }
 
 static bool Boot_SimpleFlash_IsWritableRange(uint32_t address, uint32_t size) {
-    Boot_SimpleFlash_EnsureLayoutLoaded();
     return (Boot_SimpleFlash_IsRangeInRegion(&g_boot_info_region, address, size) != false) ||
-           (Boot_SimpleFlash_IsRangeInRegion(&g_boot_layout.slot_regions[SLOT_A], address, size) !=
-            false) ||
-           (Boot_SimpleFlash_IsRangeInRegion(&g_boot_layout.slot_regions[SLOT_B], address, size) !=
-            false);
+           (Boot_SimpleFlash_IsRangeInRegion(&g_boot_slot_a_region, address, size) != false) ||
+           (Boot_SimpleFlash_IsRangeInRegion(&g_boot_slot_b_region, address, size) != false);
 }
 
 static bool Boot_SimpleFlash_AddressToSector(uint32_t address, uint32_t *bank, uint32_t *sector) {
@@ -230,135 +91,17 @@ static uint32_t Boot_SimpleFlash_GetBankEndExclusive(uint32_t bank) {
     return BOOT_INTERNAL_FLASH_END;
 }
 
-void Boot_SimpleFlash_InitDefaultLayout(BootSimpleFlashLayout *layout) {
-    if (layout == NULL) {
-        return;
-    }
-
-    memset(layout, 0, sizeof(*layout));
-    layout->slot_regions[SLOT_A].base = BOOT_DEFAULT_APP1_BASE;
-    layout->slot_regions[SLOT_A].size = BOOT_DEFAULT_APP1_SIZE;
-    layout->slot_regions[SLOT_B].base = BOOT_DEFAULT_APP2_BASE;
-    layout->slot_regions[SLOT_B].size = BOOT_DEFAULT_APP2_SIZE;
-    Boot_SimpleFlash_NormalizeLayout(layout);
-}
-
-BootError Boot_SimpleFlash_LoadLayout(BootSimpleFlashLayout *layout) {
-    const BootSimpleFlashLayoutRecord *record;
-
-    if (layout == NULL) {
-        return BOOT_ERR_INVALID_ARGUMENT;
-    }
-
-    if (Boot_SimpleFlash_IsRegionBlank(BOOT_CONFIG_BASE, BOOT_CONFIG_RECORD_SIZE) != false) {
-        return BOOT_ERR_CTRL_NOT_FOUND;
-    }
-
-    record = (const BootSimpleFlashLayoutRecord *) (uintptr_t) BOOT_CONFIG_BASE;
-    if (Boot_SimpleFlash_IsLayoutValid(&record->layout) == false) {
-        return BOOT_ERR_CTRL_CRC;
-    }
-
-    *layout = record->layout;
-    return BOOT_ERR_NONE;
-}
-
-BootError Boot_SimpleFlash_WriteLayout(const BootSimpleFlashLayout *layout) {
-    BootSimpleFlashLayout normalized;
-    BootSimpleFlashLayoutRecord record;
-    BootError error;
-
-    if (layout == NULL) {
-        return BOOT_ERR_INVALID_ARGUMENT;
-    }
-
-    normalized = *layout;
-    Boot_SimpleFlash_NormalizeLayout(&normalized);
-    if (Boot_SimpleFlash_IsLayoutValid(&normalized) == false) {
-        return BOOT_ERR_INVALID_ARGUMENT;
-    }
-
-    memset(&record, 0xFF, sizeof(record));
-    record.layout = normalized;
-
-    error = Boot_SimpleFlash_Write(BOOT_CONFIG_BASE, &record, sizeof(record));
-    if (error == BOOT_ERR_NONE) {
-        Boot_SimpleFlash_SetCachedLayout(&normalized);
-    }
-
-    return error;
-}
-
-BootError Boot_SimpleFlash_StoreLayout(const BootSimpleFlashLayout *layout) {
-    BootSimpleFlashLayout normalized;
-    s_BootInfo boot_info;
-    BootError info_error;
-    BootError error;
-
-    if (layout == NULL) {
-        return BOOT_ERR_INVALID_ARGUMENT;
-    }
-
-    normalized = *layout;
-    Boot_SimpleFlash_NormalizeLayout(&normalized);
-    if (Boot_SimpleFlash_IsLayoutValid(&normalized) == false) {
-        return BOOT_ERR_INVALID_ARGUMENT;
-    }
-
-    info_error = Boot_Info_Load(&boot_info);
-    if ((info_error != BOOT_ERR_NONE) && (info_error != BOOT_ERR_CTRL_NOT_FOUND) &&
-        (info_error != BOOT_ERR_CTRL_CRC)) {
-        return info_error;
-    }
-
-    error = Boot_SimpleFlash_EraseInfoRegion();
-    if (error != BOOT_ERR_NONE) {
-        return error;
-    }
-
-    if (info_error == BOOT_ERR_NONE) {
-        error = Boot_Info_Store(&boot_info);
-        if (error != BOOT_ERR_NONE) {
-            return error;
-        }
-    }
-
-    return Boot_SimpleFlash_WriteLayout(&normalized);
-}
-
-BootError Boot_SimpleFlash_EnsureLayoutPersisted(void) {
-    BootSimpleFlashLayout layout;
-    BootError error;
-
-    error = Boot_SimpleFlash_LoadLayout(&layout);
-    if (error == BOOT_ERR_NONE) {
-        Boot_SimpleFlash_SetCachedLayout(&layout);
-        return BOOT_ERR_NONE;
-    }
-
-    Boot_SimpleFlash_InitDefaultLayout(&layout);
-    Boot_SimpleFlash_SetCachedLayout(&layout);
-
-    if (Boot_SimpleFlash_IsRegionBlank(BOOT_CONFIG_BASE, BOOT_CONFIG_RECORD_SIZE) != false) {
-        return Boot_SimpleFlash_WriteLayout(&layout);
-    }
-
-    return Boot_SimpleFlash_StoreLayout(&layout);
-}
-
 const BootSimpleFlashRegion *Boot_SimpleFlash_GetInfoRegion(void) {
     return &g_boot_info_region;
 }
 
 const BootSimpleFlashRegion *Boot_SimpleFlash_GetSlotRegion(uint8_t slot) {
-    Boot_SimpleFlash_EnsureLayoutLoaded();
-
     switch (slot) {
         case SLOT_A:
-            return &g_boot_layout.slot_regions[SLOT_A];
+            return &g_boot_slot_a_region;
 
         case SLOT_B:
-            return &g_boot_layout.slot_regions[SLOT_B];
+            return &g_boot_slot_b_region;
 
         default:
             return NULL;
@@ -370,12 +113,16 @@ BootError Boot_SimpleFlash_Read(uint32_t address, void *buffer, uint32_t size) {
         return BOOT_ERR_INVALID_ARGUMENT;
     }
 
-    if (Boot_SimpleFlash_IsInternalFlashRange(address, size) == false) {
-        return BOOT_ERR_FLASH_RANGE;
+    if (Boot_SimpleFlash_IsInternalFlashRange(address, size) != false) {
+        memcpy(buffer, (const void *)(uintptr_t) address, size);
+        return BOOT_ERR_NONE;
     }
 
-    memcpy(buffer, (const void *) address, size);
-    return BOOT_ERR_NONE;
+    if (Boot_SimpleFlash_IsExtFlashRange(address, size) != false) {
+        return Boot_ExtFlash_Read(address, buffer, size);
+    }
+
+    return BOOT_ERR_FLASH_RANGE;
 }
 
 BootError Boot_SimpleFlash_Write(uint32_t address, const void *data, uint32_t size) {
@@ -388,8 +135,15 @@ BootError Boot_SimpleFlash_Write(uint32_t address, const void *data, uint32_t si
         return BOOT_ERR_INVALID_ARGUMENT;
     }
 
-    if ((Boot_SimpleFlash_IsInternalFlashRange(address, size) == false) ||
-        (Boot_SimpleFlash_IsWritableRange(address, size) == false)) {
+    if (Boot_SimpleFlash_IsWritableRange(address, size) == false) {
+        return BOOT_ERR_FLASH_RANGE;
+    }
+
+    if (Boot_SimpleFlash_IsExtFlashRange(address, size) != false) {
+        return Boot_ExtFlash_Write(address, data, size);
+    }
+
+    if (Boot_SimpleFlash_IsInternalFlashRange(address, size) == false) {
         return BOOT_ERR_FLASH_RANGE;
     }
 
@@ -413,7 +167,7 @@ BootError Boot_SimpleFlash_Write(uint32_t address, const void *data, uint32_t si
             copy_size = remaining;
         }
 
-        memcpy(flash_word, (const void *) aligned_address, sizeof(flash_word));
+        memcpy(flash_word, (const void *)(uintptr_t) aligned_address, sizeof(flash_word));
         memcpy(&flash_word[word_offset], source, copy_size);
 
         error = Boot_Platform_FlashProgramFlashWord(aligned_address, flash_word);
@@ -422,7 +176,7 @@ BootError Boot_SimpleFlash_Write(uint32_t address, const void *data, uint32_t si
             return BOOT_ERR_FLASH_WRITE;
         }
 
-        if (memcmp((const void *) aligned_address, flash_word, sizeof(flash_word)) != 0) {
+        if (memcmp((const void *)(uintptr_t) aligned_address, flash_word, sizeof(flash_word)) != 0) {
             Boot_Platform_FlashLock();
             return BOOT_ERR_FLASH_VERIFY;
         }
@@ -444,6 +198,10 @@ BootError Boot_SimpleFlash_EraseRegion(uint32_t address, uint32_t size) {
 
     if ((size == 0U) || (Boot_SimpleFlash_IsWritableRange(address, size) == false)) {
         return BOOT_ERR_FLASH_RANGE;
+    }
+
+    if (Boot_SimpleFlash_IsExtFlashRange(address, size) != false) {
+        return Boot_ExtFlash_Erase(address, size);
     }
 
     end_address = address + size - 1U;

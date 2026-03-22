@@ -48,12 +48,6 @@ static void Boot_Platform_DisableInterrupts(void)
   }
 }
 
-static void Boot_Platform_DisableCaches(void)
-{
-  SCB_DisableDCache();
-  SCB_DisableICache();
-}
-
 uint32_t Boot_Platform_GetTickMs(void)
 {
   return HAL_GetTick();
@@ -366,10 +360,6 @@ void Boot_Platform_PrepareForJump(void)
   SysTick->CTRL = 0U;
   SysTick->LOAD = 0U;
   SysTick->VAL = 0U;
-
-  HAL_RCC_DeInit();
-  HAL_DeInit();
-  Boot_Platform_DisableCaches();
 
   __DSB();
   __ISB();

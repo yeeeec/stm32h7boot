@@ -19,6 +19,7 @@ typedef enum {
     BOOT_APP_STATE_IMAGE_LOAD,
     BOOT_APP_STATE_UPGRADE,
     BOOT_APP_STATE_JUMP,
+    BOOT_APP_STATE_RECOVERY,
     BOOT_APP_STATE_FATAL
 } BootAppState;
 
@@ -88,6 +89,18 @@ static void Boot_App_SetSlotMetadata(uint8_t slot, uint32_t crc32) {
     }
 }
 
+static uint32_t Boot_App_GetSlotExpectedCrc(uint8_t slot) {
+    if (slot == SLOT_A) {
+        return g_boot_app.boot_info.app_a_crc;
+    }
+
+    if (slot == SLOT_B) {
+        return g_boot_app.boot_info.app_b_crc;
+    }
+
+    return 0U;
+}
+
 static uint8_t Boot_App_FindFirstBootableSlot(void) {
     if (Boot_SimpleJump_IsSlotValid(SLOT_A) != false) {
         return SLOT_A;
@@ -131,9 +144,11 @@ static BootError Boot_App_LoadOrInitializeBootInfo(void) {
 static BootError Boot_App_RollbackPending(uint8_t rollback_reason) {
     uint8_t fallback_slot = g_boot_app.boot_info.active_slot;
 
-    if (Boot_SimpleJump_IsSlotValid(fallback_slot) == false) {
+    if (Boot_SimpleJump_IsSlotValidWithCrc(fallback_slot, Boot_App_GetSlotExpectedCrc(fallback_slot)) ==
+        false) {
         fallback_slot = Boot_App_GetOtherSlot(g_boot_app.boot_info.pending_slot);
-        if (Boot_SimpleJump_IsSlotValid(fallback_slot) == false) {
+        if (Boot_SimpleJump_IsSlotValidWithCrc(
+                fallback_slot, Boot_App_GetSlotExpectedCrc(fallback_slot)) == false) {
             fallback_slot = SLOT_NONE;
         }
     }
@@ -163,11 +178,6 @@ static BootError Boot_App_ResolveStartupPlan(void) {
     uint8_t other_slot;
     uint8_t stable_slot;
 
-    error = Boot_SimpleFlash_EnsureLayoutPersisted();
-    if (error != BOOT_ERR_NONE) {
-        LOG_WARN(BOOT_LOG_TAG, "Boot layout fallback to defaults: %s", Boot_ErrorToString(error));
-    }
-
     error = Boot_App_LoadOrInitializeBootInfo();
     if (error != BOOT_ERR_NONE) {
         return error;
@@ -177,7 +187,9 @@ static BootError Boot_App_ResolveStartupPlan(void) {
     other_slot  = Boot_App_GetOtherSlot(active_slot);
 
     if (g_boot_app.boot_info.pending_slot != SLOT_NONE) {
-        if (Boot_SimpleJump_IsSlotValid(g_boot_app.boot_info.pending_slot) == false) {
+        if (Boot_SimpleJump_IsSlotValidWithCrc(
+                g_boot_app.boot_info.pending_slot,
+                Boot_App_GetSlotExpectedCrc(g_boot_app.boot_info.pending_slot)) == false) {
             return Boot_App_RollbackPending(ROLLBACK_CRC_ERROR);
         }
 
@@ -200,9 +212,11 @@ static BootError Boot_App_ResolveStartupPlan(void) {
     }
 
     stable_slot = SLOT_NONE;
-    if (Boot_SimpleJump_IsSlotValid(active_slot) != false) {
+    if (Boot_SimpleJump_IsSlotValidWithCrc(active_slot, Boot_App_GetSlotExpectedCrc(active_slot)) !=
+        false) {
         stable_slot = active_slot;
-    } else if (Boot_SimpleJump_IsSlotValid(other_slot) != false) {
+    } else if (Boot_SimpleJump_IsSlotValidWithCrc(
+                   other_slot, Boot_App_GetSlotExpectedCrc(other_slot)) != false) {
         stable_slot = other_slot;
         g_boot_app.boot_info.active_slot     = other_slot;
         g_boot_app.boot_info.pending_slot    = SLOT_NONE;
@@ -241,7 +255,8 @@ static BootError Boot_App_EnsureJumpSlotValid(void) {
         return BOOT_ERR_NO_BOOTABLE_IMAGE;
     }
 
-    if (Boot_SimpleJump_IsSlotValid(g_boot_app.jump_slot) != false) {
+    if (Boot_SimpleJump_IsSlotValidWithCrc(
+            g_boot_app.jump_slot, Boot_App_GetSlotExpectedCrc(g_boot_app.jump_slot)) != false) {
         return BOOT_ERR_NONE;
     }
 
@@ -251,7 +266,8 @@ static BootError Boot_App_EnsureJumpSlotValid(void) {
     }
 
     other_slot = Boot_App_GetOtherSlot(g_boot_app.jump_slot);
-    if (Boot_SimpleJump_IsSlotValid(other_slot) != false) {
+    if (Boot_SimpleJump_IsSlotValidWithCrc(
+            other_slot, Boot_App_GetSlotExpectedCrc(other_slot)) != false) {
         g_boot_app.boot_info.active_slot     = other_slot;
         g_boot_app.boot_info.pending_slot    = SLOT_NONE;
         g_boot_app.boot_info.confirmed       = BOOT_CONFIRMED;
@@ -332,7 +348,8 @@ void Boot_App_Process(void) {
                 LOG_INFO(BOOT_LOG_TAG, "No upgrade media, jump to current slot");
             }
 
-            g_boot_app.state = BOOT_APP_STATE_JUMP;
+            g_boot_app.state =
+                (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
             return;
         }
 
@@ -359,7 +376,9 @@ void Boot_App_Process(void) {
 
             target_slot = Boot_App_GetOtherSlot(g_boot_app.boot_info.active_slot);
             if ((g_boot_app.jump_slot == SLOT_NONE) &&
-                (Boot_SimpleJump_IsSlotValid(g_boot_app.boot_info.active_slot) == false)) {
+                (Boot_SimpleJump_IsSlotValidWithCrc(
+                     g_boot_app.boot_info.active_slot,
+                     Boot_App_GetSlotExpectedCrc(g_boot_app.boot_info.active_slot)) == false)) {
                 target_slot = SLOT_A;
             }
 
@@ -370,7 +389,8 @@ void Boot_App_Process(void) {
                          Boot_ErrorToString(error));
                 g_boot_app.last_error = error;
                 Boot_Handoff_SetError((uint32_t) error);
-                g_boot_app.state = BOOT_APP_STATE_JUMP;
+                g_boot_app.state =
+                    (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
                 return;
             }
 
@@ -395,6 +415,12 @@ void Boot_App_Process(void) {
 
             error = Boot_App_EnsureJumpSlotValid();
             if (error != BOOT_ERR_NONE) {
+                if (error == BOOT_ERR_NO_BOOTABLE_IMAGE) {
+                    LOG_WARN(BOOT_LOG_TAG, "No bootable slot, enter recovery mode");
+                    g_boot_app.state = BOOT_APP_STATE_RECOVERY;
+                    return;
+                }
+
                 Boot_App_EnterFatal(error);
                 return;
             }
@@ -414,6 +440,18 @@ void Boot_App_Process(void) {
             error = Boot_SimpleJump_ToSlot(g_boot_app.jump_slot);
             Boot_App_EnterFatal(error);
             return;
+
+        case BOOT_APP_STATE_RECOVERY: {
+            BootUsbScanResult scan_result =
+                Boot_Usb_PollForUpgradeMedia(0xFFFFFFFFUL, &error);
+
+            if (scan_result == BOOT_USB_SCAN_UPGRADE_READY) {
+                LOG_INFO(BOOT_LOG_TAG, "Recovery media ready, try reload app image");
+                g_boot_app.state = BOOT_APP_STATE_IMAGE_LOAD;
+            }
+
+            return;
+        }
 
         case BOOT_APP_STATE_FATAL:
             Boot_App_FeedWatchdogForever();

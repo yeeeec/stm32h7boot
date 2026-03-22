@@ -1,6 +1,7 @@
 set(USER_SERVICES_SOURCES
   "${CMAKE_CURRENT_LIST_DIR}/boot_crc32.c"
   "${CMAKE_CURRENT_LIST_DIR}/boot_error.c"
+  "${CMAKE_CURRENT_LIST_DIR}/boot_extflash.c"
   "${CMAKE_CURRENT_LIST_DIR}/boot_handoff.c"
   "${CMAKE_CURRENT_LIST_DIR}/boot_info.c"
   "${CMAKE_CURRENT_LIST_DIR}/boot_log.c"

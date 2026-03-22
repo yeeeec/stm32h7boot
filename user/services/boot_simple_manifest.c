@@ -112,6 +112,10 @@ BootError Boot_SimpleManifest_Load(BootAppImageInfo *image) {
         return BOOT_ERR_FILE_SIZE;
     }
 
+    if (header.write_address != BOOT_IMAGE_EXPECTED_WRITE_ADDRESS) {
+        return BOOT_ERR_IMAGE_SLOT;
+    }
+
     Boot_SimpleManifest_CopyText(image->file, sizeof(image->file), BOOT_USB_APP_IMAGE_NAME,
                                  sizeof(BOOT_USB_APP_IMAGE_NAME) - 1U);
     Boot_SimpleManifest_CopyText(image->project_name, sizeof(image->project_name), header.project_name,

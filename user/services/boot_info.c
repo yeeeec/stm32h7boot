@@ -235,9 +235,7 @@ BootError Boot_Info_Store(s_BootInfo *info)
 {
     BootInfoScanResult scan;
     BootInfoRecord record;
-    BootSimpleFlashLayout layout;
     uint32_t address;
-    BootError error;
 
     if (info == NULL)
     {
@@ -268,13 +266,7 @@ BootError Boot_Info_Store(s_BootInfo *info)
 
     if (scan.next_free_index >= BOOT_INFO_RECORD_COUNT)
     {
-        error = Boot_SimpleFlash_LoadLayout(&layout);
-        if (error != BOOT_ERR_NONE)
-        {
-            Boot_SimpleFlash_InitDefaultLayout(&layout);
-        }
-
-        error = Boot_SimpleFlash_EraseInfoRegion();
+        BootError error = Boot_SimpleFlash_EraseInfoRegion();
         if (error != BOOT_ERR_NONE)
         {
             return error;
@@ -287,15 +279,12 @@ BootError Boot_Info_Store(s_BootInfo *info)
         address = BOOT_INFO_BASE + (scan.next_free_index * BOOT_INFO_RECORD_SIZE);
     }
 
-    error = Boot_SimpleFlash_Write(address, &record, sizeof(record));
-    if (error != BOOT_ERR_NONE)
     {
-        return error;
-    }
-
-    if (scan.next_free_index >= BOOT_INFO_RECORD_COUNT)
-    {
-        return Boot_SimpleFlash_WriteLayout(&layout);
+        BootError error = Boot_SimpleFlash_Write(address, &record, sizeof(record));
+        if (error != BOOT_ERR_NONE)
+        {
+            return error;
+        }
     }
 
     return BOOT_ERR_NONE;

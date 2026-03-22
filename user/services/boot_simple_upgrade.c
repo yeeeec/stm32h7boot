@@ -2,16 +2,12 @@
 
 #include <string.h>
 
-#include "boot_config.h"
-#include "boot_crc32.h"
 #include "boot_handoff.h"
 #include "boot_info.h"
 #include "boot_log.h"
-#include "platform/boot_platform.h"
 #include "boot_simple_flash.h"
 #include "boot_simple_jump.h"
-
-#define BOOT_UPGRADE_INVALID_OFFSET 0xFFFFFFFFUL
+#include "platform/boot_platform.h"
 
 static void Boot_SimpleUpgrade_LogProgress(const BootAppImageInfo *image,
                                            uint8_t target_slot,
@@ -33,102 +29,10 @@ static void Boot_SimpleUpgrade_LogProgress(const BootAppImageInfo *image,
 
     for (percent = *last_reported_percent + 1U; percent <= current_percent; ++percent) {
         LOG_INFO(BOOT_LOG_TAG, "Upgrade slot=%s %s progress %lu%%",
-                 Boot_Info_SlotToString(target_slot), image->file,
-                 (unsigned long) percent);
+                 Boot_Info_SlotToString(target_slot), image->file, (unsigned long)percent);
     }
 
     *last_reported_percent = current_percent;
-}
-
-static uint8_t Boot_SimpleUpgrade_FindEmbeddedHeaderOffset(const BootSimpleFlashRegion *slot_region,
-                                                           const BootAppImageInfo *image,
-                                                           uint32_t *embedded_offset) {
-    const uint8_t *flash_base;
-    uint32_t offset;
-    uint32_t limit;
-
-    if ((slot_region == NULL) || (image == NULL) || (embedded_offset == NULL) ||
-        (image->size < BOOT_VERSION_INFO_SIZE)) {
-        return 0U;
-    }
-
-    flash_base = (const uint8_t *) (uintptr_t) slot_region->base;
-    limit      = image->size - BOOT_VERSION_INFO_SIZE;
-
-    for (offset = 0U; offset <= limit; ++offset) {
-        if ((offset & 0x0FFFU) == 0U) {
-            Boot_Platform_FeedWatchdog();
-        }
-
-        if (memcmp(&flash_base[offset], image->header, BOOT_VERSION_INFO_SIZE) == 0) {
-            *embedded_offset = offset;
-            return 1U;
-        }
-    }
-
-    return 0U;
-}
-
-static void Boot_SimpleUpgrade_ZeroCrcField(uint8_t *buffer,
-                                            uint32_t buffer_offset,
-                                            uint32_t buffer_size,
-                                            uint32_t embedded_header_offset) {
-    uint32_t zero_begin;
-    uint32_t zero_end;
-    uint32_t buffer_end;
-    uint32_t overlap_begin;
-    uint32_t overlap_end;
-
-    if ((buffer == NULL) || (embedded_header_offset == BOOT_UPGRADE_INVALID_OFFSET)) {
-        return;
-    }
-
-    zero_begin = embedded_header_offset + BOOT_VERSION_CRC32_OFFSET;
-    zero_end   = zero_begin + sizeof(uint32_t);
-    buffer_end = buffer_offset + buffer_size;
-
-    if ((zero_begin >= buffer_end) || (zero_end <= buffer_offset)) {
-        return;
-    }
-
-    overlap_begin = (zero_begin > buffer_offset) ? zero_begin : buffer_offset;
-    overlap_end   = (zero_end < buffer_end) ? zero_end : buffer_end;
-    memset(&buffer[overlap_begin - buffer_offset], 0, overlap_end - overlap_begin);
-}
-
-static BootError Boot_SimpleUpgrade_ComputeFlashImageCrc(uint32_t base_address,
-                                                         uint32_t image_size,
-                                                         uint32_t embedded_header_offset,
-                                                         uint32_t *crc32) {
-    uint8_t buffer[BOOT_UPGRADE_READ_CHUNK_SIZE];
-    uint32_t offset = 0U;
-    uint32_t current_crc = 0xFFFFFFFFUL;
-    BootError error;
-
-    if (crc32 == NULL) {
-        return BOOT_ERR_INVALID_ARGUMENT;
-    }
-
-    while (offset < image_size) {
-        uint32_t chunk_size = image_size - offset;
-
-        if (chunk_size > sizeof(buffer)) {
-            chunk_size = sizeof(buffer);
-        }
-
-        error = Boot_SimpleFlash_Read(base_address + offset, buffer, chunk_size);
-        if (error != BOOT_ERR_NONE) {
-            return error;
-        }
-
-        Boot_SimpleUpgrade_ZeroCrcField(buffer, offset, chunk_size, embedded_header_offset);
-        current_crc = Boot_Crc32_Mpeg2Update(current_crc, buffer, chunk_size);
-        offset += chunk_size;
-        Boot_Platform_FeedWatchdog();
-    }
-
-    *crc32 = current_crc;
-    return BOOT_ERR_NONE;
 }
 
 static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootAppImageInfo *image,
@@ -138,10 +42,8 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootAppImageInfo *ima
     uint8_t read_buffer[BOOT_UPGRADE_READ_CHUNK_SIZE];
     uint8_t verify_buffer[BOOT_UPGRADE_READ_CHUNK_SIZE];
     char relative_path[BOOT_FILE_PATH_LENGTH];
-    uint32_t flash_crc = 0U;
     uint32_t total_written = 0U;
     uint32_t last_reported_percent = 0U;
-    uint32_t embedded_header_offset = BOOT_UPGRADE_INVALID_OFFSET;
     uint32_t write_address;
     uint32_t expected_file_size;
     BootError error;
@@ -232,35 +134,15 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootAppImageInfo *ima
 
     Boot_Platform_FileClose(&file);
 
-    if (Boot_SimpleJump_IsSlotValid(target_slot) == false) {
-        return BOOT_ERR_IMAGE_VECTOR;
-    }
-
-    if (Boot_SimpleUpgrade_FindEmbeddedHeaderOffset(slot_region, image, &embedded_header_offset) != 0U) {
-        LOG_INFO(BOOT_LOG_TAG, "Embedded version header found at offset=0x%08lX",
-                 (unsigned long) embedded_header_offset);
-    } else {
-        LOG_INFO(BOOT_LOG_TAG, "Embedded version header not found, use plain image CRC");
-    }
-
-    error = Boot_SimpleUpgrade_ComputeFlashImageCrc(slot_region->base, image->size,
-                                                    embedded_header_offset, &flash_crc);
+    error = Boot_SimpleJump_ValidateSlot(target_slot, image->crc32);
     if (error != BOOT_ERR_NONE) {
         return error;
     }
 
-    if (flash_crc != image->crc32) {
-        return BOOT_ERR_FILE_CRC;
-    }
-
-    Boot_Handoff_RecordUpgrade(image->size, image->crc32, flash_crc, flash_crc);
-    LOG_INFO(BOOT_LOG_TAG, "Upgrade slot=%s verify src=0x%08lX flash=0x%08lX",
-             Boot_Info_SlotToString(target_slot), (unsigned long) flash_crc,
-             (unsigned long) flash_crc);
+    Boot_Handoff_RecordUpgrade(image->size, image->crc32, image->crc32, image->crc32);
     Boot_Handoff_LogCurrent("Upgrade handoff");
     Boot_SimpleUpgrade_LogProgress(image, target_slot, image->size, image->size,
                                    &last_reported_percent, 100U);
-
     return BOOT_ERR_NONE;
 }
 
@@ -275,13 +157,13 @@ BootError Boot_SimpleUpgrade_Run(const BootAppImageInfo *image, uint8_t target_s
     for (attempt = 0U; attempt < BOOT_UPGRADE_MAX_RETRIES; ++attempt) {
         LOG_INFO(BOOT_LOG_TAG, "Upgrade slot=%s %s attempt %lu/%u",
                  Boot_Info_SlotToString(target_slot), image->file,
-                 (unsigned long) (attempt + 1U), (unsigned int) BOOT_UPGRADE_MAX_RETRIES);
+                 (unsigned long)(attempt + 1U), (unsigned int)BOOT_UPGRADE_MAX_RETRIES);
 
         last_error = Boot_SimpleUpgrade_RunSingleAttempt(image, target_slot);
         if (last_error == BOOT_ERR_NONE) {
             LOG_INFO(BOOT_LOG_TAG, "Upgrade slot=%s %s success, size=%lu crc=0x%08lX",
                      Boot_Info_SlotToString(target_slot), image->file,
-                     (unsigned long) image->size, (unsigned long) image->crc32);
+                     (unsigned long)image->size, (unsigned long)image->crc32);
             return BOOT_ERR_NONE;
         }
 
