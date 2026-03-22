@@ -1,391 +1,296 @@
 # STM32H7 Bootloader 设计说明
 
-## 1. 文档范围
+> 本文按当前固定方案整理：Boot 固定放内部 Flash，`bootconfig` 固定放在 Boot 后面的 128 KB 内部 Flash，APP 固定只写入外部 QSPI Flash 的 AB 槽。
 
-本文只描述 `Boot/` 当前实际参与编译的 boot 实现，不引入 `App`、旧方案或外部假设。
+## 1. 固定方案
 
-当前 boot 已从“单槽直接覆盖”重构为：
-
-- `s_BootInfo` 驱动的双槽升级
-- `app.bin` 写入 inactive slot
-- `pending / testing / confirm / rollback` 完整链路
-- USB U 盘升级包仍使用 `manifest.json + 带 8 字节头的 crc/app.bin`
+- Boot 固定位于内部 Flash 起始地址。
+- `bootconfig` 固定位于 Boot 后面的 128 KB 内部 Flash。
+- APP 不再写入内部 Flash。
+- APP 只允许写入外部 QSPI Flash。
+- 外部 QSPI Flash 使用 AB 双槽。
+- U 盘升级时始终写 inactive slot。
+- 上电未升级时，先读取 `bootconfig`，再校验目标槽位镜像；CRC 不匹配则不跳转。
 
 ## 2. Flash 布局
 
-当前内部 Flash 2MB 的使用方式如下：
+### 2.1 内部 Flash
+
+内部 Flash 固定布局如下：
 
 | 区域 | 地址范围 | 大小 | 说明 |
 | --- | --- | --- | --- |
-| Boot | `0x08000000 ~ 0x0801FFFF` | 128 KB | boot 程序本体 |
-| BootInfo | `0x08020000 ~ 0x0803FFFF` | 128 KB | `s_BootInfo` 持久化区 |
-| Slot A | `0x08040000 ~ 0x0811FFFF` | 896 KB | App A |
-| Slot B | `0x08120000 ~ 0x081FFFFF` | 896 KB | App B |
+| Boot | `0x08000000 ~ 0x0801FFFF` | 128 KB | Bootloader 本体 |
+| bootconfig | `0x08020000 ~ 0x0803FFFF` | 128 KB | 启动配置、BootInfo、journal 区 |
 
 说明：
 
-- `s_BootInfo` 没有改结构体定义。
-- BootInfo 不放 EEPROM，而是放在 boot 后面的 128KB Flash 区。
-- BootInfo 区内部采用 64 字节对齐的顺序记录方式做 journal 持久化，写满后整扇区擦除重写。
+- `bootconfig` 就放在 Boot 后面的 128 KB。
+- 内部 Flash 不再放 APP。
+- 内部 Flash `0x08040000` 以后不再作为 APP 升级目标。
 
-## 3. s_BootInfo 的作用
+### 2.2 外部 QSPI Flash
 
-当前 boot 使用 `s_BootInfo` 维护双槽状态：
+APP 固定存放在外部 QSPI Flash，采用 AB 双槽：
 
-- `active_slot`
-  - 当前正式稳定运行的槽位
-- `pending_slot`
-  - 下一次待试启动的槽位
-- `confirmed`
-  - 新固件是否已被 App 确认
-- `boot_count`
-  - `pending_slot` 已尝试启动的次数
-- `max_boot_count`
-  - 最大允许测试启动次数，默认 `3`
-- `upgrade_state`
-  - `IDLE / READY / TESTING / ROLLBACK / SUCCESS`
-- `rollback_reason`
-  - 记录最近一次回滚原因
-- `version_a / version_b`
-  - 记录两个槽位的版本号
-- `app_a_crc / app_b_crc`
-  - 记录两个槽位最近一次升级写入时的镜像 CRC
-- `last_reset_reason`
-  - 记录最近一次 boot 保存 BootInfo 时看到的复位标志
-- `seq + crc`
-  - 用于 BootInfo 自身有效性和新旧记录判定
+| 区域 | 地址范围 | 大小 | 说明 |
+| --- | --- | --- | --- |
+| APP 总区 | `0x90000000 ~ 0x900FFFFF` | 1 MB | 固定 APP 区 |
+| Slot A | `0x90000000 ~ 0x9007FFFF` | 512 KB | APP1 |
+| Slot B | `0x90080000 ~ 0x900FFFFF` | 512 KB | APP2 |
 
-## 4. BootInfo 持久化规则
+结论：
 
-BootInfo 由 `boot_info.c` 管理。
+- APP 只在这两个外部槽位中切换。
+- Boot 不再根据介质类型做分流。
+- 所有升级包最终都只会落到外部 Flash 的 `Slot A` 或 `Slot B`。
 
-### 4.1 记录格式
+## 3. `app.bin` 文件格式
 
-- 每条 Flash 记录占 `64 bytes`
-- 前面放完整的 `s_BootInfo`
-- 剩余字节填 `0xFF`
-
-### 4.2 启动读取
-
-- boot 扫描整个 BootInfo 区
-- 找出 CRC 正确且 `seq` 最大的一条记录作为当前有效值
-- 若整区为空，则视为未初始化
-- 若有内容但都无效，则视为损坏并重建默认值
-
-### 4.3 保存策略
-
-- 每次保存时：
-  - 自动补 `magic`
-  - 自动维护 `seq`
-  - 自动重算结构体自身 `crc`
-- 若后续还有空白记录，则追加写入
-- 若 journal 已满，则先整区擦除，再从头写入最新一条
-
-### 4.4 App 侧确认接口
-
-当前代码已提供：
-
-- `Boot_Info_ConfirmRunningImage()`
-
-它的设计用途是：
-
-- App 启动稳定后主动调用
-- boot 根据 `SCB->VTOR` 判断当前运行槽位
-- 将该槽位写成 `active_slot`
-- 清空 `pending_slot`
-- 写入：
-  - `confirmed = BOOT_CONFIRMED`
-  - `boot_count = 0`
-  - `upgrade_state = UPGRADE_SUCCESS`
-  - `rollback_reason = ROLLBACK_NONE`
-
-boot 工程里已经实现了这个接口，但当前 boot 工程本身不会自动调用它，后续要由 App 接入。
-
-## 5. 启动主流程
-
-boot 入口仍由 `Boot_App_Init()` 和 `Boot_App_Process()` 驱动，但状态机已经从单槽流程调整为双槽决策。
-
-当前状态：
-
-1. `BOOT_APP_STATE_INIT`
-2. `BOOT_APP_STATE_USB_SCAN`
-3. `BOOT_APP_STATE_MANIFEST_LOAD`
-4. `BOOT_APP_STATE_UPGRADE`
-5. `BOOT_APP_STATE_JUMP`
-6. `BOOT_APP_STATE_FATAL`
-
-### 5.1 INIT
-
-启动时先做这些事：
-
-1. 初始化日志
-2. 初始化 handoff
-3. 初始化 USB 扫描上下文
-4. 读取并清除 RCC reset flags
-5. 读取或重建 BootInfo
-6. 根据 `active_slot / pending_slot / boot_count / reset_flags` 计算本次启动计划
-
-### 5.2 启动决策
-
-boot 的优先级如下：
-
-1. 若存在 `pending_slot`
-   - 先判断是否应该继续测试该槽
-   - 不进入 USB 升级扫描
-2. 若没有 `pending_slot`
-   - 进入 USB 升级扫描
-   - 没有升级介质时跳转当前稳定槽
-
-### 5.3 pending 槽位决策
-
-如果 `pending_slot != SLOT_NONE`，当前代码会按顺序判断：
-
-1. `pending_slot` 向量表是否有效
-   - 无效则回滚，原因记为 `ROLLBACK_CRC_ERROR`
-2. 本次 reset 是否为看门狗复位，且 `boot_count > 0`
-   - 是则回滚，原因记为 `ROLLBACK_WDG_RESET`
-3. `boot_count >= max_boot_count`
-   - 是则回滚，原因记为 `ROLLBACK_BOOT_OVERFLOW`
-4. 否则继续测试该 `pending_slot`
-
-继续测试前，boot 会：
-
-- `boot_count++`
-- `confirmed = BOOT_NOT_CONFIRMED`
-- `upgrade_state = UPGRADE_TESTING`
-- 保存 BootInfo
-
-### 5.4 回滚行为
-
-发生回滚时：
-
-- `pending_slot = SLOT_NONE`
-- `confirmed = BOOT_CONFIRMED`
-- `boot_count = 0`
-- `upgrade_state = UPGRADE_ROLLBACK`
-- `rollback_reason = 对应原因`
-- 跳回原 `active_slot`
-- 若原 `active_slot` 也无效，则尝试另一个可启动槽
-
-### 5.5 稳定槽修正
-
-若没有 `pending_slot`，但 `active_slot` 本身已无效：
-
-- boot 会尝试切到另一个可启动槽
-- 并把它改写为新的 `active_slot`
-
-若两个槽都无效：
-
-- boot 仍会进入 USB 扫描
-- 允许通过 U 盘恢复
-- 若没有合法升级介质，则最终进入 `FATAL`
-
-## 6. USB 升级触发规则
-
-USB 介质检查仍由 `boot_usb.c` 和 `boot_udisk_check.c` 实现。
-
-只有在“当前没有 pending 测试任务”时，boot 才会扫描升级介质。
-
-### 6.1 合法升级介质条件
-
-必须同时满足：
-
-1. USB Host 状态进入 `READY`
-2. FATFS 挂载成功
-3. U 盘通过 `/cck` 指纹校验
-4. 存在 `/bin`
-5. 存在 `/bin/manifest.json`
-
-### 6.2 U 盘指纹校验
-
-当前仍基于以下内容计算：
-
-- USB VID
-- USB PID
-- USB Serial
-- FAT32 Volume ID
-- 固定盐值 `MySecretSalt2024`
-- 根目录 `/cck` 中的 4 字节 little-endian 指纹
-
-CRC 算法使用 `Boot_Crc32_IsoCalc()`。
-
-## 7. manifest 规则
-
-manifest 仍由 `boot_simple_manifest.c` 手写解析，当前只认：
-
-- `file`
-- `size`
-- `crc32`
-- `version`
-
-其中：
-
-- `size / crc32 / version` 支持十进制或 `0x...`
-- 裸数值或字符串都可以
-
-### 7.1 当前支持的升级文件
-
-虽然 manifest 可以列多个 operation，但当前 boot 只会选择：
-
-- 第一个 `file == "app.bin"`
-- 且 `/bin/crc/app.bin` 实际存在
-
-### 7.2 最小示例
-
-```json
-{
-  "crc_config": "0xA5A55A5A",
-  "operations": [
-    {
-      "file": "app.bin",
-      "version": "0x00010005",
-      "size": "0x00040000",
-      "crc32": "0x12345678"
-    }
-  ]
-}
-```
-
-## 8. 升级包格式
-
-当前升级包仍不是裸 `app.bin`，而是：
+升级文件固定为 `/bin/app.bin`，格式仍为“版本头 + 裸固件”：
 
 ```text
-offset 0x00 : 4 bytes magic
-offset 0x04 : 4 bytes payload_crc32
-offset 0x08 : payload
+offset 0x00 ~ 0x5F : 96-byte version header
+offset 0x60 ~ end  : raw firmware payload
 ```
 
-要求：
+头部关键字段如下：
 
-- `magic == 0xA5A55A5A`
-- `payload_crc32 == manifest.crc32`
-- payload 大小等于 `manifest.size`
+```c
+typedef struct __attribute__((packed)) {
+    char     magic[4];          // "FWVH"
+    char     project_name[32];
+    char     image_tag[4];      // "FWPK"
+    char     git_hash[8];
+    char     build_time[20];
+    uint32_t raw_bin_crc32;     // 裸固件 CRC
+    uint32_t write_address;     // 固定要求为 0x90000000
+    uint32_t valid_bin_size;    // 裸固件有效长度
+    uint8_t  reserved[16];
+} BootVersionInfoHeader;
+```
 
-boot 真正打开的文件路径是：
+本固定方案下：
 
-- `/bin/crc/app.bin`
+- `write_address` 不再用于判断“写内部 Flash 还是外部 Flash”。
+- `write_address` 仅作为合法性检查字段使用。
+- Boot 只接受 `write_address == 0x90000000` 的升级包。
+- 如果头中的 `write_address` 不是 `0x90000000`，则直接拒绝烧录。
 
-## 9. 双槽升级流程
+## 4. bootconfig 需要保存的信息
 
-升级由 `boot_simple_upgrade.c` 执行，但写入目标已经变为 inactive slot。
+由于 APP 位置已经固定为外部 Flash，因此 `bootconfig` 不再需要保存介质类型或 `app_region_base`。建议只保留与 AB 槽管理直接相关的信息：
 
-### 9.1 目标槽选择
+- `active_slot`
+  - 当前已经确认稳定运行的槽位，取值 `A` 或 `B`。
+- `pending_slot`
+  - 新固件写入后的待测试槽位，取值 `A`、`B` 或 `NONE`。
+- `confirmed`
+  - 待测试固件是否已经被 App 确认。
+- `boot_count`
+  - `pending_slot` 已尝试启动的次数。
+- `max_boot_count`
+  - 最大允许试启动次数，建议 `3`。
+- `version_a / version_b`
+  - A、B 槽版本号。
+- `app_a_crc / app_b_crc`
+  - A、B 槽对应的镜像 CRC。
+- `last_reset_reason`
+  - 最近一次复位原因。
+- `seq + crc`
+  - 用于 `bootconfig` journal 记录的有效性判断。
 
-- 若当前稳定槽是 `A`，升级写入 `B`
-- 若当前稳定槽是 `B`，升级写入 `A`
-- 若当前没有可用稳定槽，则默认优先写 `A`
+如果沿用现有 `s_BootInfo` 结构，也可以保留冗余字段，但文档语义上应视为固定外部 Flash 方案，不再解释内部 APP 区。
 
-### 9.2 单次升级尝试
+## 5. bootconfig 持久化位置与规则
 
-一次尝试包含：
+`bootconfig` 固定在内部 Flash：
 
-1. 打开 `/bin/crc/app.bin`
-2. 校验总大小
-3. 校验 8 字节包头
-4. 擦除目标槽全部 Flash
-5. 按 `1024 bytes` 分块读取 payload
-6. 分块写入目标槽
-7. 每块写完立刻回读比较
-8. 计算源数据 CRC 和 Flash 回读 CRC
-9. 全部写完后比较：
-   - `source_crc`
-   - `flash_crc`
-   - `manifest.crc32`
-10. 再检查目标槽向量表是否有效
+- 基址：`0x08020000`
+- 大小：`128 KB`
 
-### 9.3 重试
+建议延续 journal 方式：
 
-- 单次升级最多重试 `3` 次
-- 写的是 inactive slot，所以失败不会破坏当前 `active_slot`
-- 如果 3 次都失败：
-  - 不再进入 fatal
-  - 直接保留旧稳定槽继续启动
+1. 每条记录按固定大小写入。
+2. 启动时扫描整个 `bootconfig` 区。
+3. 取 CRC 正确且 `seq` 最大的一条作为当前有效记录。
+4. 若区域为空，则按默认值初始化。
+5. 若区域非空但全部无效，则视为损坏并重建默认值。
+6. 写满后先擦除整个 `bootconfig` 区，再从头写入最新记录。
 
-### 9.4 升级成功后的 BootInfo 变化
+## 6. U 盘升级时的目标槽位选择
 
-成功写入后，boot 会：
+### 6.1 升级包合法性
 
-- 更新目标槽的 `version_x`
-- 更新目标槽的 `app_x_crc`
+Boot 读取 `/bin/app.bin` 后按以下顺序检查：
+
+1. 版本头 `magic` 正确。
+2. `image_tag` 正确。
+3. `raw_bin_crc32` 非零。
+4. `valid_bin_size` 合法，且与实际文件大小匹配。
+5. `write_address == 0x90000000`。
+
+只要其中任意一步失败，都拒绝烧录。
+
+### 6.2 选择 A 还是 B
+
+由于 APP 固定在外部 Flash，Boot 的选槽逻辑也固定如下：
+
+1. 若 `bootconfig` 不存在，或当前没有稳定可用镜像，则优先写 `Slot A`。
+2. 若 `active_slot == A`，则新包写入 `Slot B`。
+3. 若 `active_slot == B`，则新包写入 `Slot A`。
+4. 若当前存在 `pending_slot`，则不应继续发起新的覆盖升级，应先完成确认或回滚。
+
+也就是说：
+
+- 当前稳定版本在哪个槽，新版本就写另一个槽。
+- 当前稳定槽绝不直接覆盖。
+
+### 6.3 烧录成功后的 bootconfig 更新
+
+目标槽位写入成功并通过 CRC 校验后，Boot 应更新 `bootconfig`：
+
+- 更新目标槽位版本号
+- 更新目标槽位 CRC
 - `pending_slot = target_slot`
 - `confirmed = BOOT_NOT_CONFIRMED`
 - `boot_count = 0`
 - `upgrade_state = UPGRADE_READY`
 - `rollback_reason = ROLLBACK_NONE`
 
-保存成功后，再进入 `JUMP`，下一跳目标变成 `pending_slot`。
-
-## 10. 槽位跳转规则
-
-`boot_simple_jump.c` 现在按槽工作：
-
-- `Boot_SimpleJump_IsSlotValid(slot)`
-- `Boot_SimpleJump_ToSlot(slot)`
-
-### 10.1 合法性检查
-
-对目标槽做如下检查：
-
-1. 向量表首地址的 MSP 不能是 `0xFFFFFFFF`
-2. ResetHandler 不能是 `0xFFFFFFFF`
-3. MSP 必须 8 字节对齐
-4. MSP 必须落在合法 SRAM 区
-5. ResetHandler 清掉 Thumb bit 后，必须落在对应槽的 Flash 范围内
-
-### 10.2 跳转前动作
-
-跳转前仍会：
-
-- 卸载 USB 文件系统
-- 记录 handoff 向量信息
-- 关闭中断
-- 清 NVIC enable/pending
-- 关闭 SysTick
-- `HAL_RCC_DeInit()`
-- `HAL_DeInit()`
-- 关闭 I/D Cache
-- 设置 `SCB->VTOR = slot_base`
-- 设置 MSP/PSP/CONTROL
-- 跳到该槽 ResetHandler
-
-## 11. 打包工具
-
-`others/process_bin.bat` 已同步到新的双槽方案。
-
-当前工具会：
-
-1. 读取 `bin/manifest.json`
-2. 处理 `bin/<file>`
-3. 自动做 4 字节对齐
-4. 用 STM32 兼容的 `CRC32 MPEG-2` 算法计算 payload CRC
-5. 自动更新 manifest 中的：
-   - `size`
-   - `crc32`
-   - 若已有 `version`，则归一化成 `0xXXXXXXXX`
-   - 若 `app.bin` 缺失 `version`，则自动补成 `0x00000000`
-6. 生成 `bin/crc/<file>`
-
 注意：
 
-- 双槽由 boot 自己决定写到 A 还是 B
-- 升级包本身不绑定固定槽位
+- 此时 `active_slot` 保持不变。
+- 只有待测固件运行稳定并被 App 确认后，`pending_slot` 才转正为 `active_slot`。
 
-## 12. 当前限制
+## 7. 上电未升级时的启动逻辑
 
-虽然已经切到双槽，但当前实现仍有这些边界：
+“上电未升级”表示本次启动没有检测到合法 U 盘升级动作。此时 Boot 应按固定外部 Flash 双槽逻辑处理：
 
-- 只处理 `app.bin`
-- 还没有做签名校验
-- 还没有版本策略拦截
-- `ROLLBACK_BOOT_TIMEOUT` 常量已保留，但当前主要实际使用的是：
-  - `ROLLBACK_CRC_ERROR`
-  - `ROLLBACK_BOOT_OVERFLOW`
-  - `ROLLBACK_WDG_RESET`
-- App 侧确认接口已经有，但还需要 App 真正接入 `Boot_Info_ConfirmRunningImage()`
+1. 读取 `bootconfig` 最新有效记录。
+2. 如果存在 `pending_slot`，优先处理待测镜像。
+3. 如果不存在 `pending_slot`，处理 `active_slot`。
+4. 在任何跳转前，都必须先做镜像合法性和 CRC 校验。
+5. CRC 不匹配则不跳转。
 
-## 13. 结论
+## 8. 跳转前的镜像校验规则
 
-当前 boot 的真实行为可以概括为：
+Boot 在尝试跳转前，对目标槽位执行以下校验：
 
-“上电后先读 BootInfo；若存在待测试的新固件，则优先决定是继续测试还是回滚；若系统当前处于稳定状态，则扫描合法升级 U 盘，把新的 `app.bin` 写入 inactive slot，并把该槽标记为 pending；随后按槽位做向量表校验并跳转。只要 App 在新槽稳定运行后调用确认接口，新的 pending 槽就会转正为 active 槽；若新槽多次启动失败、看门狗复位，或自身镜像无效，则 boot 自动回滚到旧稳定槽。” 
+1. 检查向量表：
+   - MSP 不能为 `0xFFFFFFFF`
+   - ResetHandler 不能为 `0xFFFFFFFF`
+   - MSP 必须落在合法 SRAM 区
+   - ResetHandler 去掉 Thumb 位后必须位于目标槽位范围内
+2. 在目标槽位镜像中定位嵌入式版本头。
+3. 从版本头中读取：
+   - `valid_bin_size`
+   - `raw_bin_crc32`
+   - `write_address`
+4. 检查 `write_address` 必须为 `0x90000000`。
+5. 按 `valid_bin_size` 重新计算目标槽位镜像 CRC。
+   - 计算时将镜像内嵌头中的 `raw_bin_crc32` 字段按 `0` 处理。
+6. 比较以下值是否一致：
+   - Flash 实际计算得到的 CRC
+   - 镜像头中的 `raw_bin_crc32`
+   - `bootconfig` 中该槽位记录的 CRC
+
+只有全部通过，目标槽位才允许跳转。
+
+结论：
+
+- 只看向量表合法还不够。
+- CRC 不匹配，一律不跳转。
+
+## 9. `pending_slot` 存在时的处理
+
+如果 `pending_slot != NONE`，表示新固件已经写入外部 Flash，但还没有正式确认。Boot 应按如下顺序处理：
+
+1. 先校验 `pending_slot` 的向量表和 CRC。
+2. 如果校验失败：
+   - 认定待测镜像无效。
+   - 清除 `pending_slot`。
+   - 回滚到 `active_slot`。
+   - 如果回滚槽也无效，则不跳转。
+3. 如果最近一次复位为看门狗复位，且 `boot_count > 0`：
+   - 认定待测镜像试运行失败。
+   - 回滚到 `active_slot`。
+4. 如果 `boot_count >= max_boot_count`：
+   - 认定试启动次数超限。
+   - 回滚到 `active_slot`。
+5. 如果以上都通过：
+   - `boot_count++`
+   - `confirmed = BOOT_NOT_CONFIRMED`
+   - `upgrade_state = UPGRADE_TESTING`
+   - 保存 `bootconfig`
+   - 跳转到 `pending_slot`
+
+## 10. `pending_slot` 不存在时的处理
+
+如果 `pending_slot == NONE`，说明当前没有待测试镜像，Boot 应按如下逻辑启动：
+
+1. 先校验 `active_slot`。
+2. 若 `active_slot` 合法且 CRC 匹配，则直接跳转。
+3. 若 `active_slot` 非法或 CRC 不匹配，则校验另一个槽位。
+4. 若另一个槽位合法：
+   - 将其改写为新的 `active_slot`
+   - 清空 `pending_slot`
+   - `confirmed = BOOT_CONFIRMED`
+   - `boot_count = 0`
+   - 保存 `bootconfig`
+   - 跳转到该槽位
+5. 若两个槽位都不合法：
+   - 不跳转
+   - 停留在 Boot，等待 U 盘恢复升级
+
+## 11. App 确认机制
+
+新固件从 `pending_slot` 启动成功后，App 需要在确认系统已经稳定运行后主动写确认。确认成功后，`bootconfig` 状态应更新为：
+
+- `active_slot = 当前运行槽位`
+- `pending_slot = NONE`
+- `confirmed = BOOT_CONFIRMED`
+- `boot_count = 0`
+- `upgrade_state = UPGRADE_SUCCESS`
+- `rollback_reason = ROLLBACK_NONE`
+
+只有完成这一步，新槽位才算正式转正。
+
+## 12. 推荐主流程
+
+建议 Boot 主状态机固定为：
+
+1. `INIT`
+   - 初始化日志、硬件、USB、复位标志
+   - 读取 `bootconfig`
+2. `USB_SCAN`
+   - 检查是否存在合法升级 U 盘
+3. `IMAGE_LOAD`
+   - 读取 `/bin/app.bin`
+   - 校验头部，确认 `write_address == 0x90000000`
+4. `UPGRADE`
+   - 选择外部 Flash inactive slot
+   - 擦除、写入、回读校验、CRC 校验
+   - 更新 `bootconfig.pending_slot`
+5. `JUMP`
+   - 若有 `pending_slot`，优先尝试待测槽
+   - 否则启动 `active_slot`
+6. `RECOVERY`
+   - 无合法镜像时停留在 Boot，等待恢复升级
+
+## 13. 最终结论
+
+本次固定方案可以概括为：
+
+> Boot 只负责内部 Flash 的 Boot 和 `bootconfig`；所有 APP 固定只写入外部 QSPI Flash 的 AB 槽；每次升级写 inactive slot；每次跳转前都必须校验向量表和 CRC；CRC 不匹配则不跳转。
+
+进一步展开就是：
+
+- `bootconfig` 固定放在 Boot 后面的 128 KB：`0x08020000 ~ 0x0803FFFF`
+- APP 固定只放外部 Flash：
+  - `Slot A = 0x90000000 ~ 0x9007FFFF`
+  - `Slot B = 0x90080000 ~ 0x900FFFFF`
+- `app.bin.write_address` 固定要求为 `0x90000000`
+- 内部 Flash 不再作为 APP 升级目标
+- `pending_slot` 优先级高于 `active_slot`
+- 只要目标槽位 CRC 不匹配，就不允许跳转
