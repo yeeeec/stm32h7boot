@@ -1,0 +1,58 @@
+24-exec-interrupt
+-> 24^done
+-> ~"\nProgram"
+
+Program
+-> ~" received signal SIGINT, Interrupt.\n"
+ received signal SIGINT, Interrupt.
+-> ~"Boot_ExtFlash_CommandError (error=BOOT_ERR_EXTFLASH_READ, status=PLAT_OK) at C:/prjs/stm32h7boot/user/services/boot_extflash.c:22\n"
+Boot_ExtFlash_CommandError (error=BOOT_ERR_EXTFLASH_READ, status=PLAT_OK) at C:/prjs/stm32h7boot/user/services/boot_extflash.c:22
+-> ~"22\t    return (status == PLAT_OK) ? BOOT_ERR_NONE : error;\n"
+22	    return (status == PLAT_OK) ? BOOT_ERR_NONE : error;
+-> *stopped,reason="signal-received",signal-name="SIGINT",signal-meaning="Interrupt",frame={addr="0x08016b58",func="Boot_ExtFlash_CommandError",args=[{name="error",value="BOOT_ERR_EXTFLASH_READ"},{name="status",value="PLAT_OK"}],file="C:/prjs/stm32h7boot/user/services/boot_extflash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_extflash.c",line="22",arch="armv7e-m"},thread-id="1",stopped-threads="all"
+mi2.status = stopped
+25-interpreter-exec console "monitor reset"
+-> @"Resetting target\n"
+Resetting target
+-> 25^done
+26-break-insert -t --function main
+-> 26^done,bkpt={number="2",type="breakpoint",disp="del",enabled="y",addr="0x080129ce",func="main",file="C:/prjs/stm32h7boot/Core/Src/main.c",fullname="C:\\prjs\\stm32h7boot\\Core\\Src\\main.c",line="97",thread-groups=["i1"],times="0",original-location="-function main"}
+27-exec-continue --all
+-> 27^running
+-> *running,thread-id="all"
+mi2.status = running
+28-exec-interrupt
+-> 28^done
+-> ~"\nProgram"
+
+Program
+-> ~" received signal SIGINT, Interrupt.\n"
+ received signal SIGINT, Interrupt.
+-> ~"0x08009842 in QSPI_WaitFlagStateUntilTimeout (hqspi=0x20000f00 <hqspi>, Flag=6, State=SET, Tickstart=4589, Timeout=100) at C:/prjs/stm32h7boot/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_qspi.c:2485\n"
+0x08009842 in QSPI_WaitFlagStateUntilTimeout (hqspi=0x20000f00 <hqspi>, Flag=6, State=SET, Tickstart=4589, Timeout=100) at C:/prjs/stm32h7boot/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_qspi.c:2485
+-> ~"2485\t{\n"
+2485	{
+-> *stopped,reason="signal-received",signal-name="SIGINT",signal-meaning="Interrupt",frame={addr="0x08009842",func="QSPI_WaitFlagStateUntilTimeout",args=[{name="hqspi",value="0x20000f00 <hqspi>"},{name="Flag",value="6"},{name="State",value="SET"},{name="Tickstart",value="4589"},{name="Timeout",value="100"}],file="C:/prjs/stm32h7boot/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_qspi.c",fullname="C:\\prjs\\stm32h7boot\\Drivers\\STM32H7xx_HAL_Driver\\Src\\stm32h7xx_hal_qspi.c",line="2485",arch="armv7e-m"},thread-id="1",stopped-threads="all"
+mi2.status = stopped
+29-thread-list-ids
+-> 29^done,thread-ids={thread-id="1"},current-thread-id="1",number-of-threads="1"
+30-thread-info 1
+-> 30^done,threads=[{id="1",target-id="Thread 1",details="Thread",frame={level="0",addr="0x08009842",func="QSPI_WaitFlagStateUntilTimeout",args=[{name="hqspi",value="0x20000f00 <hqspi>"},{name="Flag",value="6"},{name="State",value="SET"},{name="Tickstart",value="4589"},{name="Timeout",value="100"}],file="C:/prjs/stm32h7boot/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_qspi.c",fullname="C:\\prjs\\stm32h7boot\\Drivers\\STM32H7xx_HAL_Driver\\Src\\stm32h7xx_hal_qspi.c",line="2485",arch="armv7e-m"},state="stopped"}]
+31-stack-list-frames --thread 1 0 19
+-> 31^done,stack=[frame={level="0",addr="0x08009842",func="QSPI_WaitFlagStateUntilTimeout",file="C:/prjs/stm32h7boot/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_qspi.c",fullname="C:\\prjs\\stm32h7boot\\Drivers\\STM32H7xx_HAL_Driver\\Src\\stm32h7xx_hal_qspi.c",line="2485",arch="armv7e-m"},frame={level="1",addr="0x08009446",func="HAL_QSPI_Receive",file="C:/prjs/stm32h7boot/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_qspi.c",fullname="C:\\prjs\\stm32h7boot\\Drivers\\STM32H7xx_HAL_Driver\\Src\\stm32h7xx_hal_qspi.c",line="1104",arch="armv7e-m"},frame={level="2",addr="0x08017f00",func="platform_qspi_receive",file="C:/prjs/stm32h7boot/platform/src/port/stm32h7/qspi_backend.c",fullname="C:\\prjs\\stm32h7boot\\platform\\src\\port\\stm32h7\\qspi_backend.c",line="51",arch="armv7e-m"},frame={level="3",addr="0x08016e74",func="Boot_ExtFlash_ReadStatus",file="C:/prjs/stm32h7boot/user/services/boot_extflash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_extflash.c",line="162",arch="armv7e-m"},frame={level="4",addr="0x08016ea8",func="Boot_ExtFlash_WaitReady",file="C:/prjs/stm32h7boot/user/services/boot_extflash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_extflash.c",line="173",arch="armv7e-m"},frame={level="5",addr="0x0801728a",func="Boot_ExtFlash_Erase",file="C:/prjs/stm32h7boot/user/services/boot_extflash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_extflash.c",line="386",arch="armv7e-m"},frame={level="6",addr="0x08015718",func="Boot_SimpleFlash_EraseRegion",file="C:/prjs/stm32h7boot/user/services/boot_simple_flash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_simple_flash.c",line="204",arch="armv7e-m"},frame={level="7",addr="0x0801585c",func="Boot_SimpleFlash_EraseSlot",file="C:/prjs/stm32h7boot/user/services/boot_simple_flash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_simple_flash.c",line="267",arch="armv7e-m"},frame={level="8",addr="0x080164c4",func="Boot_SimpleUpgrade_RunSingleAttempt",file="C:/prjs/stm32h7boot/user/services/boot_simple_upgrade.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_simple_upgrade.c",line="87",arch="armv7e-m"},frame={level="9",addr="0x080167be",func="Boot_SimpleUpgrade_Run",file="C:/prjs/stm32h7boot/user/services/boot_simple_upgrade.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_simple_upgrade.c",line="162",arch="armv7e-m"},frame={level="10",addr="0x080141d2",func="Boot_App_Process",file="C:/prjs/stm32h7boot/user/application/boot_app.c",fullname="C:\\prjs\\stm32h7boot\\user\\application\\boot_app.c",line="499",arch="armv7e-m"},frame={level="11",addr="0x080141d2",func="Boot_App_Process",file="C:/prjs/stm32h7boot/user/application/boot_app.c",fullname="C:\\prjs\\stm32h7boot\\user\\application\\boot_app.c",line="499",arch="armv7e-m"},frame={level="12",addr="0x08012acc",func="main",file="C:/prjs/stm32h7boot/Core/Src/main.c",fullname="C:\\prjs\\stm32h7boot\\Core\\Src\\main.c",line="149",arch="armv7e-m"}]
+32-stack-list-frames --thread 1 0 19
+-> 32^done,stack=[frame={level="0",addr="0x08009842",func="QSPI_WaitFlagStateUntilTimeout",file="C:/prjs/stm32h7boot/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_qspi.c",fullname="C:\\prjs\\stm32h7boot\\Drivers\\STM32H7xx_HAL_Driver\\Src\\stm32h7xx_hal_qspi.c",line="2485",arch="armv7e-m"},frame={level="1",addr="0x08009446",func="HAL_QSPI_Receive",file="C:/prjs/stm32h7boot/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_qspi.c",fullname="C:\\prjs\\stm32h7boot\\Drivers\\STM32H7xx_HAL_Driver\\Src\\stm32h7xx_hal_qspi.c",line="1104",arch="armv7e-m"},frame={level="2",addr="0x08017f00",func="platform_qspi_receive",file="C:/prjs/stm32h7boot/platform/src/port/stm32h7/qspi_backend.c",fullname="C:\\prjs\\stm32h7boot\\platform\\src\\port\\stm32h7\\qspi_backend.c",line="51",arch="armv7e-m"},frame={level="3",addr="0x08016e74",func="Boot_ExtFlash_ReadStatus",file="C:/prjs/stm32h7boot/user/services/boot_extflash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_extflash.c",line="162",arch="armv7e-m"},frame={level="4",addr="0x08016ea8",func="Boot_ExtFlash_WaitReady",file="C:/prjs/stm32h7boot/user/services/boot_extflash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_extflash.c",line="173",arch="armv7e-m"},frame={level="5",addr="0x0801728a",func="Boot_ExtFlash_Erase",file="C:/prjs/stm32h7boot/user/services/boot_extflash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_extflash.c",line="386",arch="armv7e-m"},frame={level="6",addr="0x08015718",func="Boot_SimpleFlash_EraseRegion",file="C:/prjs/stm32h7boot/user/services/boot_simple_flash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_simple_flash.c",line="204",arch="armv7e-m"},frame={level="7",addr="0x0801585c",func="Boot_SimpleFlash_EraseSlot",file="C:/prjs/stm32h7boot/user/services/boot_simple_flash.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_simple_flash.c",line="267",arch="armv7e-m"},frame={level="8",addr="0x080164c4",func="Boot_SimpleUpgrade_RunSingleAttempt",file="C:/prjs/stm32h7boot/user/services/boot_simple_upgrade.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_simple_upgrade.c",line="87",arch="armv7e-m"},frame={level="9",addr="0x080167be",func="Boot_SimpleUpgrade_Run",file="C:/prjs/stm32h7boot/user/services/boot_simple_upgrade.c",fullname="C:\\prjs\\stm32h7boot\\user\\services\\boot_simple_upgrade.c",line="162",arch="armv7e-m"},frame={level="10",addr="0x080141d2",func="Boot_App_Process",file="C:/prjs/stm32h7boot/user/application/boot_app.c",fullname="C:\\prjs\\stm32h7boot\\user\\application\\boot_app.c",line="499",arch="armv7e-m"},frame={level="11",addr="0x080141d2",func="Boot_App_Process",file="C:/prjs/stm32h7boot/user/application/boot_app.c",fullname="C:\\prjs\\stm32h7boot\\user\\application\\boot_app.c",line="499",arch="armv7e-m"},frame={level="12",addr="0x08012acc",func="main",file="C:/prjs/stm32h7boot/Core/Src/main.c",fullname="C:\\prjs\\stm32h7boot\\Core\\Src\\main.c",line="149",arch="armv7e-m"}]
+33-stack-info-frame --thread 1 --frame 0
+-> 33^done,frame={level="0",addr="0x08009842",func="QSPI_WaitFlagStateUntilTimeout",file="C:/prjs/stm32h7boot/Drivers/STM32H7xx_HAL_Driver/Src/stm32h7xx_hal_qspi.c",fullname="C:\\prjs\\stm32h7boot\\Drivers\\STM32H7xx_HAL_Driver\\Src\\stm32h7xx_hal_qspi.c",line="2485",arch="armv7e-m"}
+34-stack-list-variables --thread 1 --frame 0 --simple-values
+-> 34^done,variables=[{name="hqspi",arg="1",type="QSPI_HandleTypeDef *",value="0x20000f00 <hqspi>"},{name="Flag",arg="1",type="uint32_t",value="6"},{name="State",arg="1",type="FlagStatus",value="SET"},{name="Tickstart",arg="1",type="uint32_t",value="4589"},{name="Timeout",arg="1",type="uint32_t",value="100"}]
+35-var-create --thread 1 --frame 0 var_hqspi_4096 @ "hqspi"
+-> 35^done,name="var_hqspi_4096",numchild="13",value="0x20000f00 <hqspi>",type="QSPI_HandleTypeDef *",has_more="0"
+36-var-create --thread 1 --frame 0 var_Flag_4096 @ "Flag"
+-> 36^done,name="var_Flag_4096",numchild="0",value="6",type="uint32_t",has_more="0"
+37-var-create --thread 1 --frame 0 var_State_4096 @ "State"
+-> 37^done,name="var_State_4096",numchild="0",value="SET",type="FlagStatus",has_more="0"
+38-var-create --thread 1 --frame 0 var_Tickstart_4096 @ "Tickstart"
+-> 38^done,name="var_Tickstart_4096",numchild="0",value="4589",type="uint32_t",has_more="0"
+39-var-create --thread 1 --frame 0 var_Timeout_4096 @ "Timeout"
+-> 39^done,name="var_Timeout_4096",numchild="0",value="100",type="uint32_t",has_more="0"

@@ -51,6 +51,16 @@ Plat_Status_t platform_qspi_receive(uint8_t *data, uint32_t timeout) {
     return platform_status_from_hal(HAL_QSPI_Receive(&hqspi, data, timeout));
 }
 
+Plat_Status_t platform_qspi_auto_polling(QSPI_CommandTypeDef *command,
+                                         QSPI_AutoPollingTypeDef *config,
+                                         uint32_t timeout) {
+    if ((command == NULL) || (config == NULL)) {
+        return PLAT_ERR_INVALID_PARAM;
+    }
+
+    return platform_status_from_hal(HAL_QSPI_AutoPolling(&hqspi, command, config, timeout));
+}
+
 Plat_Status_t platform_qspi_memory_mapped(QSPI_CommandTypeDef *command,
                                           QSPI_MemoryMappedTypeDef *config) {
     if ((command == NULL) || (config == NULL)) {

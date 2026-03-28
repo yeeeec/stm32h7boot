@@ -239,6 +239,11 @@ BootError Boot_SimpleJump_ValidateSlot(uint8_t slot, uint32_t expected_crc) {
     vector_valid = Boot_SimpleJump_IsVectorValid(stack_pointer, reset_handler, region);
     Boot_Handoff_RecordVector(region->base, stack_pointer, reset_handler, vector_valid);
     if (vector_valid == false) {
+        LOG_WARN(BOOT_LOG_TAG,
+                 "Slot=%s vector invalid: sp=0x%08lX reset=0x%08lX base=0x%08lX size=0x%08lX",
+                 Boot_Info_SlotToString(slot), (unsigned long) stack_pointer,
+                 (unsigned long) reset_handler, (unsigned long) region->base,
+                 (unsigned long) region->size);
         return BOOT_ERR_IMAGE_VECTOR;
     }
 
@@ -253,10 +258,19 @@ BootError Boot_SimpleJump_ValidateSlot(uint8_t slot, uint32_t expected_crc) {
     }
 
     if (flash_crc != header.raw_bin_crc32) {
+        LOG_WARN(BOOT_LOG_TAG,
+                 "Slot=%s embedded CRC mismatch: flash=0x%08lX embedded=0x%08lX size=%lu header_off=0x%08lX",
+                 Boot_Info_SlotToString(slot), (unsigned long) flash_crc,
+                 (unsigned long) header.raw_bin_crc32, (unsigned long) header.valid_bin_size,
+                 (unsigned long) embedded_offset);
         return BOOT_ERR_IMAGE_CRC;
     }
 
     if ((expected_crc != 0U) && (flash_crc != expected_crc)) {
+        LOG_WARN(BOOT_LOG_TAG,
+                 "Slot=%s expected CRC mismatch: flash=0x%08lX expected=0x%08lX",
+                 Boot_Info_SlotToString(slot), (unsigned long) flash_crc,
+                 (unsigned long) expected_crc);
         return BOOT_ERR_IMAGE_CRC;
     }
 

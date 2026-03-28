@@ -31,6 +31,8 @@ typedef struct {
     uint32_t reset_flags;
     uint8_t jump_slot;
     uint8_t allow_upgrade_scan;
+    uint8_t recovery_retry_blocked;
+    BootError recovery_block_error;
 } BootAppContext;
 
 static BootAppContext g_boot_app;
@@ -52,6 +54,34 @@ static void Boot_App_EnterFatal(BootError error) {
 
 static uint8_t Boot_App_GetOtherSlot(uint8_t slot) {
     return (slot == SLOT_A) ? SLOT_B : SLOT_A;
+}
+
+static void Boot_App_BlockRecoveryRetry(BootError error) {
+    if (g_boot_app.jump_slot != SLOT_NONE) {
+        return;
+    }
+
+    if (g_boot_app.recovery_retry_blocked == 0U) {
+        LOG_WARN(BOOT_LOG_TAG,
+                 "Recovery retry paused until upgrade media is removed: %s",
+                 Boot_ErrorToString(error));
+    }
+
+    g_boot_app.recovery_retry_blocked = 1U;
+    g_boot_app.recovery_block_error   = error;
+}
+
+static void Boot_App_ClearRecoveryRetryBlock(const char *reason) {
+    if (g_boot_app.recovery_retry_blocked == 0U) {
+        return;
+    }
+
+    LOG_INFO(BOOT_LOG_TAG,
+             "Recovery retry re-armed (%s), previous failure: %s",
+             (reason != NULL) ? reason : "unknown",
+             Boot_ErrorToString(g_boot_app.recovery_block_error));
+    g_boot_app.recovery_retry_blocked = 0U;
+    g_boot_app.recovery_block_error   = BOOT_ERR_NONE;
 }
 
 static int Boot_App_IsWatchdogReset(uint32_t reset_flags) {
@@ -439,7 +469,9 @@ void Boot_App_Process(void) {
             error = Boot_SimpleManifest_Load(&g_boot_app.image_info);
             if (error != BOOT_ERR_NONE) {
                 LOG_WARN(BOOT_LOG_TAG, "App package ignored: %s", Boot_ErrorToString(error));
-                g_boot_app.state = BOOT_APP_STATE_JUMP;
+                Boot_App_BlockRecoveryRetry(error);
+                g_boot_app.state =
+                    (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
                 return;
             }
 
@@ -471,11 +503,13 @@ void Boot_App_Process(void) {
                          Boot_ErrorToString(error));
                 g_boot_app.last_error = error;
                 Boot_Handoff_SetError((uint32_t) error);
+                Boot_App_BlockRecoveryRetry(error);
                 g_boot_app.state =
                     (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
                 return;
             }
 
+            Boot_App_ClearRecoveryRetryBlock("upgrade success");
             Boot_App_ArmPendingUpgrade(target_slot, &g_boot_app.image_info);
             error = Boot_App_SaveBootInfo("arm pending upgrade");
             if (error != BOOT_ERR_NONE) {
@@ -526,6 +560,15 @@ void Boot_App_Process(void) {
         case BOOT_APP_STATE_RECOVERY: {
             BootUsbScanResult scan_result =
                 Boot_Usb_PollForUpgradeMedia(0xFFFFFFFFUL, &error);
+
+            if (scan_result == BOOT_USB_SCAN_NO_DEVICE) {
+                Boot_App_ClearRecoveryRetryBlock("media removed");
+                return;
+            }
+
+            if (g_boot_app.recovery_retry_blocked != 0U) {
+                return;
+            }
 
             if (scan_result == BOOT_USB_SCAN_UPGRADE_READY) {
                 LOG_INFO(BOOT_LOG_TAG, "Recovery media ready, try reload app image");

@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "boot_config.h"
+#include "boot_log.h"
 #include "platform/boot_platform.h"
 #include "platform/qspi.h"
 #include "stm32h7xx_hal.h"
@@ -14,6 +15,8 @@
 #define BOOT_EXTFLASH_CMD_SECTOR_ERASE  0x20U
 
 #define BOOT_EXTFLASH_STATUS_WIP        0x01U
+#define BOOT_EXTFLASH_STATUS_WEL        0x02U
+#define BOOT_EXTFLASH_STATUS_POLL_INTERVAL 0x10U
 
 static uint8_t g_boot_extflash_initialized;
 static uint8_t g_boot_extflash_memory_mapped;
@@ -133,56 +136,53 @@ static BootError Boot_ExtFlash_SendSimpleCommand(uint8_t instruction) {
                                       platform_qspi_command(&command, BOOT_EXTFLASH_CMD_TIMEOUT_MS));
 }
 
-static BootError Boot_ExtFlash_ReadStatus(uint8_t *status) {
-    QSPI_CommandTypeDef command;
-    BootError error;
-
-    if (status == NULL) {
-        return BOOT_ERR_INVALID_ARGUMENT;
-    }
-
-    memset(&command, 0, sizeof(command));
-    command.InstructionMode   = QSPI_INSTRUCTION_1_LINE;
-    command.Instruction       = BOOT_EXTFLASH_CMD_READ_STATUS;
-    command.AddressMode       = QSPI_ADDRESS_NONE;
-    command.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
-    command.DataMode          = QSPI_DATA_1_LINE;
-    command.NbData            = 1U;
-    command.DummyCycles       = 0U;
-    command.DdrMode           = QSPI_DDR_MODE_DISABLE;
-    command.DdrHoldHalfCycle  = QSPI_DDR_HHC_ANALOG_DELAY;
-    command.SIOOMode          = QSPI_SIOO_INST_EVERY_CMD;
-
-    error = Boot_ExtFlash_CommandError(BOOT_ERR_EXTFLASH_READ,
-                                       platform_qspi_command(&command, BOOT_EXTFLASH_CMD_TIMEOUT_MS));
-    if (error != BOOT_ERR_NONE) {
-        return error;
-    }
-
-    return Boot_ExtFlash_CommandError(BOOT_ERR_EXTFLASH_READ,
-                                      platform_qspi_receive(status, BOOT_EXTFLASH_CMD_TIMEOUT_MS));
+static void Boot_ExtFlash_BuildStatusCommand(QSPI_CommandTypeDef *command) {
+    memset(command, 0, sizeof(*command));
+    command->InstructionMode   = QSPI_INSTRUCTION_1_LINE;
+    command->Instruction       = BOOT_EXTFLASH_CMD_READ_STATUS;
+    command->AddressMode       = QSPI_ADDRESS_NONE;
+    command->AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
+    command->DataMode          = QSPI_DATA_1_LINE;
+    command->NbData            = 1U;
+    command->DummyCycles       = 0U;
+    command->DdrMode           = QSPI_DDR_MODE_DISABLE;
+    command->DdrHoldHalfCycle  = QSPI_DDR_HHC_ANALOG_DELAY;
+    command->SIOOMode          = QSPI_SIOO_INST_EVERY_CMD;
 }
 
-static BootError Boot_ExtFlash_WaitReady(uint32_t timeout_ms) {
-    uint32_t start_tick;
-    uint8_t status = BOOT_EXTFLASH_STATUS_WIP;
-    BootError error;
+static BootError Boot_ExtFlash_AutoPollStatus(uint8_t match,
+                                              uint8_t mask,
+                                              uint32_t timeout_ms,
+                                              BootError error) {
+    QSPI_CommandTypeDef command;
+    QSPI_AutoPollingTypeDef polling;
+    Plat_Status_t status;
 
-    start_tick = Boot_Platform_GetTickMs();
-    while ((status & BOOT_EXTFLASH_STATUS_WIP) != 0U) {
-        error = Boot_ExtFlash_ReadStatus(&status);
-        if (error != BOOT_ERR_NONE) {
-            return error;
-        }
+    Boot_ExtFlash_BuildStatusCommand(&command);
 
-        if ((Boot_Platform_GetTickMs() - start_tick) >= timeout_ms) {
-            return BOOT_ERR_EXTFLASH_READ;
-        }
+    memset(&polling, 0, sizeof(polling));
+    polling.Match           = match;
+    polling.Mask            = mask;
+    polling.MatchMode       = QSPI_MATCH_MODE_AND;
+    polling.StatusBytesSize = 1U;
+    polling.Interval        = BOOT_EXTFLASH_STATUS_POLL_INTERVAL;
+    polling.AutomaticStop   = QSPI_AUTOMATIC_STOP_ENABLE;
 
-        Boot_Platform_FeedWatchdog();
+    status = platform_qspi_auto_polling(&command, &polling, timeout_ms);
+    if (status != PLAT_OK) {
+        LOG_WARN(BOOT_LOG_TAG,
+                 "ExtFlash status poll failed: match=0x%02X mask=0x%02X timeout=%lu status=%ld",
+                 (unsigned int) match,
+                 (unsigned int) mask,
+                 (unsigned long) timeout_ms,
+                 (long) status);
     }
 
-    return BOOT_ERR_NONE;
+    return Boot_ExtFlash_CommandError(error, status);
+}
+
+static BootError Boot_ExtFlash_WaitReady(uint32_t timeout_ms, BootError error) {
+    return Boot_ExtFlash_AutoPollStatus(0U, BOOT_EXTFLASH_STATUS_WIP, timeout_ms, error);
 }
 
 static BootError Boot_ExtFlash_WriteEnable(void) {
@@ -193,7 +193,10 @@ static BootError Boot_ExtFlash_WriteEnable(void) {
         return error;
     }
 
-    return Boot_ExtFlash_WaitReady(BOOT_EXTFLASH_CMD_TIMEOUT_MS);
+    return Boot_ExtFlash_AutoPollStatus(BOOT_EXTFLASH_STATUS_WEL,
+                                        BOOT_EXTFLASH_STATUS_WEL,
+                                        BOOT_EXTFLASH_CMD_TIMEOUT_MS,
+                                        BOOT_ERR_EXTFLASH_WRITE);
 }
 
 static BootError Boot_ExtFlash_EnsureReady(void) {
@@ -315,7 +318,7 @@ BootError Boot_ExtFlash_Write(uint32_t address, const void *data, uint32_t size)
             return error;
         }
 
-        error = Boot_ExtFlash_WaitReady(BOOT_EXTFLASH_WRITE_TIMEOUT_MS);
+        error = Boot_ExtFlash_WaitReady(BOOT_EXTFLASH_WRITE_TIMEOUT_MS, BOOT_ERR_EXTFLASH_WRITE);
         if (error != BOOT_ERR_NONE) {
             return error;
         }
@@ -383,7 +386,7 @@ BootError Boot_ExtFlash_Erase(uint32_t address, uint32_t size) {
             return error;
         }
 
-        error = Boot_ExtFlash_WaitReady(BOOT_EXTFLASH_ERASE_TIMEOUT_MS);
+        error = Boot_ExtFlash_WaitReady(BOOT_EXTFLASH_ERASE_TIMEOUT_MS, BOOT_ERR_EXTFLASH_ERASE);
         if (error != BOOT_ERR_NONE) {
             return error;
         }
