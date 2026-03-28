@@ -1,3 +1,17 @@
 {
-    "cortex-debug.variableUseNaturalFormat": true
+  "cortex-debug.variableUseNaturalFormat": true,
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": true,
+  "cmake.cmakePath": "${env:USERPROFILE}\\tools\\cmake-4.2.3-windows-x86_64\\bin\\cmake.exe",
+  "cmake.configureEnvironment": {
+    "PATH": "${env:USERPROFILE}\\tools\\cmake-4.2.3-windows-x86_64\\bin;${env:USERPROFILE}\\tools\\xpack-arm-none-eabi-gcc-15.2.1-1.1\\bin;${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe;${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe\\xpack-openocd-0.12.0-7\\bin;${env:LOCALAPPDATA}\\Programs\\Python\\Python313;${env:LOCALAPPDATA}\\Programs\\Python\\Python313\\Scripts;C:\\Program Files\\Git\\cmd;${env:PATH}"
+  },
+  "cmake.buildEnvironment": {
+    "PATH": "${env:USERPROFILE}\\tools\\cmake-4.2.3-windows-x86_64\\bin;${env:USERPROFILE}\\tools\\xpack-arm-none-eabi-gcc-15.2.1-1.1\\bin;${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe;${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe\\xpack-openocd-0.12.0-7\\bin;${env:LOCALAPPDATA}\\Programs\\Python\\Python313;${env:LOCALAPPDATA}\\Programs\\Python\\Python313\\Scripts;C:\\Program Files\\Git\\cmd;${env:PATH}"
+  },
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.compileCommands": "${workspaceFolder}/build/Debug/compile_commands.json",
+  "terminal.integrated.env.windows": {
+    "Path": "${env:USERPROFILE}\\tools\\cmake-4.2.3-windows-x86_64\\bin;${env:USERPROFILE}\\tools\\xpack-arm-none-eabi-gcc-15.2.1-1.1\\bin;${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\Ninja-build.Ninja_Microsoft.Winget.Source_8wekyb3d8bbwe;${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe\\xpack-openocd-0.12.0-7\\bin;${env:LOCALAPPDATA}\\Programs\\Python\\Python313;${env:LOCALAPPDATA}\\Programs\\Python\\Python313\\Scripts;C:\\Program Files\\Git\\cmd;${env:Path}"
+  }
 }

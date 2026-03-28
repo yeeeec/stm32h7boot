@@ -1,6 +1,6 @@
 # STM32H7 Bootloader 设计说明
 
-> 本文按当前固定方案整理：Boot 固定放内部 Flash，`bootconfig` 固定放在 Boot 后面的 128 KB 内部 Flash，APP 固定只写入外部 QSPI Flash 的 AB 槽。
+> 本文按当前固定方案整理：Boot 固定放内部 Flash，`bootconfig` 固定放在 Boot 之后的 128 KB 内部 Flash，APP 固定只写入外部 QSPI Flash 的 AB 槽。
 
 ## 1. 固定方案
 
@@ -21,7 +21,7 @@
 | 区域 | 地址范围 | 大小 | 说明 |
 | --- | --- | --- | --- |
 | Boot | `0x08000000 ~ 0x0801FFFF` | 128 KB | Bootloader 本体 |
-| bootconfig | `0x08020000 ~ 0x0803FFFF` | 128 KB | 启动配置、BootInfo、journal 区 |
+| bootconfig | `0x081E0000 ~ 0x081FFFFF` | 128 KB | 启动配置、BootInfo、journal 区 |
 
 说明：
 
@@ -106,7 +106,7 @@ typedef struct __attribute__((packed)) {
 
 `bootconfig` 固定在内部 Flash：
 
-- 基址：`0x08020000`
+- 基址：`0x081E0000`
 - 大小：`128 KB`
 
 建议延续 journal 方式：
@@ -286,7 +286,7 @@ Boot 在尝试跳转前，对目标槽位执行以下校验：
 
 进一步展开就是：
 
-- `bootconfig` 固定放在 Boot 后面的 128 KB：`0x08020000 ~ 0x0803FFFF`
+- `bootconfig` 固定放在 Boot 之后的 128 KB：`0x081E0000 ~ 0x081FFFFF`
 - APP 固定只放外部 Flash：
   - `Slot A = 0x90000000 ~ 0x9007FFFF`
   - `Slot B = 0x90080000 ~ 0x900FFFFF`
