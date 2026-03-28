@@ -12,7 +12,7 @@
 #define BOOT_BOOT_BASE                      0x08000000UL
 #define BOOT_BOOT_SIZE                      (128UL * 1024UL)
 
-#define BOOT_INFO_BASE                      0x08020000UL
+#define BOOT_INFO_BASE                      0x081E0000UL
 #define BOOT_INFO_SIZE                      (128UL * 1024UL)
 
 #define BOOT_EXTFLASH_BASE                  0x90000000UL

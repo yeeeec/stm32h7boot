@@ -58,6 +58,7 @@ typedef struct {
 } BootHandoffInfo;
 
 const BootHandoffInfo *Boot_Handoff_Get(void);
+const BootHandoffInfo *Boot_Handoff_GetPrevious(void);
 const char *Boot_Handoff_StageToString(uint32_t stage);
 const char *Boot_Handoff_FaultToString(uint32_t fault_type);
 
@@ -79,6 +80,8 @@ void Boot_Handoff_LogCurrent(const char *label);
  * App-side integration:
  * Call Boot_Handoff_AppMarkAlive(BOOT_HANDOFF_STAGE_APP_EARLY) as early as possible
  * after reset, then Boot_Handoff_AppMarkAlive(BOOT_HANDOFF_STAGE_APP_MAIN) at main().
+ * Once the new image is proven stable, call Boot_Handoff_AppMarkAlive(BOOT_HANDOFF_STAGE_APP_READY)
+ * and/or Boot_Info_ConfirmRunningImage() to promote the pending slot.
  */
 void Boot_Handoff_AppMarkAlive(BootHandoffStage stage);
 

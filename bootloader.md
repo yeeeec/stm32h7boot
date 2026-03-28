@@ -1,11 +1,11 @@
 # STM32H7 Bootloader 设计说明
 
-> 本文按当前固定方案整理：Boot 固定放内部 Flash，`bootconfig` 固定放在 Boot 之后的 128 KB 内部 Flash，APP 固定只写入外部 QSPI Flash 的 AB 槽。
+> 本文按当前固定方案整理：Boot 固定放内部 Flash，`bootconfig` 固定放在内部 Flash 尾部的 128 KB，APP 固定只写入外部 QSPI Flash 的 AB 槽。
 
 ## 1. 固定方案
 
 - Boot 固定位于内部 Flash 起始地址。
-- `bootconfig` 固定位于 Boot 后面的 128 KB 内部 Flash。
+- `bootconfig` 固定位于内部 Flash 尾部的 128 KB。
 - APP 不再写入内部 Flash。
 - APP 只允许写入外部 QSPI Flash。
 - 外部 QSPI Flash 使用 AB 双槽。
@@ -25,7 +25,7 @@
 
 说明：
 
-- `bootconfig` 就放在 Boot 后面的 128 KB。
+- `bootconfig` 固定放在内部 Flash 尾部的 128 KB：`0x081E0000 ~ 0x081FFFFF`。
 - 内部 Flash 不再放 APP。
 - 内部 Flash `0x08040000` 以后不再作为 APP 升级目标。
 
@@ -245,7 +245,7 @@ Boot 在尝试跳转前，对目标槽位执行以下校验：
 
 ## 11. App 确认机制
 
-新固件从 `pending_slot` 启动成功后，App 需要在确认系统已经稳定运行后主动写确认。确认成功后，`bootconfig` 状态应更新为：
+新固件从 `pending_slot` 启动成功后，App 需要在确认系统已经稳定运行后主动写确认。推荐直接调用 `Boot_Info_ConfirmRunningImage()`；若仅接入 handoff mailbox，则至少要上报 `BOOT_HANDOFF_STAGE_APP_READY`，供 Boot 在下一次启动时完成转正。确认成功后，`bootconfig` 状态应更新为：
 
 - `active_slot = 当前运行槽位`
 - `pending_slot = NONE`
@@ -286,7 +286,7 @@ Boot 在尝试跳转前，对目标槽位执行以下校验：
 
 进一步展开就是：
 
-- `bootconfig` 固定放在 Boot 之后的 128 KB：`0x081E0000 ~ 0x081FFFFF`
+- `bootconfig` 固定放在内部 Flash 尾部的 128 KB：`0x081E0000 ~ 0x081FFFFF`
 - APP 固定只放外部 Flash：
   - `Slot A = 0x90000000 ~ 0x9007FFFF`
   - `Slot B = 0x90080000 ~ 0x900FFFFF`

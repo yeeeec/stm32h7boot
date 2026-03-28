@@ -2,80 +2,26 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug STM32H743 (ST-Link / OpenOCD)",
+      "name": "Debug STM32H743 (pyOCD)",
       "type": "cortex-debug",
       "request": "launch",
-      "servertype": "openocd",
-      "serverpath": "${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe\\xpack-openocd-0.12.0-7\\bin\\openocd.exe",
-      "searchDir": [
-        "${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe\\xpack-openocd-0.12.0-7\\scripts"
-      ],
-      "configFiles": [
-        "interface/stlink.cfg",
-        "target/stm32h7x.cfg"
-      ],
-      "device": "STM32H743XI",
+      "servertype": "pyocd",
+      "serverpath": "${env:LOCALAPPDATA}\\Programs\\Python\\Python313\\Scripts\\pyocd.exe",
       "cwd": "${workspaceFolder}",
-      "executable": "${workspaceFolder}/build/Debug/stm32h7boot.elf",
+      "executable": "${command:cmake.launchTargetPath}",
       "gdbPath": "${env:USERPROFILE}\\tools\\xpack-arm-none-eabi-gcc-15.2.1-1.1\\bin\\arm-none-eabi-gdb.exe",
       "preLaunchTask": "Build Debug",
-      "runToEntryPoint": "main",
-      "showDevDebugOutput": "raw",
-      "postLaunchCommands": [
-        "monitor reset halt"
+      "device": "STM32H743XIHx",
+      "targetId": "stm32h743xx",
+      "serverArgs": [
+        "--probe",
+        "DA4160F4A34411D7",
+        "--connect",
+        "attach"
       ],
-      "liveWatch": {
-        "enabled": true,
-        "samplesPerSecond": 4
-      },
-      "rttConfig": {
-        "enabled": true,
-        "address": "auto",
-        "rtt_start_retry": 1000,
-        "decoders": [
-          {
-            "port": 0,
-            "type": "console",
-            "label": "RTT Channel 0",
-            "timestamp": true
-          }
-        ]
-      }
-    },
-    {
-      "name": "Debug STM32H743 (J-Link, requires SEGGER package)",
-      "type": "cortex-debug",
-      "request": "launch",
-      "servertype": "jlink",
-      "serverpath": "C:\\Program Files\\SEGGER\\JLink\\JLinkGDBServerCL.exe",
-      "device": "STM32H743XI",
-      "interface": "swd",
-      "cwd": "${workspaceFolder}",
-      "executable": "${workspaceFolder}/build/Debug/stm32h7boot.elf",
-      "gdbPath": "${env:USERPROFILE}\\tools\\xpack-arm-none-eabi-gcc-15.2.1-1.1\\bin\\arm-none-eabi-gdb.exe",
-      "preLaunchTask": "Build Debug",
+      "overrideGDBServerStartedRegex": "GDB server listening on port",
       "runToEntryPoint": "main",
-      "showDevDebugOutput": "raw",
-      "postLaunchCommands": [
-        "monitor reset halt"
-      ],
-      "liveWatch": {
-        "enabled": true,
-        "samplesPerSecond": 4
-      },
-      "rttConfig": {
-        "enabled": true,
-        "address": "auto",
-        "rtt_start_retry": 1000,
-        "decoders": [
-          {
-            "port": 0,
-            "type": "console",
-            "label": "RTT Channel 0",
-            "timestamp": true
-          }
-        ]
-      }
+      "showDevDebugOutput": "raw"
     }
   ]
 }

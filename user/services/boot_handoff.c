@@ -8,6 +8,7 @@
 
 static BootHandoffInfo g_boot_handoff
     __attribute__((section(".boot_keep.handoff"), aligned(32), used));
+static BootHandoffInfo g_boot_previous_handoff;
 
 static void Boot_Handoff_FlushCache(void) {
 #if defined(SCB_CCR_DC_Msk)
@@ -58,6 +59,11 @@ static void Boot_Handoff_LogSnapshot(const char *label, const BootHandoffInfo *i
 
 const BootHandoffInfo *Boot_Handoff_Get(void) {
     return &g_boot_handoff;
+}
+
+const BootHandoffInfo *Boot_Handoff_GetPrevious(void) {
+    return (Boot_Handoff_IsValid(&g_boot_previous_handoff) != false) ? &g_boot_previous_handoff
+                                                                      : NULL;
 }
 
 const char *Boot_Handoff_StageToString(uint32_t stage) {
@@ -112,7 +118,9 @@ void Boot_Handoff_InitBoot(void) {
     uint32_t next_session = 1U;
 
     memcpy(&previous, &g_boot_handoff, sizeof(previous));
+    memset(&g_boot_previous_handoff, 0, sizeof(g_boot_previous_handoff));
     if (Boot_Handoff_IsValid(&previous)) {
+        g_boot_previous_handoff = previous;
         next_session = previous.session + 1U;
 
         if ((previous.flags & BOOT_HANDOFF_FLAG_APP_CONFIRMED) != 0U) {

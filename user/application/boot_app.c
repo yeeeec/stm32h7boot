@@ -101,6 +101,86 @@ static uint32_t Boot_App_GetSlotExpectedCrc(uint8_t slot) {
     return 0U;
 }
 
+static uint8_t Boot_App_SlotFromBase(uint32_t app_base) {
+    const BootSimpleFlashRegion *slot_region;
+
+    slot_region = Boot_SimpleFlash_GetSlotRegion(SLOT_A);
+    if ((slot_region != NULL) && (slot_region->base == app_base)) {
+        return SLOT_A;
+    }
+
+    slot_region = Boot_SimpleFlash_GetSlotRegion(SLOT_B);
+    if ((slot_region != NULL) && (slot_region->base == app_base)) {
+        return SLOT_B;
+    }
+
+    return SLOT_NONE;
+}
+
+static BootError Boot_App_FinalizePendingAsActive(const char *reason) {
+    uint8_t promoted_slot = g_boot_app.boot_info.pending_slot;
+
+    if (Boot_Info_IsSlotValueValid(promoted_slot) == false) {
+        return BOOT_ERR_IMAGE_SLOT;
+    }
+
+    g_boot_app.boot_info.active_slot     = promoted_slot;
+    g_boot_app.boot_info.pending_slot    = SLOT_NONE;
+    g_boot_app.boot_info.confirmed       = BOOT_CONFIRMED;
+    g_boot_app.boot_info.boot_count      = 0U;
+    g_boot_app.boot_info.upgrade_state   = UPGRADE_SUCCESS;
+    g_boot_app.boot_info.rollback_reason = ROLLBACK_NONE;
+    return Boot_App_SaveBootInfo(reason);
+}
+
+static void Boot_App_TryPromoteConfirmedPending(void) {
+    const BootHandoffInfo *previous_handoff;
+    BootError error;
+    uint8_t confirmed_slot;
+
+    if (g_boot_app.boot_info.pending_slot == SLOT_NONE) {
+        return;
+    }
+
+    previous_handoff = Boot_Handoff_GetPrevious();
+    if (previous_handoff == NULL) {
+        return;
+    }
+
+    if ((previous_handoff->flags & BOOT_HANDOFF_FLAG_APP_CONFIRMED) == 0U) {
+        return;
+    }
+
+    if (previous_handoff->stage != BOOT_HANDOFF_STAGE_APP_READY) {
+        return;
+    }
+
+    confirmed_slot = Boot_App_SlotFromBase(previous_handoff->app_base);
+    if (confirmed_slot != g_boot_app.boot_info.pending_slot) {
+        LOG_WARN(BOOT_LOG_TAG,
+                 "Ignore app-ready handoff for slot=%s while pending=%s",
+                 Boot_Info_SlotToString(confirmed_slot),
+                 Boot_Info_SlotToString(g_boot_app.boot_info.pending_slot));
+        return;
+    }
+
+    if (Boot_SimpleJump_IsSlotValidWithCrc(
+            confirmed_slot, Boot_App_GetSlotExpectedCrc(confirmed_slot)) == false) {
+        LOG_WARN(BOOT_LOG_TAG, "App-ready handoff ignored, slot=%s no longer validates",
+                 Boot_Info_SlotToString(confirmed_slot));
+        return;
+    }
+
+    error = Boot_App_FinalizePendingAsActive("promote confirmed pending");
+    if (error == BOOT_ERR_NONE) {
+        LOG_INFO(BOOT_LOG_TAG, "Pending slot=%s promoted to active from app-ready handoff",
+                 Boot_Info_SlotToString(confirmed_slot));
+    } else {
+        LOG_WARN(BOOT_LOG_TAG, "Failed to promote confirmed pending slot=%s: %s",
+                 Boot_Info_SlotToString(confirmed_slot), Boot_ErrorToString(error));
+    }
+}
+
 static uint8_t Boot_App_FindFirstBootableSlot(void) {
     if (Boot_SimpleJump_IsSlotValid(SLOT_A) != false) {
         return SLOT_A;
@@ -182,6 +262,8 @@ static BootError Boot_App_ResolveStartupPlan(void) {
     if (error != BOOT_ERR_NONE) {
         return error;
     }
+
+    Boot_App_TryPromoteConfirmedPending();
 
     active_slot = g_boot_app.boot_info.active_slot;
     other_slot  = Boot_App_GetOtherSlot(active_slot);
