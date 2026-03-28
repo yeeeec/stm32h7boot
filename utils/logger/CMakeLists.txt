@@ -2,6 +2,8 @@ option(LOG_ENABLE "Enable logging module" ON)
 option(LOG_BACKEND_RTT "Enable RTT log backend" OFF)
 option(LOG_BACKEND_UART "Enable UART log backend" ON)
 option(LOG_USE_RTOS "Enable RTOS-aware logging mode" OFF)
+set(LOG_BACKEND_UART_ID "PLAT_UART_DISPLAY" CACHE STRING
+    "Platform UART ID used by the UART log backend")
 
 if(NOT LOG_ENABLE)
   message(FATAL_ERROR "LOG_ENABLE=OFF is not supported by the current application.")
@@ -50,5 +52,8 @@ if(LOG_BACKEND_RTT)
 endif()
 
 if(LOG_BACKEND_UART)
-  message(FATAL_ERROR "LOG_BACKEND_UART is not wired in the new framework yet.")
+  target_sources(app_logger PRIVATE "${CMAKE_CURRENT_LIST_DIR}/src/log_backend_uart.c")
+  target_include_directories(app_logger PRIVATE "${CMAKE_SOURCE_DIR}/platform/include")
+  target_link_libraries(app_logger PUBLIC lwrb)
+  target_compile_definitions(app_logger PUBLIC PL_LOG_UART_ID=${LOG_BACKEND_UART_ID})
 endif()

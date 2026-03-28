@@ -46,6 +46,7 @@ static uint32_t logging_get_tick_value(void) {
  * @return Color escape string; empty string if level is unknown.
  */
 
+#if LOG_BACKEND_RTT
 static const char *logging_get_level_color(LogLevel_t level) {
     switch (level) {
         case LOG_LVL_ERROR:
@@ -60,6 +61,7 @@ static const char *logging_get_level_color(LogLevel_t level) {
             return "";
     }
 }
+#endif
 
 static void logging_format_time(uint32_t tick_ms, char *out, size_t out_size) {
     uint32_t ms   = tick_ms % 1000;
@@ -90,9 +92,25 @@ void logging_init_module(void) {
  * @param len Number of bytes to output.
  */
 
-static void logging_output_all_backends(const char *buf, uint16_t len) {
+static void logging_output_all_backends(LogLevel_t level, const char *buf, uint16_t len) {
 #if LOG_BACKEND_RTT
-    log_backend_rtt_output(buf, len);
+    const char *color = logging_get_level_color(level);
+
+    if (color[0] != '\0') {
+        char color_buf[LOG_FMT_BUF_SIZE + 32];
+        int color_len = snprintf(color_buf, sizeof(color_buf), "%s%s%s", color, buf, LOGGING_CLR_RESET);
+
+        if (color_len > 0) {
+            if (color_len > (int) sizeof(color_buf)) {
+                color_len = (int) sizeof(color_buf);
+            }
+            log_backend_rtt_output(color_buf, (uint16_t) color_len);
+        }
+    } else {
+        log_backend_rtt_output(buf, len);
+    }
+#else
+    (void) level;
 #endif
 #if LOG_BACKEND_UART
     log_backend_uart_output(buf, len);
@@ -112,13 +130,12 @@ void logging_write_message(LogLevel_t level, const char *tag, const char *fmt, .
     if ((int) level > (int) LOG_LEVEL)
         return;
 
-    const char *color = logging_get_level_color(level);
     uint32_t tick     = logging_get_tick_value();
     char time_str[16]; // hh:mm:ss:ms
 
     logging_format_time(tick, time_str, sizeof(time_str));
 
-    len += snprintf(buf, sizeof(buf), "%s[%s][%s] ", color, time_str, tag ? tag : "SYS");
+    len += snprintf(buf, sizeof(buf), "[%s][%s] ", time_str, tag ? tag : "SYS");
     if (len < 0)
         return;
     if (len >= (int) sizeof(buf))
@@ -134,15 +151,14 @@ void logging_write_message(LogLevel_t level, const char *tag, const char *fmt, .
     if (len > (int) sizeof(buf) - 8)
         len = (int) sizeof(buf) - 8;
 
-    if (color[0] != '\0') {
-        len += snprintf(buf + len, sizeof(buf) - (size_t) len, "%s\r\n", LOGGING_CLR_RESET);
-    } else {
-        len += snprintf(buf + len, sizeof(buf) - (size_t) len, "\r\n");
-    }
+    len += snprintf(buf + len, sizeof(buf) - (size_t) len, "\r\n");
 
     if (len < 0)
         return;
-    logging_output_all_backends(buf, (uint16_t) len);
+    if (len > (int) sizeof(buf)) {
+        len = (int) sizeof(buf);
+    }
+    logging_output_all_backends(level, buf, (uint16_t) len);
 }
 
 #else /* LOG_ENABLE == 0 */

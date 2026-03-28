@@ -6,17 +6,22 @@
 #include "platform/uart.h"
 
 #ifndef PL_LOG_UART_ID
-#define PL_LOG_UART_ID 0
+#define PL_LOG_UART_ID PLAT_UART_DISPLAY
 #endif
 
 void log_backend_uart_init(void) {
-    /* Optional: init banner */
+    /* UART is expected to be initialized by the platform/CubeMX startup path. */
+    (void) platform_uart_init((Plat_UART_ID_t) PL_LOG_UART_ID, 0U);
 }
 
 void log_backend_uart_output(const char *data, uint16_t len) {
-    if (!data || len == 0) return;
-    while (platform_uart_is_tx_busy(PL_LOG_UART_ID)) {}
-    platform_uart_send(PL_LOG_UART_ID, (const uint8_t*)data, len);
+    if ((data == NULL) || (len == 0U)) {
+        return;
+    }
+
+    (void) platform_uart_send_data((Plat_UART_ID_t) PL_LOG_UART_ID,
+                                   (const uint8_t *) data,
+                                   len);
 }
 
 #else

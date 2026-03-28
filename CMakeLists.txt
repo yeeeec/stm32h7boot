@@ -44,6 +44,10 @@ add_subdirectory(utils)
 add_subdirectory(platform)
 add_subdirectory(user)
 
+if(TARGET app_logger AND TARGET fw::platform)
+    target_link_libraries(app_logger PUBLIC fw::platform)
+endif()
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths

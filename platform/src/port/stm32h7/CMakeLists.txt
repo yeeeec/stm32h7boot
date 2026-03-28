@@ -9,6 +9,7 @@ target_sources(
     "${CMAKE_CURRENT_LIST_DIR}/fmc_io_backend.c"
     "${CMAKE_CURRENT_LIST_DIR}/ltdc_backend.c"
     "${CMAKE_CURRENT_LIST_DIR}/qspi_backend.c"
+    "${CMAKE_CURRENT_LIST_DIR}/uart_backend.c"
 )
 
 target_include_directories(
@@ -21,6 +22,7 @@ target_include_directories(
 target_link_libraries(
   platform_port_stm32h7
   PRIVATE
+    lwrb
     stm32cubemx
 )
 
