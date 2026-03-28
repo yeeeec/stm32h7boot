@@ -1,6 +1,6 @@
 option(LOG_ENABLE "Enable logging module" ON)
-option(LOG_BACKEND_RTT "Enable RTT log backend" ON)
-option(LOG_BACKEND_UART "Enable UART log backend" OFF)
+option(LOG_BACKEND_RTT "Enable RTT log backend" OFF)
+option(LOG_BACKEND_UART "Enable UART log backend" ON)
 option(LOG_USE_RTOS "Enable RTOS-aware logging mode" OFF)
 
 if(NOT LOG_ENABLE)
