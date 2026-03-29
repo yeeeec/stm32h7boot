@@ -360,6 +360,20 @@ void Boot_Platform_PrepareForJump(void)
   SysTick->CTRL = 0U;
   SysTick->LOAD = 0U;
   SysTick->VAL = 0U;
+  SCB->ICSR = SCB_ICSR_PENDSTCLR_Msk | SCB_ICSR_PENDSVCLR_Msk;
+
+#if defined(SCB_CCR_DC_Msk)
+  if ((SCB->CCR & SCB_CCR_DC_Msk) != 0U)
+  {
+    SCB_DisableDCache();
+  }
+#endif
+#if defined(SCB_CCR_IC_Msk)
+  if ((SCB->CCR & SCB_CCR_IC_Msk) != 0U)
+  {
+    SCB_DisableICache();
+  }
+#endif
 
   __DSB();
   __ISB();

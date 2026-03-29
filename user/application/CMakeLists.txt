@@ -1,6 +1,12 @@
+set(USER_APPLICATION_SOURCE "${CMAKE_CURRENT_LIST_DIR}/boot_app.c")
+
+if(BOOT_VARIANT STREQUAL "test")
+  set(USER_APPLICATION_SOURCE "${CMAKE_CURRENT_LIST_DIR}/boot_app_test.c")
+endif()
+
 add_library(
   user_application STATIC
-  "${CMAKE_CURRENT_LIST_DIR}/boot_app.c"
+  "${USER_APPLICATION_SOURCE}"
 )
 add_library(
   fw::user_application ALIAS user_application

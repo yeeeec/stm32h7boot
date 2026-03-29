@@ -18,6 +18,14 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE "Debug")
 endif()
 
+# Select the boot variant
+set(BOOT_VARIANT "prod" CACHE STRING "Boot variant to build (prod or test)")
+set_property(CACHE BOOT_VARIANT PROPERTY STRINGS prod test)
+string(TOLOWER "${BOOT_VARIANT}" BOOT_VARIANT)
+if(NOT (BOOT_VARIANT STREQUAL "prod" OR BOOT_VARIANT STREQUAL "test"))
+    message(FATAL_ERROR "Unsupported BOOT_VARIANT='${BOOT_VARIANT}', expected 'prod' or 'test'")
+endif()
+
 # Set the project name
 set(CMAKE_PROJECT_NAME stm32h7boot)
 
@@ -30,12 +38,22 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 # Core project settings
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
+message("Boot variant: " ${BOOT_VARIANT})
+
+if(BOOT_VARIANT STREQUAL "prod")
+    add_compile_definitions(BOOT_VARIANT_PROD=1 BOOT_VARIANT_TEST=0)
+else()
+    add_compile_definitions(BOOT_VARIANT_PROD=0 BOOT_VARIANT_TEST=1)
+endif()
 
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 
 # Create an executable object type
 add_executable(${CMAKE_PROJECT_NAME})
+if(BOOT_VARIANT STREQUAL "test")
+    set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME "${CMAKE_PROJECT_NAME}_test")
+endif()
 
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)

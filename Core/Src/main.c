@@ -35,6 +35,10 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+#ifndef BOOT_VARIANT_TEST
+#define BOOT_VARIANT_TEST 0
+#endif
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -128,15 +132,19 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+#if (BOOT_VARIANT_TEST == 0)
   MX_FMC_Init();
   MX_CRC_Init();
   MX_TIM1_Init();
   // MX_LTDC_Init();
   // MX_DMA2D_Init();
+#endif
   MX_QUADSPI_Init();
+#if (BOOT_VARIANT_TEST == 0)
   MX_FATFS_Init();
   MX_USB_HOST_Init();
   MX_USART1_UART_Init();
+#endif
   /* USER CODE BEGIN 2 */
   Boot_App_Init();
 
@@ -147,7 +155,9 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+#if (BOOT_VARIANT_TEST == 0)
     MX_USB_HOST_Process();
+#endif
 
     /* USER CODE BEGIN 3 */
     Boot_App_Process();

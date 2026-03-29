@@ -14,28 +14,46 @@
             "name": "Debug",
             "inherits": "default",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Debug"
+                "CMAKE_BUILD_TYPE": "Debug",
+                "BOOT_VARIANT": "prod"
             }
         },
         {
             "name": "RelWithDebInfo",
             "inherits": "default",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "RelWithDebInfo"
+                "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+                "BOOT_VARIANT": "prod"
             }
         },
         {
             "name": "Release",
             "inherits": "default",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "Release"
+                "CMAKE_BUILD_TYPE": "Release",
+                "BOOT_VARIANT": "prod"
             }
         },
         {
             "name": "MinSizeRel",
             "inherits": "default",
             "cacheVariables": {
-                "CMAKE_BUILD_TYPE": "MinSizeRel"
+                "CMAKE_BUILD_TYPE": "MinSizeRel",
+                "BOOT_VARIANT": "prod"
+            }
+        },
+        {
+            "name": "TestDebug",
+            "inherits": "Debug",
+            "cacheVariables": {
+                "BOOT_VARIANT": "test"
+            }
+        },
+        {
+            "name": "TestRelease",
+            "inherits": "Release",
+            "cacheVariables": {
+                "BOOT_VARIANT": "test"
             }
         }
     ],
@@ -55,6 +73,14 @@
         {
             "name": "MinSizeRel",
             "configurePreset": "MinSizeRel"
+        },
+        {
+            "name": "TestDebug",
+            "configurePreset": "TestDebug"
+        },
+        {
+            "name": "TestRelease",
+            "configurePreset": "TestRelease"
         }
     ]
 }

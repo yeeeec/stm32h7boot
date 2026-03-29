@@ -277,6 +277,30 @@ static BootError Boot_App_MarkBackupReadyForInstall(const BootAppImageInfo *imag
     return error;
 }
 
+static BootError Boot_App_MarkDirectInstallReady(const BootAppImageInfo *image) {
+    s_BootInfo previous_info = g_boot_app.boot_info;
+    BootError error;
+
+    if (image == NULL) {
+        return BOOT_ERR_INVALID_ARGUMENT;
+    }
+
+    Boot_App_SetPendingMetadata(image->size, image->crc32);
+    g_boot_app.boot_info.active_slot     = SLOT_A;
+    g_boot_app.boot_info.pending_slot    = SLOT_A;
+    g_boot_app.boot_info.confirmed       = BOOT_NOT_CONFIRMED;
+    g_boot_app.boot_info.boot_count      = 0U;
+    g_boot_app.boot_info.upgrade_state   = UPGRADE_READY;
+    g_boot_app.boot_info.rollback_reason = ROLLBACK_NONE;
+
+    error = Boot_App_SaveBootInfo("direct install ready");
+    if (error != BOOT_ERR_NONE) {
+        g_boot_app.boot_info = previous_info;
+    }
+
+    return error;
+}
+
 static BootError Boot_App_MarkPendingTesting(void) {
     if ((g_boot_app.boot_info.pending_slot != SLOT_A) || (Boot_App_HasPendingMetadata() == false)) {
         return BOOT_ERR_IMAGE_SLOT;
@@ -726,52 +750,65 @@ void Boot_App_Process(void) {
         case BOOT_APP_STATE_UPGRADE: {
             BootError backup_error;
             BootError restore_error;
+            uint8_t backup_ready = 0U;
 
-            if (Boot_App_HasSlotMetadata(SLOT_A) == false) {
-                LOG_WARN(BOOT_LOG_TAG, "Upgrade aborted: slot=A metadata missing, cannot create rollback backup");
-                Boot_App_BlockRecoveryRetry(BOOT_ERR_CTRL_CORRUPTED);
-                g_boot_app.state =
-                    (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
-                return;
+            if (Boot_App_HasSlotMetadata(SLOT_A) != false) {
+                backup_error = Boot_App_BackupCurrentAToB();
+                if (backup_error == BOOT_ERR_NONE) {
+                    error = Boot_App_MarkBackupReadyForInstall(&g_boot_app.image_info);
+                    if (error != BOOT_ERR_NONE) {
+                        LOG_WARN(BOOT_LOG_TAG, "Install state save failed, keep current slot=A: %s",
+                                 Boot_ErrorToString(error));
+                        g_boot_app.state = BOOT_APP_STATE_JUMP;
+                        return;
+                    }
+
+                    backup_ready = 1U;
+                } else {
+                    LOG_WARN(BOOT_LOG_TAG,
+                             "Backup slot=A to slot=B failed, direct overwrite will be used: %s",
+                             Boot_ErrorToString(backup_error));
+                }
+            } else {
+                LOG_WARN(BOOT_LOG_TAG,
+                         "Slot=A metadata missing, direct overwrite will be used without a fresh rollback backup");
             }
 
-            backup_error = Boot_App_BackupCurrentAToB();
-            if (backup_error != BOOT_ERR_NONE) {
-                LOG_WARN(BOOT_LOG_TAG, "Backup slot=A to slot=B failed: %s",
-                         Boot_ErrorToString(backup_error));
-                Boot_App_BlockRecoveryRetry(backup_error);
-                g_boot_app.state =
-                    (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
-                return;
-            }
-
-            error = Boot_App_MarkBackupReadyForInstall(&g_boot_app.image_info);
-            if (error != BOOT_ERR_NONE) {
-                LOG_WARN(BOOT_LOG_TAG, "Install state save failed, keep current slot=A: %s",
-                         Boot_ErrorToString(error));
-                g_boot_app.state = BOOT_APP_STATE_JUMP;
-                return;
+            if (backup_ready == 0U) {
+                error = Boot_App_MarkDirectInstallReady(&g_boot_app.image_info);
+                if (error != BOOT_ERR_NONE) {
+                    LOG_WARN(BOOT_LOG_TAG, "Direct install state save failed: %s",
+                             Boot_ErrorToString(error));
+                    Boot_App_BlockRecoveryRetry(error);
+                    g_boot_app.state =
+                        (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
+                    return;
+                }
             }
 
             error = Boot_SimpleUpgrade_Run(&g_boot_app.image_info, SLOT_A);
             if (error != BOOT_ERR_NONE) {
                 LOG_WARN(BOOT_LOG_TAG, "Upgrade write to slot=A failed: %s",
                          Boot_ErrorToString(error));
-                restore_error =
-                    Boot_App_RestoreBackupToA(ROLLBACK_CRC_ERROR, "rollback after upgrade failure");
-                if (restore_error != BOOT_ERR_NONE) {
+
+                if (Boot_App_IsBackupSlotBValid() != false) {
+                    restore_error =
+                        Boot_App_RestoreBackupToA(ROLLBACK_CRC_ERROR, "rollback after upgrade failure");
+                    if (restore_error == BOOT_ERR_NONE) {
+                        Boot_App_ClearRecoveryRetryBlock("rollback restored");
+                        g_boot_app.state = BOOT_APP_STATE_JUMP;
+                        return;
+                    }
+
                     LOG_WARN(BOOT_LOG_TAG, "Rollback restore from slot=B failed: %s",
                              Boot_ErrorToString(restore_error));
-                    g_boot_app.last_error = restore_error;
-                    Boot_Handoff_SetError((uint32_t)restore_error);
-                    Boot_App_BlockRecoveryRetry(restore_error);
-                    g_boot_app.state =
-                        (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
-                    return;
                 }
 
-                Boot_App_ClearRecoveryRetryBlock("rollback restored");
-                g_boot_app.state = BOOT_APP_STATE_JUMP;
+                g_boot_app.last_error = error;
+                Boot_Handoff_SetError((uint32_t)error);
+                Boot_App_BlockRecoveryRetry(error);
+                g_boot_app.state =
+                    (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
                 return;
             }
 
@@ -784,7 +821,11 @@ void Boot_App_Process(void) {
 
             g_boot_app.allow_upgrade_scan = 0U;
             g_boot_app.jump_slot          = SLOT_A;
-            LOG_INFO(BOOT_LOG_TAG, "Upgrade written to slot=A, rollback backup preserved in slot=B");
+            if (backup_ready != 0U) {
+                LOG_INFO(BOOT_LOG_TAG, "Upgrade written to slot=A, rollback backup preserved in slot=B");
+            } else {
+                LOG_INFO(BOOT_LOG_TAG, "Upgrade written to slot=A without creating a fresh rollback backup");
+            }
             g_boot_app.state = BOOT_APP_STATE_JUMP;
             return;
         }

@@ -342,6 +342,10 @@ void HAL_QSPI_MspInit(QSPI_HandleTypeDef* hqspi)
 
     /* Peripheral clock enable */
     __HAL_RCC_QSPI_CLK_ENABLE();
+    __HAL_RCC_QSPI_FORCE_RESET();
+    __DSB();
+    __HAL_RCC_QSPI_RELEASE_RESET();
+    __DSB();
 
     __HAL_RCC_GPIOG_CLK_ENABLE();
     __HAL_RCC_GPIOF_CLK_ENABLE();

@@ -11,6 +11,42 @@
 
 typedef void (*BootSimpleEntryPoint)(void);
 
+static BootError Boot_SimpleJump_ReadVectorAtBase(uint32_t app_base,
+                                                  uint32_t *stack_pointer,
+                                                  uint32_t *reset_handler) {
+    BootError error;
+
+    if ((stack_pointer == NULL) || (reset_handler == NULL)) {
+        return BOOT_ERR_INVALID_ARGUMENT;
+    }
+
+    error = Boot_SimpleFlash_Read(app_base, stack_pointer, sizeof(*stack_pointer));
+    if (error != BOOT_ERR_NONE) {
+        return error;
+    }
+
+    return Boot_SimpleFlash_Read(app_base + sizeof(*stack_pointer), reset_handler,
+                                 sizeof(*reset_handler));
+}
+
+static void Boot_SimpleJump_EnterApp(uint32_t app_base,
+                                     uint32_t stack_pointer,
+                                     uint32_t reset_handler) {
+    Boot_Platform_PrepareForJump();
+
+    SCB->VTOR = app_base;
+    __set_MSP(stack_pointer);
+    __set_PSP(0U);
+    __set_CONTROL(0U);
+    __set_BASEPRI(0U);
+    __set_FAULTMASK(0U);
+    __enable_irq();
+    __DSB();
+    __ISB();
+
+    ((BootSimpleEntryPoint)reset_handler)();
+}
+
 static bool Boot_SimpleJump_IsStackInRange(uint32_t value, uint32_t base, uint32_t size) {
     uint32_t end_address = base + size;
     return ((value & 0x7U) == 0U) && (value >= base) && (value <= end_address);
@@ -59,19 +95,11 @@ static bool Boot_SimpleJump_IsVectorValid(uint32_t stack_pointer,
 static BootError Boot_SimpleJump_ReadVector(const BootSimpleFlashRegion *region,
                                             uint32_t *stack_pointer,
                                             uint32_t *reset_handler) {
-    BootError error;
-
     if ((region == NULL) || (stack_pointer == NULL) || (reset_handler == NULL)) {
         return BOOT_ERR_INVALID_ARGUMENT;
     }
 
-    error = Boot_SimpleFlash_Read(region->base, stack_pointer, sizeof(*stack_pointer));
-    if (error != BOOT_ERR_NONE) {
-        return error;
-    }
-
-    return Boot_SimpleFlash_Read(region->base + sizeof(*stack_pointer), reset_handler,
-                                 sizeof(*reset_handler));
+    return Boot_SimpleJump_ReadVectorAtBase(region->base, stack_pointer, reset_handler);
 }
 
 static BootError Boot_SimpleJump_ComputeSlotCrc(const BootSimpleFlashRegion *region,
@@ -183,6 +211,26 @@ bool Boot_SimpleJump_IsSlotValidWithMetadata(uint8_t slot, uint32_t expected_siz
     return (Boot_SimpleJump_ValidateSlot(slot, expected_size, expected_crc) == BOOT_ERR_NONE);
 }
 
+BootError Boot_SimpleJump_ToAddressUnchecked(uint32_t app_base) {
+    uint32_t stack_pointer = 0U;
+    uint32_t reset_handler = 0U;
+    BootError error;
+
+    error = Boot_SimpleJump_ReadVectorAtBase(app_base, &stack_pointer, &reset_handler);
+    if (error != BOOT_ERR_NONE) {
+        return error;
+    }
+
+    if (Boot_ExtFlash_IsRangeValid(app_base, sizeof(uint32_t)) != false) {
+        if (Boot_ExtFlash_Init() != BOOT_ERR_NONE) {
+            return BOOT_ERR_EXTFLASH_READ;
+        }
+    }
+
+    Boot_SimpleJump_EnterApp(app_base, stack_pointer, reset_handler);
+    return BOOT_ERR_JUMP_FAILED;
+}
+
 BootError Boot_SimpleJump_ToSlot(uint8_t slot) {
     const BootSimpleFlashRegion *region = Boot_SimpleFlash_GetSlotRegion(slot);
     uint32_t stack_pointer = 0U;
@@ -214,16 +262,7 @@ BootError Boot_SimpleJump_ToSlot(uint8_t slot) {
     LOG_INFO(BOOT_LOG_TAG, "Jumping to app slot=%s", Boot_Info_SlotToString(slot));
     Boot_Handoff_SetStage(BOOT_HANDOFF_STAGE_JUMPING);
 
-    Boot_Platform_PrepareForJump();
-
-    SCB->VTOR = region->base;
-    __set_MSP(stack_pointer);
-    __set_PSP(0U);
-    __set_CONTROL(0U);
-    __DSB();
-    __ISB();
-
-    ((BootSimpleEntryPoint)reset_handler)();
+    Boot_SimpleJump_EnterApp(region->base, stack_pointer, reset_handler);
     return BOOT_ERR_JUMP_FAILED;
 }
 
