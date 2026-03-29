@@ -60,6 +60,8 @@ typedef struct
     uint32_t app_b_size;
     uint32_t app_a_crc;
     uint32_t app_b_crc;
+    uint32_t pending_size;
+    uint32_t pending_crc;
     uint32_t last_reset_reason;
     uint32_t seq;
     uint32_t crc;

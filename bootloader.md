@@ -8,8 +8,8 @@
 - `bootconfig` 固定位于内部 Flash 尾部的 128 KB。
 - APP 不再写入内部 Flash。
 - APP 只允许写入外部 QSPI Flash。
-- 外部 QSPI Flash 使用 AB 双槽。
-- U 盘升级时始终写 inactive slot。
+- 外部 QSPI Flash 使用 `A` 运行槽 + `B` 回滚备份槽。
+- U 盘升级时先执行 `A -> B` 备份，再直接改写 `A`。
 - 上电未升级时，先读取 `bootconfig`，再校验目标槽位镜像；CRC 不匹配则不跳转。
 
 ## 2. Flash 布局
@@ -31,19 +31,20 @@
 
 ### 2.2 外部 QSPI Flash
 
-APP 固定存放在外部 QSPI Flash，采用 AB 双槽：
+APP 固定存放在外部 QSPI Flash，采用 A 运行槽 + B 回滚备份槽：
 
 | 区域 | 地址范围 | 大小 | 说明 |
 | --- | --- | --- | --- |
 | APP 总区 | `0x90000000 ~ 0x900FFFFF` | 1 MB | 固定 APP 区 |
-| Slot A | `0x90000000 ~ 0x9007FFFF` | 512 KB | APP1 |
-| Slot B | `0x90080000 ~ 0x900FFFFF` | 512 KB | APP2 |
+| Slot A | `0x90000000 ~ 0x9007FFFF` | 512 KB | 唯一运行槽 |
+| Slot B | `0x90080000 ~ 0x900FFFFF` | 512 KB | 回滚备份槽 |
 
 结论：
 
-- APP 只在这两个外部槽位中切换。
+- Boot 永远只从 `Slot A` 跳转。
+- `Slot B` 只用于保存 `Slot A` 的回滚备份，不直接启动。
 - Boot 不再根据介质类型做分流。
-- 所有升级包最终都只会落到外部 Flash 的 `Slot A` 或 `Slot B`。
+- 新升级包在安装时直接写 `Slot A`，并要求任意时刻 `A/B` 至少有一个完整镜像。
 
 ## 3. `app.bin` 文件格式
 
@@ -79,22 +80,26 @@ typedef struct __attribute__((packed)) {
 
 ## 4. bootconfig 需要保存的信息
 
-由于 APP 位置已经固定为外部 Flash，因此 `bootconfig` 不再需要保存介质类型或 `app_region_base`。建议只保留与 AB 槽管理直接相关的信息：
+由于 APP 位置已经固定为外部 Flash，因此 `bootconfig` 不再需要保存介质类型或 `app_region_base`。建议只保留与 A 运行 / B 回滚直接相关的信息：
 
 - `active_slot`
-  - 当前已经确认稳定运行的槽位，取值 `A` 或 `B`。
+  - 当前稳定运行槽位，固定为 `A`。
 - `pending_slot`
-  - 新固件写入后的待测试槽位，取值 `A`、`B` 或 `NONE`。
+  - 当 `A` 上存在“待安装完成”或“待确认”的新镜像时取值 `A`，否则为 `NONE`。
 - `confirmed`
-  - 待测试固件是否已经被 App 确认。
+  - `A` 上待确认镜像是否已被 App 确认。
 - `boot_count`
-  - `pending_slot` 已尝试启动的次数。
+  - 待确认镜像在 `A` 上已尝试启动的次数。
 - `max_boot_count`
   - 最大允许试启动次数，建议 `3`。
 - `version_a / version_b`
-  - A、B 槽版本号。
+  - `A` 当前镜像版本号与 `B` 备份镜像版本号。
 - `app_a_crc / app_b_crc`
-  - A、B 槽对应的镜像 CRC。
+  - `A` 当前镜像与 `B` 回滚备份镜像的 CRC。
+- `app_a_size / app_b_size`
+  - `A` 当前镜像与 `B` 回滚备份镜像的有效长度。
+- `pending_size / pending_crc`
+  - 当前待安装/待确认镜像在 `A` 上应当具备的长度与 CRC。
 - `last_reset_reason`
   - 最近一次复位原因。
 - `seq + crc`
@@ -118,6 +123,18 @@ typedef struct __attribute__((packed)) {
 5. 若区域非空但全部无效，则视为损坏并重建默认值。
 6. 写满后先擦除整个 `bootconfig` 区，再从头写入最新记录。
 
+若 `bootconfig` 因 CRC 损坏被重建，且当前 `Slot A` 仍可启动但 `app_a_size / app_a_crc`
+缺失，Boot 会执行一次“元数据自愈”：
+
+1. 按整槽大小 `BOOT_APP_SLOT_SIZE` 重新计算当前 `Slot A` 的 CRC。
+2. 将 `app_a_size = BOOT_APP_SLOT_SIZE`、`app_a_crc = 该整槽 CRC` 写回 `bootconfig`。
+3. 后续升级即可继续执行 `A -> B` 回滚备份。
+
+说明：
+
+- 这是一种保守恢复策略，目的是恢复“可备份、可回滚”的当前镜像字节集合。
+- 下次新镜像成功安装并确认后，`app_a_size / app_a_crc` 会被新的真实镜像元数据覆盖。
+
 ## 6. U 盘升级时的目标槽位选择
 
 ### 6.1 升级包合法性
@@ -132,46 +149,56 @@ Boot 读取 `/bin/app.bin` 后按以下顺序检查：
 
 只要其中任意一步失败，都拒绝烧录。
 
-### 6.2 选择 A 还是 B
+### 6.2 升级写入策略
 
-由于 APP 固定在外部 Flash，Boot 的选槽逻辑也固定如下：
+由于运行地址固定为 `0x90000000`，Boot 的升级策略固定如下：
 
-1. 若 `bootconfig` 不存在，或当前没有稳定可用镜像，则优先写 `Slot A`。
-2. 若 `active_slot == A`，则新包写入 `Slot B`。
-3. 若 `active_slot == B`，则新包写入 `Slot A`。
-4. 若当前存在 `pending_slot`，则不应继续发起新的覆盖升级，应先完成确认或回滚。
+1. 先校验当前 `Slot A` 的向量表与 CRC，确认当前版本完整可运行。
+2. 将当前 `Slot A` 完整复制到 `Slot B`，并对 `Slot B` 做 CRC 校验。
+3. 只有在 `Slot B` 已经成为完整回滚备份后，才允许开始改写 `Slot A`。
+4. 新包不再先完整缓存到 `Slot B`，而是直接从升级源写入 `Slot A`。
+5. 若任一步骤失败，Boot 应保持或恢复 `Slot A` 为可启动状态。
 
 也就是说：
 
-- 当前稳定版本在哪个槽，新版本就写另一个槽。
-- 当前稳定槽绝不直接覆盖。
+- `Slot A` 永远是运行目标地址。
+- `Slot B` 永远保存升级前的旧版本备份。
+- 任意时刻 `A/B` 至少有一个完整镜像。
 
 ### 6.3 烧录成功后的 bootconfig 更新
 
-目标槽位写入成功并通过 CRC 校验后，Boot 应更新 `bootconfig`：
+在开始改写 `Slot A` 之前，Boot 应先更新 `bootconfig`，记录“回滚备份已就绪”：
 
-- 更新目标槽位版本号
-- 更新目标槽位 CRC
-- `pending_slot = target_slot`
+- `active_slot = A`
+- `app_b_size / app_b_crc = 当前旧 A 的 size / crc`
+- `pending_slot = A`
+- `pending_size / pending_crc = 新镜像的 size / crc`
 - `confirmed = BOOT_NOT_CONFIRMED`
 - `boot_count = 0`
 - `upgrade_state = UPGRADE_READY`
 - `rollback_reason = ROLLBACK_NONE`
 
-注意：
+随后才允许从升级源直接改写 `Slot A`。
 
-- 此时 `active_slot` 保持不变。
-- 只有待测固件运行稳定并被 App 确认后，`pending_slot` 才转正为 `active_slot`。
+当新镜像写入 `Slot A` 成功并通过向量表 + CRC 校验后，Boot 再将 `bootconfig` 更新为：
+
+- `app_a_size / app_a_crc = 新镜像的 size / crc`
+- `pending_slot = A`
+- `pending_size / pending_crc = 新镜像的 size / crc`
+- `confirmed = BOOT_NOT_CONFIRMED`
+- `boot_count = 0`
+- `upgrade_state = UPGRADE_TESTING`
+- `rollback_reason = ROLLBACK_NONE`
 
 ## 7. 上电未升级时的启动逻辑
 
-“上电未升级”表示本次启动没有检测到合法 U 盘升级动作。此时 Boot 应按固定外部 Flash 双槽逻辑处理：
+“上电未升级”表示本次启动没有检测到合法 U 盘升级动作。此时 Boot 应按固定外部 Flash 单运行槽逻辑处理：
 
 1. 读取 `bootconfig` 最新有效记录。
-2. 如果存在 `pending_slot`，优先处理待测镜像。
-3. 如果不存在 `pending_slot`，处理 `active_slot`。
+2. 如果 `pending_slot == A`，优先处理安装中/待确认的新镜像。
+3. 如果 `pending_slot == NONE`，处理当前稳定 `Slot A`。
 4. 在任何跳转前，都必须先做镜像合法性和 CRC 校验。
-5. CRC 不匹配则不跳转。
+5. Boot 只允许跳转到 `Slot A`。
 
 ## 8. 跳转前的镜像校验规则
 
@@ -204,57 +231,60 @@ Boot 在尝试跳转前，对目标槽位执行以下校验：
 
 ## 9. `pending_slot` 存在时的处理
 
-如果 `pending_slot != NONE`，表示新固件已经写入外部 Flash，但还没有正式确认。Boot 应按如下顺序处理：
+如果 `pending_slot == A`，表示当前正处于“安装完成前”或“待确认测试”阶段，且 `Slot B` 应保存回滚备份。Boot 应按如下顺序处理：
 
-1. 先校验 `pending_slot` 的向量表和 CRC。
-2. 如果校验失败：
-   - 认定待测镜像无效。
-   - 清除 `pending_slot`。
-   - 回滚到 `active_slot`。
-   - 如果回滚槽也无效，则不跳转。
-3. 如果最近一次复位为看门狗复位，且 `boot_count > 0`：
-   - 认定待测镜像试运行失败。
-   - 回滚到 `active_slot`。
-4. 如果 `boot_count >= max_boot_count`：
-   - 认定试启动次数超限。
-   - 回滚到 `active_slot`。
-5. 如果以上都通过：
-   - `boot_count++`
-   - `confirmed = BOOT_NOT_CONFIRMED`
-   - `upgrade_state = UPGRADE_TESTING`
-   - 保存 `bootconfig`
-   - 跳转到 `pending_slot`
+1. 若 `upgrade_state == UPGRADE_READY`：
+   - 若 `Slot A` 已经匹配 `pending_size / pending_crc`，说明新镜像已写完但尚未转入测试状态：
+     - 更新 `upgrade_state = UPGRADE_TESTING`
+     - 跳转到 `Slot A`
+   - 若 `Slot A` 仍匹配旧的 `app_a_size / app_a_crc`，说明安装尚未真正覆盖旧版本：
+     - 清除 `pending_slot`
+     - 保持当前 `Slot A`
+   - 若 `Slot A` 无效但 `Slot B` 备份有效：
+     - 自动执行 `B -> A` 回滚恢复
+     - 清除 `pending_slot`
+     - 跳转到恢复后的 `Slot A`
+   - 若 `A/B` 都无效：
+     - 不跳转
+     - 停留在 Boot，等待恢复升级
+2. 若 `upgrade_state == UPGRADE_TESTING`：
+   - 先校验 `Slot A` 是否匹配 `pending_size / pending_crc`
+   - 若校验失败，自动执行 `B -> A` 回滚
+   - 若最近一次复位为看门狗复位，且 `boot_count > 0`，自动执行 `B -> A` 回滚
+   - 若 `boot_count >= max_boot_count`，自动执行 `B -> A` 回滚
+   - 若以上都通过：
+     - `boot_count++`
+     - 保存 `bootconfig`
+     - 跳转到 `Slot A`
 
 ## 10. `pending_slot` 不存在时的处理
 
-如果 `pending_slot == NONE`，说明当前没有待测试镜像，Boot 应按如下逻辑启动：
+如果 `pending_slot == NONE`，说明当前没有待确认安装，Boot 应按如下逻辑启动：
 
-1. 先校验 `active_slot`。
-2. 若 `active_slot` 合法且 CRC 匹配，则直接跳转。
-3. 若 `active_slot` 非法或 CRC 不匹配，则校验另一个槽位。
-4. 若另一个槽位合法：
-   - 将其改写为新的 `active_slot`
-   - 清空 `pending_slot`
-   - `confirmed = BOOT_CONFIRMED`
-   - `boot_count = 0`
+1. 先校验 `Slot A`。
+2. 若 `Slot A` 合法且 CRC 匹配，则直接跳转。
+3. 若 `Slot A` 非法，但 `Slot B` 备份合法：
+   - 自动执行 `B -> A` 恢复
    - 保存 `bootconfig`
-   - 跳转到该槽位
-5. 若两个槽位都不合法：
+   - 跳转到恢复后的 `Slot A`
+4. 若 `A/B` 都不合法：
    - 不跳转
    - 停留在 Boot，等待 U 盘恢复升级
 
 ## 11. App 确认机制
 
-新固件从 `pending_slot` 启动成功后，App 需要在确认系统已经稳定运行后主动写确认。推荐直接调用 `Boot_Info_ConfirmRunningImage()`；若仅接入 handoff mailbox，则至少要上报 `BOOT_HANDOFF_STAGE_APP_READY`，供 Boot 在下一次启动时完成转正。确认成功后，`bootconfig` 状态应更新为：
+新固件从 `Slot A` 启动成功后，App 需要在确认系统已经稳定运行后主动写确认。推荐直接调用 `Boot_Info_ConfirmRunningImage()`；若仅接入 handoff mailbox，则至少要上报 `BOOT_HANDOFF_STAGE_APP_READY`，供 Boot 在下一次启动时完成转正。确认成功后，`bootconfig` 状态应更新为：
 
-- `active_slot = 当前运行槽位`
+- `active_slot = A`
 - `pending_slot = NONE`
 - `confirmed = BOOT_CONFIRMED`
 - `boot_count = 0`
 - `upgrade_state = UPGRADE_SUCCESS`
 - `rollback_reason = ROLLBACK_NONE`
+- `pending_size = 0`
+- `pending_crc = 0`
 
-只有完成这一步，新槽位才算正式转正。
+只有完成这一步，新写入的 `Slot A` 才算正式转正。
 
 ## 12. 推荐主流程
 
@@ -269,12 +299,15 @@ Boot 在尝试跳转前，对目标槽位执行以下校验：
    - 读取 `/bin/app.bin`
    - 校验头部，确认 `write_address == 0x90000000`
 4. `UPGRADE`
-   - 选择外部 Flash inactive slot
-   - 擦除、写入、回读校验、CRC 校验
-   - 更新 `bootconfig.pending_slot`
+   - 校验当前 `Slot A`
+   - 将 `Slot A` 复制到 `Slot B`
+   - 更新 `bootconfig`，记录 `B` 为回滚备份、`A` 为安装目标
+   - 直接从升级源改写 `Slot A`
+   - 对新 `Slot A` 执行向量表 + CRC 校验
+   - 更新 `bootconfig` 为 `UPGRADE_TESTING`
 5. `JUMP`
-   - 若有 `pending_slot`，优先尝试待测槽
-   - 否则启动 `active_slot`
+   - 若 `pending_slot == A`，优先按待确认流程启动 `Slot A`
+   - 否则启动稳定 `Slot A`
 6. `RECOVERY`
    - 无合法镜像时停留在 Boot，等待恢复升级
 
@@ -282,7 +315,7 @@ Boot 在尝试跳转前，对目标槽位执行以下校验：
 
 本次固定方案可以概括为：
 
-> Boot 只负责内部 Flash 的 Boot 和 `bootconfig`；所有 APP 固定只写入外部 QSPI Flash 的 AB 槽；每次升级写 inactive slot；每次跳转前都必须校验向量表和 CRC；CRC 不匹配则不跳转。
+> Boot 只负责内部 Flash 的 Boot 和 `bootconfig`；APP 固定运行在外部 QSPI Flash 的 `Slot A`；每次升级先把旧 `A` 备份到 `B`，再直接改写 `A`；任意时刻 `A/B` 至少有一个完整镜像；每次跳转前都必须校验向量表和 CRC；若升级中断或新版本失效，则自动执行 `B -> A` 回滚。
 
 进一步展开就是：
 
@@ -292,5 +325,7 @@ Boot 在尝试跳转前，对目标槽位执行以下校验：
   - `Slot B = 0x90080000 ~ 0x900FFFFF`
 - `app.bin.write_address` 固定要求为 `0x90000000`
 - 内部 Flash 不再作为 APP 升级目标
-- `pending_slot` 优先级高于 `active_slot`
-- 只要目标槽位 CRC 不匹配，就不允许跳转
+- Boot 永远只跳转到 `Slot A`
+- `Slot B` 永远只作回滚备份，不直接跳转
+- 升级时必须先完成 `A -> B` 备份，才能开始改写 `A`
+- 只要目标镜像 CRC 不匹配，就不允许跳转

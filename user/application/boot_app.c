@@ -5,12 +5,12 @@
 #include "boot_handoff.h"
 #include "boot_info.h"
 #include "boot_log.h"
-#include "platform/boot_platform.h"
 #include "boot_simple_flash.h"
 #include "boot_simple_jump.h"
 #include "boot_simple_manifest.h"
 #include "boot_simple_upgrade.h"
 #include "boot_usb.h"
+#include "platform/boot_platform.h"
 #include "stm32h7xx_hal.h"
 
 typedef enum {
@@ -46,14 +46,10 @@ static void Boot_App_FeedWatchdogForever(void) {
 static void Boot_App_EnterFatal(BootError error) {
     g_boot_app.state      = BOOT_APP_STATE_FATAL;
     g_boot_app.last_error = error;
-    Boot_Handoff_SetError((uint32_t) error);
+    Boot_Handoff_SetError((uint32_t)error);
     Boot_Handoff_LogCurrent("Fatal handoff");
     LOG_ERROR(BOOT_LOG_TAG, "Fatal boot error: %s", Boot_ErrorToString(error));
     Boot_App_FeedWatchdogForever();
-}
-
-static uint8_t Boot_App_GetOtherSlot(uint8_t slot) {
-    return (slot == SLOT_A) ? SLOT_B : SLOT_A;
 }
 
 static void Boot_App_BlockRecoveryRetry(BootError error) {
@@ -62,8 +58,7 @@ static void Boot_App_BlockRecoveryRetry(BootError error) {
     }
 
     if (g_boot_app.recovery_retry_blocked == 0U) {
-        LOG_WARN(BOOT_LOG_TAG,
-                 "Recovery retry paused until upgrade media is removed: %s",
+        LOG_WARN(BOOT_LOG_TAG, "Recovery retry paused until upgrade media is removed: %s",
                  Boot_ErrorToString(error));
     }
 
@@ -76,8 +71,7 @@ static void Boot_App_ClearRecoveryRetryBlock(const char *reason) {
         return;
     }
 
-    LOG_INFO(BOOT_LOG_TAG,
-             "Recovery retry re-armed (%s), previous failure: %s",
+    LOG_INFO(BOOT_LOG_TAG, "Recovery retry re-armed (%s), previous failure: %s",
              (reason != NULL) ? reason : "unknown",
              Boot_ErrorToString(g_boot_app.recovery_block_error));
     g_boot_app.recovery_retry_blocked = 0U;
@@ -101,9 +95,9 @@ static BootError Boot_App_SaveBootInfo(const char *reason) {
                  "BootInfo saved (%s): active=%s pending=%s confirmed=%u boot_count=%u state=%u",
                  reason, Boot_Info_SlotToString(g_boot_app.boot_info.active_slot),
                  Boot_Info_SlotToString(g_boot_app.boot_info.pending_slot),
-                 (unsigned int) g_boot_app.boot_info.confirmed,
-                 (unsigned int) g_boot_app.boot_info.boot_count,
-                 (unsigned int) g_boot_app.boot_info.upgrade_state);
+                 (unsigned int)g_boot_app.boot_info.confirmed,
+                 (unsigned int)g_boot_app.boot_info.boot_count,
+                 (unsigned int)g_boot_app.boot_info.upgrade_state);
     }
 
     return error;
@@ -111,13 +105,13 @@ static BootError Boot_App_SaveBootInfo(const char *reason) {
 
 static void Boot_App_SetSlotMetadata(uint8_t slot, uint32_t size, uint32_t crc32) {
     if (slot == SLOT_A) {
-        g_boot_app.boot_info.version_a = 0U;
+        g_boot_app.boot_info.version_a  = 0U;
         g_boot_app.boot_info.app_a_size = size;
-        g_boot_app.boot_info.app_a_crc = crc32;
+        g_boot_app.boot_info.app_a_crc  = crc32;
     } else if (slot == SLOT_B) {
-        g_boot_app.boot_info.version_b = 0U;
+        g_boot_app.boot_info.version_b  = 0U;
         g_boot_app.boot_info.app_b_size = size;
-        g_boot_app.boot_info.app_b_crc = crc32;
+        g_boot_app.boot_info.app_b_crc  = crc32;
     }
 }
 
@@ -145,6 +139,57 @@ static uint32_t Boot_App_GetSlotExpectedCrc(uint8_t slot) {
     return 0U;
 }
 
+static bool Boot_App_HasSlotMetadata(uint8_t slot) {
+    return (Boot_App_GetSlotExpectedSize(slot) != 0U) && (Boot_App_GetSlotExpectedCrc(slot) != 0U);
+}
+
+static void Boot_App_SetPendingMetadata(uint32_t size, uint32_t crc32) {
+    g_boot_app.boot_info.pending_size = size;
+    g_boot_app.boot_info.pending_crc  = crc32;
+}
+
+static void Boot_App_ClearPendingMetadata(void) {
+    g_boot_app.boot_info.pending_size = 0U;
+    g_boot_app.boot_info.pending_crc  = 0U;
+}
+
+static bool Boot_App_HasPendingMetadata(void) {
+    return (g_boot_app.boot_info.pending_size != 0U) && (g_boot_app.boot_info.pending_crc != 0U);
+}
+
+static bool Boot_App_IsSlotAValidWithMetadata(uint32_t size, uint32_t crc32) {
+    return (size != 0U) && (crc32 != 0U) &&
+           (Boot_SimpleJump_IsSlotValidWithMetadata(SLOT_A, size, crc32) != false);
+}
+
+static bool Boot_App_IsCurrentSlotAValid(void) {
+    if (Boot_App_HasSlotMetadata(SLOT_A) != false) {
+        return Boot_App_IsSlotAValidWithMetadata(Boot_App_GetSlotExpectedSize(SLOT_A),
+                                                 Boot_App_GetSlotExpectedCrc(SLOT_A));
+    }
+
+    return Boot_SimpleJump_IsSlotValid(SLOT_A);
+}
+
+static bool Boot_App_IsConfirmedSlotAValid(void) {
+    return Boot_App_HasSlotMetadata(SLOT_A) &&
+           Boot_App_IsSlotAValidWithMetadata(Boot_App_GetSlotExpectedSize(SLOT_A),
+                                             Boot_App_GetSlotExpectedCrc(SLOT_A));
+}
+
+static bool Boot_App_IsPendingSlotAValid(void) {
+    return Boot_App_HasPendingMetadata() &&
+           Boot_App_IsSlotAValidWithMetadata(g_boot_app.boot_info.pending_size,
+                                             g_boot_app.boot_info.pending_crc);
+}
+
+static bool Boot_App_IsBackupSlotBValid(void) {
+    return Boot_App_HasSlotMetadata(SLOT_B) &&
+           (Boot_SimpleUpgrade_VerifySlotData(SLOT_B, Boot_App_GetSlotExpectedSize(SLOT_B),
+                                              Boot_App_GetSlotExpectedCrc(SLOT_B)) ==
+            BOOT_ERR_NONE);
+}
+
 static uint8_t Boot_App_SlotFromBase(uint32_t app_base) {
     const BootSimpleFlashRegion *slot_region;
 
@@ -161,20 +206,145 @@ static uint8_t Boot_App_SlotFromBase(uint32_t app_base) {
     return SLOT_NONE;
 }
 
-static BootError Boot_App_FinalizePendingAsActive(const char *reason) {
-    uint8_t promoted_slot = g_boot_app.boot_info.pending_slot;
+static BootError Boot_App_ClearPendingAndKeepCurrentA(const char *reason) {
+    s_BootInfo previous_info = g_boot_app.boot_info;
+    BootError error;
 
-    if (Boot_Info_IsSlotValueValid(promoted_slot) == false) {
+    g_boot_app.boot_info.active_slot     = SLOT_A;
+    g_boot_app.boot_info.pending_slot    = SLOT_NONE;
+    g_boot_app.boot_info.confirmed       = BOOT_CONFIRMED;
+    g_boot_app.boot_info.boot_count      = 0U;
+    g_boot_app.boot_info.upgrade_state   = UPGRADE_IDLE;
+    g_boot_app.boot_info.rollback_reason = ROLLBACK_NONE;
+    Boot_App_ClearPendingMetadata();
+
+    error = Boot_App_SaveBootInfo(reason);
+    if (error != BOOT_ERR_NONE) {
+        g_boot_app.boot_info = previous_info;
+    }
+
+    return error;
+}
+
+static BootError Boot_App_FinalizePendingAsActive(const char *reason) {
+    s_BootInfo previous_info = g_boot_app.boot_info;
+    BootError error;
+
+    if ((g_boot_app.boot_info.pending_slot != SLOT_A) || (Boot_App_HasPendingMetadata() == false)) {
         return BOOT_ERR_IMAGE_SLOT;
     }
 
-    g_boot_app.boot_info.active_slot     = promoted_slot;
+    Boot_App_SetSlotMetadata(SLOT_A, g_boot_app.boot_info.pending_size, g_boot_app.boot_info.pending_crc);
+    g_boot_app.boot_info.active_slot     = SLOT_A;
     g_boot_app.boot_info.pending_slot    = SLOT_NONE;
     g_boot_app.boot_info.confirmed       = BOOT_CONFIRMED;
     g_boot_app.boot_info.boot_count      = 0U;
     g_boot_app.boot_info.upgrade_state   = UPGRADE_SUCCESS;
     g_boot_app.boot_info.rollback_reason = ROLLBACK_NONE;
-    return Boot_App_SaveBootInfo(reason);
+    Boot_App_ClearPendingMetadata();
+
+    error = Boot_App_SaveBootInfo(reason);
+    if (error != BOOT_ERR_NONE) {
+        g_boot_app.boot_info = previous_info;
+    }
+
+    return error;
+}
+
+static BootError Boot_App_MarkBackupReadyForInstall(const BootAppImageInfo *image) {
+    s_BootInfo previous_info = g_boot_app.boot_info;
+    BootError error;
+
+    if ((image == NULL) || (Boot_App_HasSlotMetadata(SLOT_A) == false)) {
+        return BOOT_ERR_CTRL_CORRUPTED;
+    }
+
+    Boot_App_SetSlotMetadata(SLOT_B, Boot_App_GetSlotExpectedSize(SLOT_A),
+                             Boot_App_GetSlotExpectedCrc(SLOT_A));
+    Boot_App_SetPendingMetadata(image->size, image->crc32);
+    g_boot_app.boot_info.active_slot     = SLOT_A;
+    g_boot_app.boot_info.pending_slot    = SLOT_A;
+    g_boot_app.boot_info.confirmed       = BOOT_NOT_CONFIRMED;
+    g_boot_app.boot_info.boot_count      = 0U;
+    g_boot_app.boot_info.upgrade_state   = UPGRADE_READY;
+    g_boot_app.boot_info.rollback_reason = ROLLBACK_NONE;
+
+    error = Boot_App_SaveBootInfo("backup ready");
+    if (error != BOOT_ERR_NONE) {
+        g_boot_app.boot_info = previous_info;
+    }
+
+    return error;
+}
+
+static BootError Boot_App_MarkPendingTesting(void) {
+    if ((g_boot_app.boot_info.pending_slot != SLOT_A) || (Boot_App_HasPendingMetadata() == false)) {
+        return BOOT_ERR_IMAGE_SLOT;
+    }
+
+    Boot_App_SetSlotMetadata(SLOT_A, g_boot_app.boot_info.pending_size, g_boot_app.boot_info.pending_crc);
+    g_boot_app.boot_info.active_slot     = SLOT_A;
+    g_boot_app.boot_info.pending_slot    = SLOT_A;
+    g_boot_app.boot_info.confirmed       = BOOT_NOT_CONFIRMED;
+    g_boot_app.boot_info.boot_count      = 0U;
+    g_boot_app.boot_info.upgrade_state   = UPGRADE_TESTING;
+    g_boot_app.boot_info.rollback_reason = ROLLBACK_NONE;
+
+    return Boot_App_SaveBootInfo("pending testing");
+}
+
+static BootError Boot_App_BackupCurrentAToB(void) {
+    BootError error;
+
+    if (Boot_App_HasSlotMetadata(SLOT_A) == false) {
+        return BOOT_ERR_CTRL_CORRUPTED;
+    }
+
+    error = Boot_SimpleJump_ValidateSlot(SLOT_A, Boot_App_GetSlotExpectedSize(SLOT_A),
+                                         Boot_App_GetSlotExpectedCrc(SLOT_A));
+    if (error != BOOT_ERR_NONE) {
+        return error;
+    }
+
+    return Boot_SimpleUpgrade_CopySlot(SLOT_A, SLOT_B, Boot_App_GetSlotExpectedSize(SLOT_A),
+                                       Boot_App_GetSlotExpectedCrc(SLOT_A));
+}
+
+static BootError Boot_App_RestoreBackupToA(uint8_t rollback_reason, const char *reason) {
+    BootError error;
+
+    if (Boot_App_IsBackupSlotBValid() == false) {
+        return BOOT_ERR_ROLLBACK_FAILED;
+    }
+
+    error = Boot_SimpleUpgrade_CopySlot(SLOT_B, SLOT_A, Boot_App_GetSlotExpectedSize(SLOT_B),
+                                        Boot_App_GetSlotExpectedCrc(SLOT_B));
+    if (error != BOOT_ERR_NONE) {
+        return error;
+    }
+
+    error = Boot_SimpleJump_ValidateSlot(SLOT_A, Boot_App_GetSlotExpectedSize(SLOT_B),
+                                         Boot_App_GetSlotExpectedCrc(SLOT_B));
+    if (error != BOOT_ERR_NONE) {
+        return error;
+    }
+
+    Boot_App_SetSlotMetadata(SLOT_A, Boot_App_GetSlotExpectedSize(SLOT_B),
+                             Boot_App_GetSlotExpectedCrc(SLOT_B));
+    g_boot_app.boot_info.active_slot     = SLOT_A;
+    g_boot_app.boot_info.pending_slot    = SLOT_NONE;
+    g_boot_app.boot_info.confirmed       = BOOT_CONFIRMED;
+    g_boot_app.boot_info.boot_count      = 0U;
+    g_boot_app.boot_info.upgrade_state   = UPGRADE_ROLLBACK;
+    g_boot_app.boot_info.rollback_reason = rollback_reason;
+    Boot_App_ClearPendingMetadata();
+    (void)Boot_App_SaveBootInfo(reason);
+
+    g_boot_app.allow_upgrade_scan = 1U;
+    g_boot_app.jump_slot          = SLOT_A;
+    LOG_WARN(BOOT_LOG_TAG, "Rollback restored backup slot=B to runtime slot=A, reason=%u",
+             (unsigned int)rollback_reason);
+    return BOOT_ERR_NONE;
 }
 
 static void Boot_App_TryPromoteConfirmedPending(void) {
@@ -182,7 +352,7 @@ static void Boot_App_TryPromoteConfirmedPending(void) {
     BootError error;
     uint8_t confirmed_slot;
 
-    if (g_boot_app.boot_info.pending_slot == SLOT_NONE) {
+    if ((g_boot_app.boot_info.pending_slot != SLOT_A) || (Boot_App_HasPendingMetadata() == false)) {
         return;
     }
 
@@ -200,39 +370,29 @@ static void Boot_App_TryPromoteConfirmedPending(void) {
     }
 
     confirmed_slot = Boot_App_SlotFromBase(previous_handoff->app_base);
-    if (confirmed_slot != g_boot_app.boot_info.pending_slot) {
-        LOG_WARN(BOOT_LOG_TAG,
-                 "Ignore app-ready handoff for slot=%s while pending=%s",
-                 Boot_Info_SlotToString(confirmed_slot),
-                 Boot_Info_SlotToString(g_boot_app.boot_info.pending_slot));
+    if (confirmed_slot != SLOT_A) {
+        LOG_WARN(BOOT_LOG_TAG, "Ignore app-ready handoff for slot=%s while pending=A",
+                 Boot_Info_SlotToString(confirmed_slot));
         return;
     }
 
-    if (Boot_SimpleJump_IsSlotValidWithMetadata(confirmed_slot,
-                                                Boot_App_GetSlotExpectedSize(confirmed_slot),
-                                                Boot_App_GetSlotExpectedCrc(confirmed_slot)) == false) {
-        LOG_WARN(BOOT_LOG_TAG, "App-ready handoff ignored, slot=%s no longer validates",
-                 Boot_Info_SlotToString(confirmed_slot));
+    if (Boot_App_IsPendingSlotAValid() == false) {
+        LOG_WARN(BOOT_LOG_TAG, "App-ready handoff ignored, pending slot=A no longer validates");
         return;
     }
 
     error = Boot_App_FinalizePendingAsActive("promote confirmed pending");
     if (error == BOOT_ERR_NONE) {
-        LOG_INFO(BOOT_LOG_TAG, "Pending slot=%s promoted to active from app-ready handoff",
-                 Boot_Info_SlotToString(confirmed_slot));
+        LOG_INFO(BOOT_LOG_TAG, "Pending slot=A promoted to confirmed image");
     } else {
-        LOG_WARN(BOOT_LOG_TAG, "Failed to promote confirmed pending slot=%s: %s",
-                 Boot_Info_SlotToString(confirmed_slot), Boot_ErrorToString(error));
+        LOG_WARN(BOOT_LOG_TAG, "Failed to finalize pending slot=A: %s",
+                 Boot_ErrorToString(error));
     }
 }
 
 static uint8_t Boot_App_FindFirstBootableSlot(void) {
     if (Boot_SimpleJump_IsSlotValid(SLOT_A) != false) {
         return SLOT_A;
-    }
-
-    if (Boot_SimpleJump_IsSlotValid(SLOT_B) != false) {
-        return SLOT_B;
     }
 
     return SLOT_NONE;
@@ -246,7 +406,7 @@ static BootError Boot_App_LoadOrInitializeBootInfo(void) {
     if (error == BOOT_ERR_NONE) {
         if (g_boot_app.boot_info.max_boot_count == 0U) {
             g_boot_app.boot_info.max_boot_count = BOOT_PENDING_SLOT_MAX_ATTEMPTS;
-            (void) Boot_App_SaveBootInfo("normalize max_boot_count");
+            (void)Boot_App_SaveBootInfo("normalize max_boot_count");
         }
         return BOOT_ERR_NONE;
     }
@@ -262,49 +422,137 @@ static BootError Boot_App_LoadOrInitializeBootInfo(void) {
     }
 
     LOG_WARN(BOOT_LOG_TAG, "BootInfo recreated: %s", Boot_ErrorToString(error));
-    (void) Boot_App_SaveBootInfo("initialize default");
+    (void)Boot_App_SaveBootInfo("initialize default");
     return BOOT_ERR_NONE;
 }
 
-static BootError Boot_App_RollbackPending(uint8_t rollback_reason) {
-    uint8_t fallback_slot = g_boot_app.boot_info.active_slot;
+static BootError Boot_App_TrySelfHealCurrentAMetadata(void) {
+    const BootSimpleFlashRegion *slot_region;
+    s_BootInfo previous_info;
+    uint32_t slot_crc = 0U;
+    BootError error;
 
-    if (Boot_SimpleJump_IsSlotValidWithMetadata(fallback_slot,
-                                                Boot_App_GetSlotExpectedSize(fallback_slot),
-                                                Boot_App_GetSlotExpectedCrc(fallback_slot)) == false) {
-        fallback_slot = Boot_App_GetOtherSlot(g_boot_app.boot_info.pending_slot);
-        if (Boot_SimpleJump_IsSlotValidWithMetadata(fallback_slot,
-                                                    Boot_App_GetSlotExpectedSize(fallback_slot),
-                                                    Boot_App_GetSlotExpectedCrc(fallback_slot)) ==
-            false) {
-            fallback_slot = SLOT_NONE;
+    if (Boot_App_HasSlotMetadata(SLOT_A) != false) {
+        return BOOT_ERR_NONE;
+    }
+
+    if ((g_boot_app.boot_info.pending_slot != SLOT_NONE) ||
+        ((g_boot_app.boot_info.upgrade_state != UPGRADE_IDLE) &&
+         (g_boot_app.boot_info.upgrade_state != UPGRADE_SUCCESS) &&
+         (g_boot_app.boot_info.upgrade_state != UPGRADE_ROLLBACK))) {
+        return BOOT_ERR_NONE;
+    }
+
+    if (Boot_SimpleJump_IsSlotValid(SLOT_A) == false) {
+        return BOOT_ERR_NONE;
+    }
+
+    slot_region = Boot_SimpleFlash_GetSlotRegion(SLOT_A);
+    if (slot_region == NULL) {
+        return BOOT_ERR_IMAGE_SLOT;
+    }
+
+    error = Boot_SimpleUpgrade_ComputeSlotCrc(SLOT_A, slot_region->size, &slot_crc);
+    if (error != BOOT_ERR_NONE) {
+        return error;
+    }
+
+    previous_info = g_boot_app.boot_info;
+    Boot_App_SetSlotMetadata(SLOT_A, slot_region->size, slot_crc);
+    g_boot_app.boot_info.active_slot = SLOT_A;
+
+    error = Boot_App_SaveBootInfo("self-heal slot=A metadata");
+    if (error != BOOT_ERR_NONE) {
+        g_boot_app.boot_info = previous_info;
+        return error;
+    }
+
+    LOG_WARN(BOOT_LOG_TAG,
+             "Slot=A metadata self-healed using full-slot digest: size=%lu crc=0x%08lX",
+             (unsigned long)slot_region->size, (unsigned long)slot_crc);
+    return BOOT_ERR_NONE;
+}
+
+static BootError Boot_App_HandlePendingReadyState(void) {
+    BootError error;
+
+    if ((g_boot_app.boot_info.pending_slot != SLOT_A) || (Boot_App_HasPendingMetadata() == false) ||
+        (g_boot_app.boot_info.upgrade_state != UPGRADE_READY)) {
+        return BOOT_ERR_NONE;
+    }
+
+    if (Boot_App_IsPendingSlotAValid() != false) {
+        error = Boot_App_MarkPendingTesting();
+        if (error != BOOT_ERR_NONE) {
+            LOG_WARN(BOOT_LOG_TAG, "Pending slot=A installed but testing metadata save failed: %s",
+                     Boot_ErrorToString(error));
         }
+
+        g_boot_app.allow_upgrade_scan = 0U;
+        g_boot_app.jump_slot          = SLOT_A;
+        LOG_INFO(BOOT_LOG_TAG, "Pending slot=A selected after interrupted install");
+        return BOOT_ERR_NONE;
     }
 
-    if (Boot_Info_IsSlotValueValid(fallback_slot) == false) {
-        return BOOT_ERR_ROLLBACK_FAILED;
+    if (Boot_App_IsConfirmedSlotAValid() != false) {
+        error = Boot_App_ClearPendingAndKeepCurrentA("cancel incomplete install");
+        if (error != BOOT_ERR_NONE) {
+            return error;
+        }
+
+        g_boot_app.allow_upgrade_scan = 1U;
+        g_boot_app.jump_slot          = SLOT_A;
+        LOG_INFO(BOOT_LOG_TAG, "Incomplete install discarded, keep current slot=A");
+        return BOOT_ERR_NONE;
     }
 
-    g_boot_app.boot_info.active_slot     = fallback_slot;
-    g_boot_app.boot_info.pending_slot    = SLOT_NONE;
-    g_boot_app.boot_info.confirmed       = BOOT_CONFIRMED;
-    g_boot_app.boot_info.boot_count      = 0U;
-    g_boot_app.boot_info.upgrade_state   = UPGRADE_ROLLBACK;
-    g_boot_app.boot_info.rollback_reason = rollback_reason;
-    (void) Boot_App_SaveBootInfo("rollback pending");
+    if (Boot_App_IsBackupSlotBValid() != false) {
+        return Boot_App_RestoreBackupToA(ROLLBACK_CRC_ERROR, "restore backup after incomplete install");
+    }
+
+    g_boot_app.allow_upgrade_scan = 1U;
+    g_boot_app.jump_slot          = SLOT_NONE;
+    LOG_WARN(BOOT_LOG_TAG, "Incomplete install detected, neither slot=A nor backup slot=B is bootable");
+    return BOOT_ERR_NONE;
+}
+
+static BootError Boot_App_HandlePendingTestingState(void) {
+    if ((g_boot_app.boot_info.pending_slot != SLOT_A) || (Boot_App_HasPendingMetadata() == false) ||
+        (g_boot_app.boot_info.upgrade_state != UPGRADE_TESTING)) {
+        return BOOT_ERR_NONE;
+    }
+
+    if (Boot_App_IsPendingSlotAValid() == false) {
+        if (Boot_App_IsBackupSlotBValid() != false) {
+            return Boot_App_RestoreBackupToA(ROLLBACK_CRC_ERROR, "rollback invalid pending image");
+        }
+
+        g_boot_app.allow_upgrade_scan = 1U;
+        g_boot_app.jump_slot          = SLOT_NONE;
+        LOG_WARN(BOOT_LOG_TAG, "Pending image invalid and no rollback backup is available");
+        return BOOT_ERR_NONE;
+    }
+
+    if ((Boot_App_IsWatchdogReset(g_boot_app.reset_flags) != 0) &&
+        (g_boot_app.boot_info.boot_count > 0U) && (Boot_App_IsBackupSlotBValid() != false)) {
+        return Boot_App_RestoreBackupToA(ROLLBACK_WDG_RESET, "rollback watchdog reset");
+    }
+
+    if ((g_boot_app.boot_info.boot_count >= g_boot_app.boot_info.max_boot_count) &&
+        (Boot_App_IsBackupSlotBValid() != false)) {
+        return Boot_App_RestoreBackupToA(ROLLBACK_BOOT_OVERFLOW, "rollback boot overflow");
+    }
 
     g_boot_app.allow_upgrade_scan = 0U;
-    g_boot_app.jump_slot          = fallback_slot;
-    LOG_WARN(BOOT_LOG_TAG, "Rollback to slot=%s reason=%u",
-             Boot_Info_SlotToString(fallback_slot), (unsigned int) rollback_reason);
+    g_boot_app.jump_slot          = SLOT_A;
+    LOG_INFO(BOOT_LOG_TAG, "Pending slot=A will be tested, boot_count=%u/%u",
+             (unsigned int)g_boot_app.boot_info.boot_count,
+             (unsigned int)g_boot_app.boot_info.max_boot_count);
     return BOOT_ERR_NONE;
 }
 
 static BootError Boot_App_ResolveStartupPlan(void) {
     BootError error;
-    uint8_t active_slot;
-    uint8_t other_slot;
-    uint8_t stable_slot;
 
     error = Boot_App_LoadOrInitializeBootInfo();
     if (error != BOOT_ERR_NONE) {
@@ -313,118 +561,85 @@ static BootError Boot_App_ResolveStartupPlan(void) {
 
     Boot_App_TryPromoteConfirmedPending();
 
-    active_slot = g_boot_app.boot_info.active_slot;
-    other_slot  = Boot_App_GetOtherSlot(active_slot);
+    if (g_boot_app.boot_info.active_slot != SLOT_A) {
+        g_boot_app.boot_info.active_slot = SLOT_A;
+        (void)Boot_App_SaveBootInfo("normalize active slot");
+    }
 
-    if (g_boot_app.boot_info.pending_slot != SLOT_NONE) {
-        if (Boot_SimpleJump_IsSlotValidWithMetadata(
-                g_boot_app.boot_info.pending_slot,
-                Boot_App_GetSlotExpectedSize(g_boot_app.boot_info.pending_slot),
-                Boot_App_GetSlotExpectedCrc(g_boot_app.boot_info.pending_slot)) == false) {
-            return Boot_App_RollbackPending(ROLLBACK_CRC_ERROR);
-        }
+    error = Boot_App_TrySelfHealCurrentAMetadata();
+    if (error != BOOT_ERR_NONE) {
+        LOG_WARN(BOOT_LOG_TAG, "Slot=A metadata self-heal skipped: %s",
+                 Boot_ErrorToString(error));
+    }
 
-        if ((Boot_App_IsWatchdogReset(g_boot_app.reset_flags) != 0) &&
-            (g_boot_app.boot_info.boot_count > 0U)) {
-            return Boot_App_RollbackPending(ROLLBACK_WDG_RESET);
-        }
+    error = Boot_App_HandlePendingReadyState();
+    if (error != BOOT_ERR_NONE) {
+        return error;
+    }
 
-        if (g_boot_app.boot_info.boot_count >= g_boot_app.boot_info.max_boot_count) {
-            return Boot_App_RollbackPending(ROLLBACK_BOOT_OVERFLOW);
-        }
-
-        g_boot_app.allow_upgrade_scan = 0U;
-        g_boot_app.jump_slot          = g_boot_app.boot_info.pending_slot;
-        LOG_INFO(BOOT_LOG_TAG, "Pending slot=%s will be tested, boot_count=%u/%u",
-                 Boot_Info_SlotToString(g_boot_app.jump_slot),
-                 (unsigned int) g_boot_app.boot_info.boot_count,
-                 (unsigned int) g_boot_app.boot_info.max_boot_count);
+    if (g_boot_app.jump_slot == SLOT_A) {
         return BOOT_ERR_NONE;
     }
 
-    stable_slot = SLOT_NONE;
-    if (Boot_SimpleJump_IsSlotValidWithMetadata(active_slot, Boot_App_GetSlotExpectedSize(active_slot),
-                                                Boot_App_GetSlotExpectedCrc(active_slot)) != false) {
-        stable_slot = active_slot;
-    } else if (Boot_SimpleJump_IsSlotValidWithMetadata(
-                   other_slot, Boot_App_GetSlotExpectedSize(other_slot),
-                   Boot_App_GetSlotExpectedCrc(other_slot)) != false) {
-        stable_slot = other_slot;
-        g_boot_app.boot_info.active_slot     = other_slot;
-        g_boot_app.boot_info.pending_slot    = SLOT_NONE;
-        g_boot_app.boot_info.confirmed       = BOOT_CONFIRMED;
-        g_boot_app.boot_info.boot_count      = 0U;
-        g_boot_app.boot_info.upgrade_state   = UPGRADE_IDLE;
-        g_boot_app.boot_info.rollback_reason = ROLLBACK_NONE;
-        (void) Boot_App_SaveBootInfo("switch active slot");
+    error = Boot_App_HandlePendingTestingState();
+    if (error != BOOT_ERR_NONE) {
+        return error;
+    }
+
+    if (g_boot_app.jump_slot == SLOT_A) {
+        return BOOT_ERR_NONE;
+    }
+
+    if (Boot_App_IsCurrentSlotAValid() != false) {
+        g_boot_app.allow_upgrade_scan = 1U;
+        g_boot_app.jump_slot          = SLOT_A;
+        LOG_INFO(BOOT_LOG_TAG, "Stable slot=A selected");
+        return BOOT_ERR_NONE;
+    }
+
+    if (Boot_App_IsBackupSlotBValid() != false) {
+        return Boot_App_RestoreBackupToA(ROLLBACK_CRC_ERROR, "restore backup for stable boot");
     }
 
     g_boot_app.allow_upgrade_scan = 1U;
-    g_boot_app.jump_slot          = stable_slot;
-
-    if (stable_slot != SLOT_NONE) {
-        LOG_INFO(BOOT_LOG_TAG, "Stable slot=%s selected", Boot_Info_SlotToString(stable_slot));
-    } else {
-        LOG_WARN(BOOT_LOG_TAG, "No bootable slot, waiting for upgrade media");
-    }
-
+    g_boot_app.jump_slot          = SLOT_NONE;
+    LOG_WARN(BOOT_LOG_TAG, "No bootable slot=A, waiting for upgrade media");
     return BOOT_ERR_NONE;
 }
 
-static void Boot_App_ArmPendingUpgrade(uint8_t target_slot, const BootAppImageInfo *image) {
-    Boot_App_SetSlotMetadata(target_slot, image->size, image->crc32);
-    g_boot_app.boot_info.pending_slot    = target_slot;
-    g_boot_app.boot_info.confirmed       = BOOT_NOT_CONFIRMED;
-    g_boot_app.boot_info.boot_count      = 0U;
-    g_boot_app.boot_info.upgrade_state   = UPGRADE_READY;
-    g_boot_app.boot_info.rollback_reason = ROLLBACK_NONE;
-}
-
 static BootError Boot_App_EnsureJumpSlotValid(void) {
-    uint8_t other_slot;
-
-    if (Boot_Info_IsSlotValueValid(g_boot_app.jump_slot) == false) {
+    if (g_boot_app.jump_slot != SLOT_A) {
         return BOOT_ERR_NO_BOOTABLE_IMAGE;
     }
 
-    if (Boot_SimpleJump_IsSlotValidWithMetadata(g_boot_app.jump_slot,
-                                                Boot_App_GetSlotExpectedSize(g_boot_app.jump_slot),
-                                                Boot_App_GetSlotExpectedCrc(g_boot_app.jump_slot)) !=
-        false) {
+    if ((g_boot_app.boot_info.pending_slot == SLOT_A) &&
+        (g_boot_app.boot_info.upgrade_state == UPGRADE_TESTING)) {
+        if (Boot_App_IsPendingSlotAValid() != false) {
+            return BOOT_ERR_NONE;
+        }
+
+        if (Boot_App_IsBackupSlotBValid() != false) {
+            return Boot_App_RestoreBackupToA(ROLLBACK_CRC_ERROR, "restore backup before jump");
+        }
+
+        return BOOT_ERR_NO_BOOTABLE_IMAGE;
+    }
+
+    if (Boot_App_IsCurrentSlotAValid() != false) {
         return BOOT_ERR_NONE;
     }
 
-    if ((g_boot_app.boot_info.pending_slot != SLOT_NONE) &&
-        (g_boot_app.jump_slot == g_boot_app.boot_info.pending_slot)) {
-        return Boot_App_RollbackPending(ROLLBACK_CRC_ERROR);
-    }
-
-    other_slot = Boot_App_GetOtherSlot(g_boot_app.jump_slot);
-    if (Boot_SimpleJump_IsSlotValidWithMetadata(other_slot,
-                                                Boot_App_GetSlotExpectedSize(other_slot),
-                                                Boot_App_GetSlotExpectedCrc(other_slot)) != false) {
-        g_boot_app.boot_info.active_slot     = other_slot;
-        g_boot_app.boot_info.pending_slot    = SLOT_NONE;
-        g_boot_app.boot_info.confirmed       = BOOT_CONFIRMED;
-        g_boot_app.boot_info.boot_count      = 0U;
-        g_boot_app.boot_info.upgrade_state   = UPGRADE_IDLE;
-        g_boot_app.boot_info.rollback_reason = ROLLBACK_NONE;
-        (void) Boot_App_SaveBootInfo("fallback jump slot");
-        g_boot_app.jump_slot = other_slot;
-        return BOOT_ERR_NONE;
+    if (Boot_App_IsBackupSlotBValid() != false) {
+        return Boot_App_RestoreBackupToA(ROLLBACK_CRC_ERROR, "restore backup before stable jump");
     }
 
     return BOOT_ERR_NO_BOOTABLE_IMAGE;
 }
 
 static BootError Boot_App_PreparePendingJump(void) {
-    if ((g_boot_app.boot_info.pending_slot == SLOT_NONE) ||
-        (g_boot_app.jump_slot != g_boot_app.boot_info.pending_slot)) {
+    if ((g_boot_app.boot_info.pending_slot != SLOT_A) ||
+        (g_boot_app.boot_info.upgrade_state != UPGRADE_TESTING) || (g_boot_app.jump_slot != SLOT_A)) {
         return BOOT_ERR_NONE;
-    }
-
-    if (g_boot_app.boot_info.boot_count >= g_boot_app.boot_info.max_boot_count) {
-        return BOOT_ERR_PENDING_SLOT_EXHAUSTED;
     }
 
     g_boot_app.boot_info.boot_count++;
@@ -449,8 +664,8 @@ void Boot_App_Process(void) {
             Boot_Usb_Init();
             g_boot_app.reset_flags = Boot_Platform_ReadResetFlags();
             Boot_Platform_ClearResetFlags();
-            LOG_INFO(BOOT_LOG_TAG, "Dual-slot boot init, reset_flags=0x%08lX",
-                     (unsigned long) g_boot_app.reset_flags);
+            LOG_INFO(BOOT_LOG_TAG, "A-runtime/B-backup boot init, reset_flags=0x%08lX",
+                     (unsigned long)g_boot_app.reset_flags);
 
             error = Boot_App_ResolveStartupPlan();
             if (error != BOOT_ERR_NONE) {
@@ -500,50 +715,76 @@ void Boot_App_Process(void) {
 
             LOG_INFO(BOOT_LOG_TAG,
                      "Selected app image: %s size=%lu crc=0x%08lX addr=0x%08lX project=%s git=%s",
-                     g_boot_app.image_info.file, (unsigned long) g_boot_app.image_info.size,
-                     (unsigned long) g_boot_app.image_info.crc32,
-                     (unsigned long) g_boot_app.image_info.write_address,
+                     g_boot_app.image_info.file, (unsigned long)g_boot_app.image_info.size,
+                     (unsigned long)g_boot_app.image_info.crc32,
+                     (unsigned long)g_boot_app.image_info.write_address,
                      g_boot_app.image_info.project_name, g_boot_app.image_info.git_hash);
             LOG_INFO(BOOT_LOG_TAG, "App build time: %s", g_boot_app.image_info.build_time);
             g_boot_app.state = BOOT_APP_STATE_UPGRADE;
             return;
 
         case BOOT_APP_STATE_UPGRADE: {
-            uint8_t target_slot;
+            BootError backup_error;
+            BootError restore_error;
 
-            target_slot = Boot_App_GetOtherSlot(g_boot_app.boot_info.active_slot);
-            if ((g_boot_app.jump_slot == SLOT_NONE) &&
-                (Boot_SimpleJump_IsSlotValidWithMetadata(
-                     g_boot_app.boot_info.active_slot,
-                     Boot_App_GetSlotExpectedSize(g_boot_app.boot_info.active_slot),
-                     Boot_App_GetSlotExpectedCrc(g_boot_app.boot_info.active_slot)) == false)) {
-                target_slot = SLOT_A;
-            }
-
-            error = Boot_SimpleUpgrade_Run(&g_boot_app.image_info, target_slot);
-            if (error != BOOT_ERR_NONE) {
-                LOG_WARN(BOOT_LOG_TAG, "Upgrade failed, keep running slot=%s: %s",
-                         Boot_Info_SlotToString(g_boot_app.jump_slot),
-                         Boot_ErrorToString(error));
-                g_boot_app.last_error = error;
-                Boot_Handoff_SetError((uint32_t) error);
-                Boot_App_BlockRecoveryRetry(error);
+            if (Boot_App_HasSlotMetadata(SLOT_A) == false) {
+                LOG_WARN(BOOT_LOG_TAG, "Upgrade aborted: slot=A metadata missing, cannot create rollback backup");
+                Boot_App_BlockRecoveryRetry(BOOT_ERR_CTRL_CORRUPTED);
                 g_boot_app.state =
                     (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
                 return;
             }
 
-            Boot_App_ClearRecoveryRetryBlock("upgrade success");
-            Boot_App_ArmPendingUpgrade(target_slot, &g_boot_app.image_info);
-            error = Boot_App_SaveBootInfo("arm pending upgrade");
+            backup_error = Boot_App_BackupCurrentAToB();
+            if (backup_error != BOOT_ERR_NONE) {
+                LOG_WARN(BOOT_LOG_TAG, "Backup slot=A to slot=B failed: %s",
+                         Boot_ErrorToString(backup_error));
+                Boot_App_BlockRecoveryRetry(backup_error);
+                g_boot_app.state =
+                    (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
+                return;
+            }
+
+            error = Boot_App_MarkBackupReadyForInstall(&g_boot_app.image_info);
             if (error != BOOT_ERR_NONE) {
-                LOG_WARN(BOOT_LOG_TAG, "Pending upgrade metadata not stored, stay on stable slot");
+                LOG_WARN(BOOT_LOG_TAG, "Install state save failed, keep current slot=A: %s",
+                         Boot_ErrorToString(error));
                 g_boot_app.state = BOOT_APP_STATE_JUMP;
                 return;
             }
 
-            g_boot_app.jump_slot = target_slot;
-            LOG_INFO(BOOT_LOG_TAG, "Upgrade armed for slot=%s", Boot_Info_SlotToString(target_slot));
+            error = Boot_SimpleUpgrade_Run(&g_boot_app.image_info, SLOT_A);
+            if (error != BOOT_ERR_NONE) {
+                LOG_WARN(BOOT_LOG_TAG, "Upgrade write to slot=A failed: %s",
+                         Boot_ErrorToString(error));
+                restore_error =
+                    Boot_App_RestoreBackupToA(ROLLBACK_CRC_ERROR, "rollback after upgrade failure");
+                if (restore_error != BOOT_ERR_NONE) {
+                    LOG_WARN(BOOT_LOG_TAG, "Rollback restore from slot=B failed: %s",
+                             Boot_ErrorToString(restore_error));
+                    g_boot_app.last_error = restore_error;
+                    Boot_Handoff_SetError((uint32_t)restore_error);
+                    Boot_App_BlockRecoveryRetry(restore_error);
+                    g_boot_app.state =
+                        (g_boot_app.jump_slot == SLOT_NONE) ? BOOT_APP_STATE_RECOVERY : BOOT_APP_STATE_JUMP;
+                    return;
+                }
+
+                Boot_App_ClearRecoveryRetryBlock("rollback restored");
+                g_boot_app.state = BOOT_APP_STATE_JUMP;
+                return;
+            }
+
+            Boot_App_ClearRecoveryRetryBlock("upgrade success");
+            error = Boot_App_MarkPendingTesting();
+            if (error != BOOT_ERR_NONE) {
+                LOG_WARN(BOOT_LOG_TAG, "Pending test metadata save failed, fallback state remains recoverable: %s",
+                         Boot_ErrorToString(error));
+            }
+
+            g_boot_app.allow_upgrade_scan = 0U;
+            g_boot_app.jump_slot          = SLOT_A;
+            LOG_INFO(BOOT_LOG_TAG, "Upgrade written to slot=A, rollback backup preserved in slot=B");
             g_boot_app.state = BOOT_APP_STATE_JUMP;
             return;
         }
@@ -567,12 +808,6 @@ void Boot_App_Process(void) {
 
             error = Boot_App_PreparePendingJump();
             if (error != BOOT_ERR_NONE) {
-                if (Boot_App_RollbackPending(ROLLBACK_BOOT_OVERFLOW) == BOOT_ERR_NONE) {
-                    error = Boot_App_EnsureJumpSlotValid();
-                    if (error == BOOT_ERR_NONE) {
-                        error = Boot_SimpleJump_ToSlot(g_boot_app.jump_slot);
-                    }
-                }
                 Boot_App_EnterFatal(error);
                 return;
             }

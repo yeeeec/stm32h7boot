@@ -336,12 +336,21 @@ BootError Boot_Info_ConfirmRunningImage(void)
         Boot_Info_InitDefaults(&info);
     }
 
+    if ((running_slot == SLOT_A) && (info.pending_slot == SLOT_A) && (info.pending_size != 0U) &&
+        (info.pending_crc != 0U))
+    {
+        info.app_a_size = info.pending_size;
+        info.app_a_crc  = info.pending_crc;
+    }
+
     info.active_slot     = running_slot;
     info.pending_slot    = SLOT_NONE;
     info.confirmed       = BOOT_CONFIRMED;
     info.boot_count      = 0U;
     info.upgrade_state   = UPGRADE_SUCCESS;
     info.rollback_reason = ROLLBACK_NONE;
+    info.pending_size    = 0U;
+    info.pending_crc     = 0U;
 
     return Boot_Info_Store(&info);
 }
