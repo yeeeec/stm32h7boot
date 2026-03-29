@@ -21,7 +21,7 @@
       "cwd": "${workspaceFolder}",
       "executable": "${command:cmake.launchTargetPath}",
       "gdbPath": "${env:USERPROFILE}\\tools\\xpack-arm-none-eabi-gcc-15.2.1-1.1\\bin\\arm-none-eabi-gdb.exe",
-      "preLaunchTask": "Build Debug",
+      "preLaunchTask": "Build Active Preset",
       "device": "STM32H743XIHx",
       "runToEntryPoint": "main",
       "showDevDebugOutput": "raw"
@@ -35,7 +35,7 @@
       "cwd": "${workspaceFolder}",
       "executable": "${command:cmake.launchTargetPath}",
       "gdbPath": "${env:USERPROFILE}\\tools\\xpack-arm-none-eabi-gcc-15.2.1-1.1\\bin\\arm-none-eabi-gdb.exe",
-      "preLaunchTask": "Build Debug",
+      "preLaunchTask": "Build Active Preset",
       "device": "STM32H743XIHx",
       "targetId": "stm32h743xx",
       "serverArgs": [

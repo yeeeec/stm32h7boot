@@ -11,12 +11,17 @@
 #define BOOT_EXTFLASH_CMD_READ_STATUS   0x05U
 #define BOOT_EXTFLASH_CMD_WRITE_ENABLE  0x06U
 #define BOOT_EXTFLASH_CMD_READ_DATA     0x03U
+#define BOOT_EXTFLASH_CMD_FAST_READ     0x0BU
 #define BOOT_EXTFLASH_CMD_PAGE_PROGRAM  0x02U
 #define BOOT_EXTFLASH_CMD_SECTOR_ERASE  0x20U
+#define BOOT_EXTFLASH_CMD_RESET_ENABLE  0x66U
+#define BOOT_EXTFLASH_CMD_RESET_MEMORY  0x99U
 
 #define BOOT_EXTFLASH_STATUS_WIP        0x01U
 #define BOOT_EXTFLASH_STATUS_WEL        0x02U
 #define BOOT_EXTFLASH_STATUS_POLL_INTERVAL 0x10U
+#define BOOT_EXTFLASH_RESET_DELAY_MS    1U
+#define BOOT_EXTFLASH_FAST_READ_DUMMY_CYCLES 8U
 
 static uint8_t g_boot_extflash_initialized;
 static uint8_t g_boot_extflash_memory_mapped;
@@ -91,13 +96,13 @@ static BootError Boot_ExtFlash_EnableMemoryMapped(void) {
 
     memset(&command, 0, sizeof(command));
     command.InstructionMode   = QSPI_INSTRUCTION_1_LINE;
-    command.Instruction       = BOOT_EXTFLASH_CMD_READ_DATA;
+    command.Instruction       = BOOT_EXTFLASH_CMD_FAST_READ;
     command.AddressMode       = QSPI_ADDRESS_1_LINE;
     command.AddressSize       = QSPI_ADDRESS_24_BITS;
     command.Address           = 0U;
     command.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
     command.DataMode          = QSPI_DATA_1_LINE;
-    command.DummyCycles       = 0U;
+    command.DummyCycles       = BOOT_EXTFLASH_FAST_READ_DUMMY_CYCLES;
     command.DdrMode           = QSPI_DDR_MODE_DISABLE;
     command.DdrHoldHalfCycle  = QSPI_DDR_HHC_ANALOG_DELAY;
     command.SIOOMode          = QSPI_SIOO_INST_EVERY_CMD;
@@ -134,6 +139,29 @@ static BootError Boot_ExtFlash_SendSimpleCommand(uint8_t instruction) {
 
     return Boot_ExtFlash_CommandError(BOOT_ERR_EXTFLASH_WRITE,
                                       platform_qspi_command(&command, BOOT_EXTFLASH_CMD_TIMEOUT_MS));
+}
+
+static BootError Boot_ExtFlash_ResetMemory(void) {
+    BootError error;
+
+    error = Boot_ExtFlash_AbortMemoryMapped();
+    if (error != BOOT_ERR_NONE) {
+        return error;
+    }
+
+    error = Boot_ExtFlash_SendSimpleCommand(BOOT_EXTFLASH_CMD_RESET_ENABLE);
+    if (error != BOOT_ERR_NONE) {
+        return BOOT_ERR_EXTFLASH_READ;
+    }
+
+    error = Boot_ExtFlash_SendSimpleCommand(BOOT_EXTFLASH_CMD_RESET_MEMORY);
+    if (error != BOOT_ERR_NONE) {
+        return BOOT_ERR_EXTFLASH_READ;
+    }
+
+    HAL_Delay(BOOT_EXTFLASH_RESET_DELAY_MS);
+    Boot_ExtFlash_InvalidateCaches();
+    return BOOT_ERR_NONE;
 }
 
 static void Boot_ExtFlash_BuildStatusCommand(QSPI_CommandTypeDef *command) {
@@ -207,6 +235,11 @@ static BootError Boot_ExtFlash_EnsureReady(void) {
     }
 
     if (g_boot_extflash_initialized == 0U) {
+        error = Boot_ExtFlash_ResetMemory();
+        if (error != BOOT_ERR_NONE) {
+            return error;
+        }
+
         error = Boot_ExtFlash_EnableMemoryMapped();
         if (error != BOOT_ERR_NONE) {
             return error;

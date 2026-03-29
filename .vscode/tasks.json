@@ -35,6 +35,19 @@
       "problemMatcher": "$gcc"
     },
     {
+      "label": "Build Active Preset",
+      "type": "shell",
+      "command": "${env:USERPROFILE}\\tools\\cmake-4.2.3-windows-x86_64\\bin\\cmake.exe",
+      "args": [
+        "--build",
+        "--preset",
+        "${command:cmake.activeBuildPresetName}",
+        "-j",
+        "8"
+      ],
+      "problemMatcher": "$gcc"
+    },
+    {
       "label": "Clean Debug",
       "type": "shell",
       "command": "${env:USERPROFILE}\\tools\\cmake-4.2.3-windows-x86_64\\bin\\cmake.exe",
