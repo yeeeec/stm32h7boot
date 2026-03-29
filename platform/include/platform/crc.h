@@ -38,6 +38,9 @@ uint32_t crc_calculate_words(const uint32_t *data, size_t length);
 /**
  * @brief Calculate bytes.
  *
+ * Bytes are packed into 32-bit words in little-endian order before they are
+ * fed into the hardware CRC unit. The last partial word is zero-padded.
+ *
  * @param data
  * @param length
  * @return

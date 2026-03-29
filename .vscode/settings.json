@@ -1,5 +1,5 @@
 {
-  "cortex-debug.variableUseNaturalFormat": true,
+  "cortex-debug.variableUseNaturalFormat": false,
   "cmake.useCMakePresets": "always",
   "cmake.configureOnOpen": true,
   "cmake.cmakePath": "${env:USERPROFILE}\\tools\\cmake-4.2.3-windows-x86_64\\bin\\cmake.exe",

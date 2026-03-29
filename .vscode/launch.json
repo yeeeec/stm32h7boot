@@ -2,6 +2,31 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug STM32H743 (OpenOCD CMSIS-DAP)",
+      "type": "cortex-debug",
+      "request": "launch",
+      "servertype": "openocd",
+      "serverpath": "${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe\\xpack-openocd-0.12.0-7\\bin\\openocd.exe",
+      "searchDir": [
+        "${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe\\xpack-openocd-0.12.0-7\\openocd\\scripts"
+      ],
+      "configFiles": [
+        "interface/cmsis-dap.cfg",
+        "target/stm32h7x.cfg"
+      ],
+      "openOCDLaunchCommands": [
+        "transport select swd",
+        "adapter serial DA4160F4A34411D7"
+      ],
+      "cwd": "${workspaceFolder}",
+      "executable": "${command:cmake.launchTargetPath}",
+      "gdbPath": "${env:USERPROFILE}\\tools\\xpack-arm-none-eabi-gcc-15.2.1-1.1\\bin\\arm-none-eabi-gdb.exe",
+      "preLaunchTask": "Build Debug",
+      "device": "STM32H743XIHx",
+      "runToEntryPoint": "main",
+      "showDevDebugOutput": "raw"
+    },
+    {
       "name": "Debug STM32H743 (pyOCD)",
       "type": "cortex-debug",
       "request": "launch",

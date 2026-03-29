@@ -14,6 +14,9 @@ typedef struct
     uint8_t padding[BOOT_INFO_RECORD_SIZE - sizeof(s_BootInfo)];
 } BootInfoRecord;
 
+_Static_assert(sizeof(s_BootInfo) <= BOOT_INFO_RECORD_SIZE,
+               "BootInfo must fit within a flash record");
+
 typedef struct
 {
     s_BootInfo latest;

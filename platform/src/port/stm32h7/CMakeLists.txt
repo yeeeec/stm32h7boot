@@ -4,6 +4,7 @@ target_sources(
   platform_port_stm32h7
   PRIVATE
     "${CMAKE_CURRENT_LIST_DIR}/boot_platform_backend.c"
+    "${CMAKE_CURRENT_LIST_DIR}/crc_backend.c"
     "${CMAKE_CURRENT_LIST_DIR}/system_backend.c"
     "${CMAKE_CURRENT_LIST_DIR}/fmc_sdram_backend.c"
     "${CMAKE_CURRENT_LIST_DIR}/fmc_io_backend.c"

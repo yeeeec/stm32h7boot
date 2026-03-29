@@ -109,14 +109,28 @@ static BootError Boot_App_SaveBootInfo(const char *reason) {
     return error;
 }
 
-static void Boot_App_SetSlotMetadata(uint8_t slot, uint32_t crc32) {
+static void Boot_App_SetSlotMetadata(uint8_t slot, uint32_t size, uint32_t crc32) {
     if (slot == SLOT_A) {
         g_boot_app.boot_info.version_a = 0U;
+        g_boot_app.boot_info.app_a_size = size;
         g_boot_app.boot_info.app_a_crc = crc32;
     } else if (slot == SLOT_B) {
         g_boot_app.boot_info.version_b = 0U;
+        g_boot_app.boot_info.app_b_size = size;
         g_boot_app.boot_info.app_b_crc = crc32;
     }
+}
+
+static uint32_t Boot_App_GetSlotExpectedSize(uint8_t slot) {
+    if (slot == SLOT_A) {
+        return g_boot_app.boot_info.app_a_size;
+    }
+
+    if (slot == SLOT_B) {
+        return g_boot_app.boot_info.app_b_size;
+    }
+
+    return 0U;
 }
 
 static uint32_t Boot_App_GetSlotExpectedCrc(uint8_t slot) {
@@ -194,8 +208,9 @@ static void Boot_App_TryPromoteConfirmedPending(void) {
         return;
     }
 
-    if (Boot_SimpleJump_IsSlotValidWithCrc(
-            confirmed_slot, Boot_App_GetSlotExpectedCrc(confirmed_slot)) == false) {
+    if (Boot_SimpleJump_IsSlotValidWithMetadata(confirmed_slot,
+                                                Boot_App_GetSlotExpectedSize(confirmed_slot),
+                                                Boot_App_GetSlotExpectedCrc(confirmed_slot)) == false) {
         LOG_WARN(BOOT_LOG_TAG, "App-ready handoff ignored, slot=%s no longer validates",
                  Boot_Info_SlotToString(confirmed_slot));
         return;
@@ -254,11 +269,14 @@ static BootError Boot_App_LoadOrInitializeBootInfo(void) {
 static BootError Boot_App_RollbackPending(uint8_t rollback_reason) {
     uint8_t fallback_slot = g_boot_app.boot_info.active_slot;
 
-    if (Boot_SimpleJump_IsSlotValidWithCrc(fallback_slot, Boot_App_GetSlotExpectedCrc(fallback_slot)) ==
-        false) {
+    if (Boot_SimpleJump_IsSlotValidWithMetadata(fallback_slot,
+                                                Boot_App_GetSlotExpectedSize(fallback_slot),
+                                                Boot_App_GetSlotExpectedCrc(fallback_slot)) == false) {
         fallback_slot = Boot_App_GetOtherSlot(g_boot_app.boot_info.pending_slot);
-        if (Boot_SimpleJump_IsSlotValidWithCrc(
-                fallback_slot, Boot_App_GetSlotExpectedCrc(fallback_slot)) == false) {
+        if (Boot_SimpleJump_IsSlotValidWithMetadata(fallback_slot,
+                                                    Boot_App_GetSlotExpectedSize(fallback_slot),
+                                                    Boot_App_GetSlotExpectedCrc(fallback_slot)) ==
+            false) {
             fallback_slot = SLOT_NONE;
         }
     }
@@ -299,8 +317,9 @@ static BootError Boot_App_ResolveStartupPlan(void) {
     other_slot  = Boot_App_GetOtherSlot(active_slot);
 
     if (g_boot_app.boot_info.pending_slot != SLOT_NONE) {
-        if (Boot_SimpleJump_IsSlotValidWithCrc(
+        if (Boot_SimpleJump_IsSlotValidWithMetadata(
                 g_boot_app.boot_info.pending_slot,
+                Boot_App_GetSlotExpectedSize(g_boot_app.boot_info.pending_slot),
                 Boot_App_GetSlotExpectedCrc(g_boot_app.boot_info.pending_slot)) == false) {
             return Boot_App_RollbackPending(ROLLBACK_CRC_ERROR);
         }
@@ -324,11 +343,12 @@ static BootError Boot_App_ResolveStartupPlan(void) {
     }
 
     stable_slot = SLOT_NONE;
-    if (Boot_SimpleJump_IsSlotValidWithCrc(active_slot, Boot_App_GetSlotExpectedCrc(active_slot)) !=
-        false) {
+    if (Boot_SimpleJump_IsSlotValidWithMetadata(active_slot, Boot_App_GetSlotExpectedSize(active_slot),
+                                                Boot_App_GetSlotExpectedCrc(active_slot)) != false) {
         stable_slot = active_slot;
-    } else if (Boot_SimpleJump_IsSlotValidWithCrc(
-                   other_slot, Boot_App_GetSlotExpectedCrc(other_slot)) != false) {
+    } else if (Boot_SimpleJump_IsSlotValidWithMetadata(
+                   other_slot, Boot_App_GetSlotExpectedSize(other_slot),
+                   Boot_App_GetSlotExpectedCrc(other_slot)) != false) {
         stable_slot = other_slot;
         g_boot_app.boot_info.active_slot     = other_slot;
         g_boot_app.boot_info.pending_slot    = SLOT_NONE;
@@ -352,7 +372,7 @@ static BootError Boot_App_ResolveStartupPlan(void) {
 }
 
 static void Boot_App_ArmPendingUpgrade(uint8_t target_slot, const BootAppImageInfo *image) {
-    Boot_App_SetSlotMetadata(target_slot, image->crc32);
+    Boot_App_SetSlotMetadata(target_slot, image->size, image->crc32);
     g_boot_app.boot_info.pending_slot    = target_slot;
     g_boot_app.boot_info.confirmed       = BOOT_NOT_CONFIRMED;
     g_boot_app.boot_info.boot_count      = 0U;
@@ -367,8 +387,10 @@ static BootError Boot_App_EnsureJumpSlotValid(void) {
         return BOOT_ERR_NO_BOOTABLE_IMAGE;
     }
 
-    if (Boot_SimpleJump_IsSlotValidWithCrc(
-            g_boot_app.jump_slot, Boot_App_GetSlotExpectedCrc(g_boot_app.jump_slot)) != false) {
+    if (Boot_SimpleJump_IsSlotValidWithMetadata(g_boot_app.jump_slot,
+                                                Boot_App_GetSlotExpectedSize(g_boot_app.jump_slot),
+                                                Boot_App_GetSlotExpectedCrc(g_boot_app.jump_slot)) !=
+        false) {
         return BOOT_ERR_NONE;
     }
 
@@ -378,8 +400,9 @@ static BootError Boot_App_EnsureJumpSlotValid(void) {
     }
 
     other_slot = Boot_App_GetOtherSlot(g_boot_app.jump_slot);
-    if (Boot_SimpleJump_IsSlotValidWithCrc(
-            other_slot, Boot_App_GetSlotExpectedCrc(other_slot)) != false) {
+    if (Boot_SimpleJump_IsSlotValidWithMetadata(other_slot,
+                                                Boot_App_GetSlotExpectedSize(other_slot),
+                                                Boot_App_GetSlotExpectedCrc(other_slot)) != false) {
         g_boot_app.boot_info.active_slot     = other_slot;
         g_boot_app.boot_info.pending_slot    = SLOT_NONE;
         g_boot_app.boot_info.confirmed       = BOOT_CONFIRMED;
@@ -490,8 +513,9 @@ void Boot_App_Process(void) {
 
             target_slot = Boot_App_GetOtherSlot(g_boot_app.boot_info.active_slot);
             if ((g_boot_app.jump_slot == SLOT_NONE) &&
-                (Boot_SimpleJump_IsSlotValidWithCrc(
+                (Boot_SimpleJump_IsSlotValidWithMetadata(
                      g_boot_app.boot_info.active_slot,
+                     Boot_App_GetSlotExpectedSize(g_boot_app.boot_info.active_slot),
                      Boot_App_GetSlotExpectedCrc(g_boot_app.boot_info.active_slot)) == false)) {
                 target_slot = SLOT_A;
             }

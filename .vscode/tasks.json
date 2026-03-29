@@ -48,14 +48,16 @@
       "problemMatcher": []
     },
     {
-      "label": "Flash Debug (ST-Link / OpenOCD)",
+      "label": "Flash Debug (CMSIS-DAP / OpenOCD)",
       "type": "shell",
       "command": "${env:LOCALAPPDATA}\\Microsoft\\WinGet\\Packages\\xpack-dev-tools.openocd-xpack_Microsoft.Winget.Source_8wekyb3d8bbwe\\xpack-openocd-0.12.0-7\\bin\\openocd.exe",
       "args": [
         "-f",
-        "interface/stlink.cfg",
+        "interface/cmsis-dap.cfg",
         "-f",
         "target/stm32h7x.cfg",
+        "-c",
+        "adapter serial DA4160F4A34411D7",
         "-c",
         "program ${workspaceFolder}/build/Debug/stm32h7boot.elf verify reset exit"
       ],

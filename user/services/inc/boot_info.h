@@ -56,6 +56,8 @@ typedef struct
     uint8_t  reserved0;
     uint32_t version_a;
     uint32_t version_b;
+    uint32_t app_a_size;
+    uint32_t app_b_size;
     uint32_t app_a_crc;
     uint32_t app_b_crc;
     uint32_t last_reset_reason;

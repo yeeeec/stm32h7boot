@@ -134,7 +134,7 @@ static BootError Boot_SimpleUpgrade_RunSingleAttempt(const BootAppImageInfo *ima
 
     Boot_Platform_FileClose(&file);
 
-    error = Boot_SimpleJump_ValidateSlot(target_slot, image->crc32);
+    error = Boot_SimpleJump_ValidateSlot(target_slot, image->size, image->crc32);
     if (error != BOOT_ERR_NONE) {
         return error;
     }
