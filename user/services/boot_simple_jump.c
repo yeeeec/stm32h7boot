@@ -221,12 +221,6 @@ BootError Boot_SimpleJump_ToAddressUnchecked(uint32_t app_base) {
         return error;
     }
 
-    if (Boot_ExtFlash_IsRangeValid(app_base, sizeof(uint32_t)) != false) {
-        if (Boot_ExtFlash_Init() != BOOT_ERR_NONE) {
-            return BOOT_ERR_EXTFLASH_READ;
-        }
-    }
-
     Boot_SimpleJump_EnterApp(app_base, stack_pointer, reset_handler);
     return BOOT_ERR_JUMP_FAILED;
 }
@@ -249,10 +243,6 @@ BootError Boot_SimpleJump_ToSlot(uint8_t slot) {
     error = Boot_SimpleJump_ReadVector(region, &stack_pointer, &reset_handler);
     if (error != BOOT_ERR_NONE) {
         return error;
-    }
-
-    if (Boot_ExtFlash_Init() != BOOT_ERR_NONE) {
-        return BOOT_ERR_EXTFLASH_READ;
     }
 
     LOG_INFO(BOOT_LOG_TAG, "App vector sp=0x%08lX reset=0x%08lX", (unsigned long)stack_pointer,
