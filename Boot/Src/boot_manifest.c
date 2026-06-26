@@ -252,7 +252,6 @@ static int Boot_Json_TokenEq(const char *json, const BootJsonToken *token, const
   {
     return 0;
   }
-
   value_length = strlen(value);
   token_length = (size_t)(token->end - token->start);
 
