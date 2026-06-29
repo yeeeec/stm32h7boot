@@ -10,7 +10,7 @@
       "device": "STM32H743XI",
       "interface": "swd",
       "runToEntryPoint": "main",
-      "gdbPath": "C:/Program Files (x86)/Arm GNU Toolchain arm-none-eabi/14.2 rel1/bin/arm-none-eabi-gdb",
+      "gdbPath": "C:/DevToolchain/arm-gcc/14.2 rel1/bin/arm-none-eabi-gdb",
       "executable": "${command:cmake.launchTargetPath}",
       "svdFile": "${workspaceFolder}/STM32H743.svd",
       "cwd": "${workspaceFolder}",

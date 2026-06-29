@@ -1,0 +1,83 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Cppcheck: currentFiles",
+      "type": "shell",
+      "command": "cppcheck",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "args": [
+        "--xml",
+        "--xml-version=2",
+        "--enable=warning,style,performance,portability",
+        "--std=c11",
+        "--inline-suppr",
+        "--output-file=${fileDirname}\\${fileBasenameNoExtension}.cppcheck.xml",
+        "${file}"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Cppcheck: stagedChanges",
+      "type": "process",
+      "command": "powershell.exe",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\.vscode\\cppcheck-staged.ps1"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Cppcheck: uncommittedChanges",
+      "type": "process",
+      "command": "powershell.exe",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\.vscode\\cppcheck-uncommitted.ps1"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "Cppcheck: projectScan",
+      "type": "process",
+      "command": "powershell.exe",
+      "group": "test",
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": true
+      },
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}\\.vscode\\cppcheck-project.ps1"
+      ],
+      "problemMatcher": []
+    }
+  ]
+}
