@@ -18,12 +18,11 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "fatfs.h"
-#include "usb_host.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#include "boot_app.h"
+#include "boot_config.h"
+#include "boot_jump.h"
 
 /* USER CODE END Includes */
 
@@ -74,11 +73,35 @@ static void MX_QUADSPI_Init(void);
 void MX_USB_HOST_Process(void);
 
 /* USER CODE BEGIN PFP */
+static HAL_StatusTypeDef QSPI_EnableMemoryMappedMode(void);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+static HAL_StatusTypeDef QSPI_EnableMemoryMappedMode(void)
+{
+  QSPI_CommandTypeDef command = {0};
+  QSPI_MemoryMappedTypeDef memory_mapped = {0};
+
+  /* 0x0B is supported by standard SPI NOR devices and does not require
+     enabling the device-specific quad mode before the vector table is read. */
+  command.InstructionMode = QSPI_INSTRUCTION_1_LINE;
+  command.Instruction = BOOT_QSPI_FAST_READ_COMMAND;
+  command.AddressMode = QSPI_ADDRESS_1_LINE;
+  command.AddressSize = QSPI_ADDRESS_24_BITS;
+  command.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
+  command.DataMode = QSPI_DATA_1_LINE;
+  command.DummyCycles = BOOT_QSPI_FAST_READ_DUMMY_CYCLES;
+  command.DdrMode = QSPI_DDR_MODE_DISABLE;
+  command.DdrHoldHalfCycle = QSPI_DDR_HHC_ANALOG_DELAY;
+  command.SIOOMode = QSPI_SIOO_INST_EVERY_CMD;
+
+  memory_mapped.TimeOutActivation = QSPI_TIMEOUT_COUNTER_DISABLE;
+  memory_mapped.TimeOutPeriod = 0U;
+
+  return HAL_QSPI_MemoryMapped(&hqspi, &command, &memory_mapped);
+}
 
 /* USER CODE END 0 */
 
@@ -116,25 +139,20 @@ int main(void)
   /* Configure the system clock */
   SystemClock_Config();
 
-  /* Configure the peripherals common clocks */
-  PeriphCommonClock_Config();
-
   /* USER CODE BEGIN SysInit */
 
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
-  MX_GPIO_Init();
-  MX_FMC_Init();
-  MX_CRC_Init();
-  MX_TIM1_Init();
-  MX_LTDC_Init();
-  MX_DMA2D_Init();
   MX_QUADSPI_Init();
-  MX_FATFS_Init();
-  MX_USB_HOST_Init();
   /* USER CODE BEGIN 2 */
-  Boot_App_Init();
+  if (QSPI_EnableMemoryMappedMode() != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  (void)Boot_Jump_ToAddress(BOOT_APPLICATION_ADDRESS);
+  Error_Handler();
 
   /* USER CODE END 2 */
 
@@ -143,10 +161,7 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-    MX_USB_HOST_Process();
-
     /* USER CODE BEGIN 3 */
-    Boot_App_Process();
   }
   /* USER CODE END 3 */
 }
@@ -559,6 +574,10 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void SysTick_Handler(void)
+{
+  HAL_IncTick();
+}
 
 /* USER CODE END 4 */
 

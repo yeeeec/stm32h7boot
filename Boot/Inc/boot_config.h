@@ -5,6 +5,10 @@
 
 #define BOOT_PROJECT_VERSION                "0.1.0"
 
+#define BOOT_APPLICATION_ADDRESS            0x90000000UL
+#define BOOT_QSPI_FAST_READ_COMMAND         0x0BU
+#define BOOT_QSPI_FAST_READ_DUMMY_CYCLES    8U
+
 #define BOOT_VENDOR_NAME                    "DEFAULT"
 #define BOOT_PRODUCT_NAME                   "STM32H7BOOT"
 #define BOOT_BOARD_NAME                     "STM32H743"

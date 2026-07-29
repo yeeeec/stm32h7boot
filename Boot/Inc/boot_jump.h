@@ -1,9 +1,10 @@
 #ifndef BOOT_JUMP_H
 #define BOOT_JUMP_H
 
-#include "boot_error.h"
-#include "boot_types.h"
+#include <stdint.h>
 
-BootError Boot_Jump_ToSlot(BootSlot slot);
+#include "boot_error.h"
+
+BootError Boot_Jump_ToAddress(uint32_t vector_table_address);
 
 #endif

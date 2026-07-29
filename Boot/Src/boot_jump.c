@@ -1,10 +1,25 @@
 #include "boot_jump.h"
 
 #include "main.h"
-#include "boot_image.h"
 
-typedef void (*BootEntryPoint)(void);
+static void Boot_Jump_Start(uint32_t stack_pointer __attribute__((unused)),
+                            uint32_t reset_handler __attribute__((unused)))
+  __attribute__((naked, noreturn));
 
+static void Boot_Jump_Start(uint32_t stack_pointer __attribute__((unused)),
+                            uint32_t reset_handler __attribute__((unused)))
+{
+  __asm volatile (
+    "msr msp, r0\n"
+    "movs r0, #0\n"
+    "msr psp, r0\n"
+    "msr basepri, r0\n"
+    "msr faultmask, r0\n"
+    "msr control, r0\n"
+    "isb\n"
+    "cpsie i\n"
+    "bx r1\n");
+}
 static void Boot_Jump_DisableInterrupts(void)
 {
   __disable_irq();
@@ -22,18 +37,10 @@ static void Boot_Jump_DisableCaches(void)
   SCB_DisableICache();
 }
 
-BootError Boot_Jump_ToSlot(BootSlot slot)
+BootError Boot_Jump_ToAddress(uint32_t vector_table_address)
 {
-  uint32_t vector_table_address;
   uint32_t stack_pointer;
   uint32_t reset_handler;
-  BootError error;
-
-  error = Boot_Image_GetVectorTableAddress(slot, &vector_table_address);
-  if (error != BOOT_ERR_NONE)
-  {
-    return error;
-  }
 
   stack_pointer = *(const uint32_t *)vector_table_address;
   reset_handler = *(const uint32_t *)(vector_table_address + sizeof(uint32_t));
@@ -43,21 +50,15 @@ BootError Boot_Jump_ToSlot(BootSlot slot)
   SysTick->CTRL = 0U;
   SysTick->LOAD = 0U;
   SysTick->VAL = 0U;
+  SCB->ICSR = SCB_ICSR_PENDSTCLR_Msk | SCB_ICSR_PENDSVCLR_Msk;
 
-  HAL_RCC_DeInit();
-  HAL_DeInit();
   Boot_Jump_DisableCaches();
 
   __DSB();
   __ISB();
 
   SCB->VTOR = vector_table_address;
-  __set_MSP(stack_pointer);
-  __set_PSP(0U);
-  __set_CONTROL(0U);
   __DSB();
   __ISB();
-  ((BootEntryPoint)reset_handler)();
-
-  return BOOT_ERR_JUMP_FAILED;
+  Boot_Jump_Start(stack_pointer, reset_handler);
 }
