@@ -31,8 +31,6 @@
 #include "stm32h7xx_hal.h"
 
 /* USER CODE BEGIN INCLUDE */
-#include <stdint.h>
-#include "usbh_msc.h"
 
 /* USER CODE END INCLUDE */
 
@@ -73,10 +71,6 @@ typedef enum {
 void MX_USB_HOST_Init(void);
 
 void MX_USB_HOST_Process(void);
-uint16_t USB_HOST_GetVid(void);
-uint16_t USB_HOST_GetPid(void);
-const char *USB_HOST_GetSerial(void);
-USBH_StatusTypeDef USB_HOST_GetLunInfo(uint8_t lun, MSC_LUNTypeDef *info);
 
 /**
   * @}
