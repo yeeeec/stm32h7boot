@@ -2,9 +2,9 @@
 
 #include <stddef.h>
 
-#define WATCHDOG_REFRESH_INTERVAL_MS 100U
+#include "logging.h"
 
-static const uint8_t startup_message[] = "firmware runtime initialized\r\n";
+#define WATCHDOG_REFRESH_INTERVAL_MS 100U
 
 firmware_status_t RuntimeService_Init(
     runtime_service_t *service,
@@ -28,29 +28,19 @@ firmware_status_t RuntimeService_Init(
 
     service->clock = dependencies->clock;
     service->watchdog = dependencies->watchdog;
-    service->log = dependencies->log;
     service->last_watchdog_refresh_ms = service->clock->now_ms(
         service->clock->context);
 
     status = service->watchdog->refresh(service->watchdog->context);
     if (!FirmwareStatus_IsOk(status))
     {
+        LOG_ERROR("runtime", "initial watchdog refresh failed: %d",
+                  (int)status);
         return status;
     }
 
-    if ((service->log != NULL) && (service->log->write != NULL))
-    {
-        status = service->log->write(
-            service->log->context,
-            startup_message,
-            sizeof(startup_message) - 1U);
-        if (!FirmwareStatus_IsOk(status))
-        {
-            return status;
-        }
-    }
-
     service->initialized = 1;
+    LOG_INFO("runtime", "runtime service initialized");
     return FIRMWARE_STATUS_OK;
 }
 
@@ -71,6 +61,7 @@ firmware_status_t RuntimeService_Process(runtime_service_t *service)
             service->watchdog->context);
         if (!FirmwareStatus_IsOk(status))
         {
+            LOG_ERROR("runtime", "watchdog refresh failed: %d", (int)status);
             return status;
         }
         service->last_watchdog_refresh_ms = now_ms;

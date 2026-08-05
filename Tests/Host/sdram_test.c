@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <stdint.h>
 
-#include "devices/sdram.h"
+#include "sdram.h"
 
 typedef struct
 {

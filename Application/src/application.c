@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 
+#include "logging.h"
 #include "services/runtime_service_api.h"
 
 static struct runtime_service *application_runtime_service;
@@ -34,6 +35,7 @@ firmware_status_t Application_Init(void)
     }
 
     application_initialized = 1;
+    LOG_INFO("application", "application initialized");
     return FIRMWARE_STATUS_OK;
 }
 

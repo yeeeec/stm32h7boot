@@ -2,7 +2,7 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "devices/spi_nor.h"
+#include "spi_nor.h"
 
 #define COMMAND_WRITE_ENABLE        0x06U
 #define COMMAND_READ_STATUS         0x05U
