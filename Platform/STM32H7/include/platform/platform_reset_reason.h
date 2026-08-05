@@ -1,0 +1,18 @@
+#ifndef PLATFORM_RESET_REASON_H
+#define PLATFORM_RESET_REASON_H
+
+typedef enum
+{
+    PLATFORM_RESET_REASON_UNKNOWN = 0,
+    PLATFORM_RESET_REASON_POWER_ON,
+    PLATFORM_RESET_REASON_PIN,
+    PLATFORM_RESET_REASON_SOFTWARE,
+    PLATFORM_RESET_REASON_INDEPENDENT_WATCHDOG,
+    PLATFORM_RESET_REASON_WINDOW_WATCHDOG,
+    PLATFORM_RESET_REASON_LOW_POWER
+} platform_reset_reason_t;
+
+void Platform_ResetReasonCapture(void);
+platform_reset_reason_t Platform_ResetReasonGet(void);
+
+#endif

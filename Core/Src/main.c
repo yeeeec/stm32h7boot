@@ -33,7 +33,10 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "application/application.h"
+#include "bsp/bsp.h"
+#include "composition/composition.h"
+#include "platform/platform.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -127,7 +130,22 @@ int main(void)
   MX_USART1_UART_Init();
   MX_IWDG1_Init();
   /* USER CODE BEGIN 2 */
-
+  if (!FirmwareStatus_IsOk(Platform_Init()))
+  {
+    Error_Handler();
+  }
+  if (!FirmwareStatus_IsOk(BSP_Init()))
+  {
+    Error_Handler();
+  }
+  if (!FirmwareStatus_IsOk(Composition_Init()))
+  {
+    Error_Handler();
+  }
+  if (!FirmwareStatus_IsOk(Application_Init()))
+  {
+    Error_Handler();
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -138,6 +156,11 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
+    Platform_Process();
+    if (!FirmwareStatus_IsOk(Application_Process()))
+    {
+      Error_Handler();
+    }
   }
   /* USER CODE END 3 */
 }

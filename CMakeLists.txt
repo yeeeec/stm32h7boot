@@ -37,6 +37,35 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+# Narrow facade for project-owned low-level code. Unlike the generated
+# stm32cubemx target, this deliberately excludes middleware include paths.
+add_library(cubemx_generated_stm32h7boot INTERFACE)
+target_include_directories(cubemx_generated_stm32h7boot INTERFACE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Core/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/STM32H7xx_HAL_Driver/Inc
+    ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/STM32H7xx_HAL_Driver/Inc/Legacy
+    ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/CMSIS/Device/ST/STM32H7xx/Include
+    ${CMAKE_CURRENT_SOURCE_DIR}/Drivers/CMSIS/Include
+)
+target_compile_definitions(cubemx_generated_stm32h7boot INTERFACE
+    USE_PWR_LDO_SUPPLY
+    USE_HAL_DRIVER
+    STM32H743xx
+    $<$<CONFIG:Debug>:DEBUG>
+)
+
+# Add project-owned architecture layers. The order mirrors the dependency
+# direction and keeps HAL/CubeMX include paths out of Services and Application.
+add_subdirectory(Shared)
+add_subdirectory(Interfaces)
+add_subdirectory(Drivers/Devices)
+add_subdirectory(Platform/STM32H7)
+add_subdirectory(BSP)
+add_subdirectory(Adapters)
+add_subdirectory(Services)
+add_subdirectory(Application)
+add_subdirectory(Composition)
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -63,6 +92,10 @@ list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
+    platform_stm32h7
+    board_bsp
+    firmware_application
+    firmware_composition
 
     # Add user defined libraries
 )
