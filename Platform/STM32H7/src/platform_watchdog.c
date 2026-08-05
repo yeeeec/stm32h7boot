@@ -1,3 +1,7 @@
+/**
+ * @file platform_watchdog.c
+ * @brief STM32H7 independent-watchdog service implementation.
+ */
 #include "platform/platform_watchdog.h"
 
 #include "iwdg.h"

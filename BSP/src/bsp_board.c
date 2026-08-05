@@ -1,3 +1,7 @@
+/**
+ * @file bsp_board.c
+ * @brief Static board identity implementation.
+ */
 #include "bsp/bsp_board.h"
 
 static const bsp_board_info_t board_info = {

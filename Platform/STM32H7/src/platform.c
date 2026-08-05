@@ -1,3 +1,7 @@
+/**
+ * @file platform.c
+ * @brief STM32H7 platform lifecycle implementation.
+ */
 #include "platform/platform.h"
 
 #include "platform/platform_reset_reason.h"

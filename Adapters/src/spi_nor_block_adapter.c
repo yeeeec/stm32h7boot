@@ -1,3 +1,7 @@
+/**
+ * @file spi_nor_block_adapter.c
+ * @brief Generic block-device operations backed by an SPI NOR device.
+ */
 #include "adapters/spi_nor_block_adapter.h"
 
 #include <stddef.h>

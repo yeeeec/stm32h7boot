@@ -1,3 +1,7 @@
+/**
+ * @file bsp_sdram.c
+ * @brief FMC SDRAM initialization and HAL port binding.
+ */
 #include "bsp/bsp_sdram.h"
 
 #include <stddef.h>
@@ -9,7 +13,7 @@
 #define BSP_SDRAM_STARTUP_DELAY_MS   1U
 #define BSP_SDRAM_AUTO_REFRESH_COUNT 8U
 
-/* FMC SDCLK is 100 MHz. 64 ms / 8192 rows, minus the STM32H7 margin. */
+/* 100 MHz SDCLK: 64 ms / 8192 rows, minus the STM32H7 timing margin. */
 #define BSP_SDRAM_REFRESH_RATE       761U
 
 #define BSP_SDRAM_MODE_BURST_LENGTH_1 0x0000U
@@ -42,6 +46,7 @@ static firmware_status_t SendCommand(
     SDRAM_HandleTypeDef *handle = (SDRAM_HandleTypeDef *)context;
     FMC_SDRAM_CommandTypeDef hal_command = {0};
 
+    /* Translate the portable SDRAM startup sequence to STM32 FMC commands. */
     hal_command.CommandTarget = FMC_SDRAM_CMD_TARGET_BANK1;
     hal_command.AutoRefreshNumber = auto_refresh_count;
     hal_command.ModeRegisterDefinition = mode_register;

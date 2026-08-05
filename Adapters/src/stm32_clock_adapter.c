@@ -1,3 +1,7 @@
+/**
+ * @file stm32_clock_adapter.c
+ * @brief System-clock interface backed by the STM32 platform tick.
+ */
 #include "adapters/stm32_clock_adapter.h"
 
 #include <stddef.h>

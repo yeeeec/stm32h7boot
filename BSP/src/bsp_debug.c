@@ -1,3 +1,7 @@
+/**
+ * @file bsp_debug.c
+ * @brief Blocking debug-UART output implementation.
+ */
 #include "bsp/bsp_debug.h"
 
 #include <limits.h>
@@ -24,6 +28,7 @@ firmware_status_t BSP_DebugWrite(const uint8_t *data, size_t size)
     while (offset < size)
     {
         size_t remaining = size - offset;
+        /* HAL_UART_Transmit accepts a 16-bit transfer length. */
         uint16_t chunk = (remaining > UINT16_MAX) ? UINT16_MAX : (uint16_t)remaining;
 
         if (HAL_UART_Transmit(&huart1, (uint8_t *)&data[offset], chunk,

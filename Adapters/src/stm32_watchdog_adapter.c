@@ -1,3 +1,7 @@
+/**
+ * @file stm32_watchdog_adapter.c
+ * @brief Watchdog interface backed by the STM32 platform watchdog.
+ */
 #include "adapters/stm32_watchdog_adapter.h"
 
 #include <stddef.h>

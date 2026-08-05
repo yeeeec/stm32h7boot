@@ -1,3 +1,7 @@
+/**
+ * @file platform_cache.c
+ * @brief STM32H7 D-Cache maintenance implementation.
+ */
 #include "platform/platform_cache.h"
 
 #include <stdint.h>
@@ -6,6 +10,7 @@
 
 static firmware_status_t CacheValidate(const void *address, size_t size)
 {
+    /* CMSIS takes a signed byte count; reject values it cannot represent. */
     if ((address == NULL) || (size == 0U) ||
         (size > (size_t)INT32_MAX) ||
         (((uintptr_t)address % PLATFORM_DCACHE_LINE_SIZE) != 0U) ||

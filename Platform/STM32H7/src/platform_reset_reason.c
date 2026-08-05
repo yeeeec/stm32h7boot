@@ -1,3 +1,7 @@
+/**
+ * @file platform_reset_reason.c
+ * @brief STM32 RCC reset-flag decoding implementation.
+ */
 #include "platform/platform_reset_reason.h"
 
 #include "stm32h7xx_hal.h"
@@ -6,6 +10,7 @@ static platform_reset_reason_t captured_reason = PLATFORM_RESET_REASON_UNKNOWN;
 
 void Platform_ResetReasonCapture(void)
 {
+    /* Check causes in priority order before clearing the one-shot RCC flags. */
     if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDG1RST) != 0U)
     {
         captured_reason = PLATFORM_RESET_REASON_INDEPENDENT_WATCHDOG;

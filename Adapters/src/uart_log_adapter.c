@@ -1,3 +1,7 @@
+/**
+ * @file uart_log_adapter.c
+ * @brief Log-sink interface backed by the board debug UART.
+ */
 #include "adapters/uart_log_adapter.h"
 
 #include <stddef.h>

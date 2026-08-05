@@ -1,3 +1,7 @@
+/**
+ * @file bsp.c
+ * @brief Board-support-package lifecycle implementation.
+ */
 #include "bsp/bsp.h"
 
 #include "bsp/bsp_external_flash.h"

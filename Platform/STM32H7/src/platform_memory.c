@@ -1,3 +1,7 @@
+/**
+ * @file platform_memory.c
+ * @brief ARM memory and instruction barrier implementation.
+ */
 #include "platform/platform_memory.h"
 
 #include "stm32h7xx.h"

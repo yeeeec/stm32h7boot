@@ -1,3 +1,7 @@
+/**
+ * @file bsp_external_flash.c
+ * @brief QSPI HAL port binding for the external SPI NOR flash.
+ */
 #include "bsp/bsp_external_flash.h"
 
 #include <stddef.h>
@@ -36,6 +40,7 @@ static firmware_status_t PrepareCommand(
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
+    /* Build one-line QSPI transactions expected by the SPI NOR driver. */
     memset(command, 0, sizeof(*command));
     command->InstructionMode = QSPI_INSTRUCTION_1_LINE;
     command->Instruction = transaction->instruction;
@@ -149,6 +154,7 @@ static void QspiDelayMs(void *context, uint32_t delay_ms)
 static void QspiPollHook(void *context)
 {
     (void)context;
+    /* Long erase/program polls must refresh the board watchdog. */
     (void)HAL_IWDG_Refresh(&hiwdg1);
 }
 
