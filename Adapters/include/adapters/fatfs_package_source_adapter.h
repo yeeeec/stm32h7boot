@@ -1,13 +1,13 @@
 /**
  * @file fatfs_package_source_adapter.h
- * @brief USB MSC FatFs adapter for upgrade-package file access.
+ * @brief SD-card FatFs adapter for upgrade-package file access.
  */
 #ifndef ADAPTERS_FATFS_PACKAGE_SOURCE_ADAPTER_H
 #define ADAPTERS_FATFS_PACKAGE_SOURCE_ADAPTER_H
 
 #include "firmware/package_source.h"
 
-/** Adapter state for the single CubeMX USB host FatFs volume. */
+/** Adapter state for the single CubeMX SD-card FatFs volume. */
 typedef struct
 {
     package_source_t interface;
@@ -16,14 +16,14 @@ typedef struct
 } fatfs_package_source_adapter_t;
 
 /**
- * @brief Initialize access to the CubeMX USB host FatFs objects.
+ * @brief Initialize access to the CubeMX SD-card FatFs objects.
  *
  * @param[out] adapter Adapter object to initialize.
  *
  * @return FIRMWARE_STATUS_OK on success.
  * @return FIRMWARE_STATUS_INVALID_ARGUMENT if @p adapter is NULL.
  *
- * @pre MX_FATFS_Init and MX_USB_HOST_Init have completed.
+ * @pre MX_FATFS_Init and MX_SDMMC1_SD_Init have completed.
  */
 firmware_status_t FatFsPackageSourceAdapter_Init(
     fatfs_package_source_adapter_t *adapter);
