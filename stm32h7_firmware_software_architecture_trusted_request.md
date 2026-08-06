@@ -1,7 +1,8 @@
 # STM32H7 Bootloader 与 Application 通用软件架构设计
 
 > 本文只讨论软件架构、代码所有权、模块边界、依赖方向和构建组织。  
-> 不讨论 Bootloader 或 Application 的具体业务状态机、升级策略、协议格式、分区地址和设备功能实现。
+> 不讨论 Bootloader 或 Application 的具体业务状态机、升级策略、协议格式、分区地址和设备功能实现。  
+> 当前 Bootloader 工程使用 SD 卡 + SDIO/SDMMC + FatFs；未来 eMMC 通过 Adapter 替换，不改变本文依赖方向。
 
 ---
 
@@ -131,6 +132,7 @@ Product Application Layer
 ├── i2c.c/h
 ├── tim.c/h
 ├── usart.c/h
+├── sdmmc.c/h
 └── iwdg.c/h
 
 中断集成
@@ -140,8 +142,8 @@ Product Application Layer
 Middleware 集成
 ├── FATFS/App
 ├── FATFS/Target
-├── USB_HOST/App
-└── USB_HOST/Target
+├── USB_HOST/App（可选）
+└── USB_HOST/Target（可选）
 ```
 
 Generated Integration 的职责是：
@@ -208,7 +210,7 @@ Generated_Peripherals_Init
     = 按确定顺序调用各个 MX_*_Init
 
 Generated_Middleware_Process
-    = USB Host、网络栈等生成级轮询入口
+    = USB Host、网络栈等需要轮询的生成级入口；SDIO/SDMMC + FatFs 通常不要求独立业务轮询
 ```
 
 这些函数属于 Generated Integration，不属于 Platform 或 BSP。
@@ -483,6 +485,7 @@ Interfaces 定义 Services 所需的稳定能力契约。
 Interfaces/
 ├── Types/
 ├── Storage/
+├── Update/
 ├── Communication/
 ├── System/
 ├── Verification/
@@ -521,6 +524,8 @@ Adapter 负责把具体底层能力转换为 Interfaces。
 Interface                         Adapter
 -----------------------------------------------------
 Storage Interface                 FatFs Storage Adapter
+Package Source Interface          FatFs SD/eMMC Package Adapter
+Trusted Request Store Interface   Trusted FatFs Request Store Adapter
 Block Device Interface            External Flash Adapter
 Clock Interface                   STM32H7 Clock Adapter
 Reset Interface                   STM32H7 Reset Adapter
@@ -544,6 +549,46 @@ Adapter 不应依赖：
 - 上层 Service 实现。
 
 Adapter 是吸收底层技术细节的主要位置。
+
+当前 Bootloader 的具体绑定示例：
+
+```text
+package_source_t       <- FatFs SD Package Source Adapter
+update_request_store_t <- Trusted FatFs Request Store Adapter
+block_device_t         <- W25Q256 Adapter
+
+未来恢复 eMMC 后：
+package_source_t       <- eMMC 文件系统 Adapter
+update_request_store_t <- 具备受信写入保证的 eMMC Request Store Adapter
+```
+
+介质替换不得影响 Application、Services 或 Interfaces 的公共语义。
+
+---
+
+## 14.1 可信升级请求的架构边界
+
+本项目把发布身份认证与 Bootloader 安装完整性拆分：
+
+```text
+Application Upgrade Preparation Service
+    -> ECDSA Manifest Verification
+    -> 创建绑定 manifest_sha256 的可信请求
+
+Bootloader Update Service
+    -> 校验可信请求
+    -> SHA256(Manifest/APP/GUI)
+    -> 安装与提交
+```
+
+规则：
+
+- Manifest 验签属于正式 Application 的 Service，不属于 Bootloader Application 顶层状态机；
+- Bootloader 不链接公钥、micro-ecc 或 Manifest Signature Verifier；
+- `update_request_store_t` 是安全边界接口，不能被视为普通任意文件读取接口；
+- Adapter 只实现技术访问，但正式 Composition 只能绑定满足受信写入保证的实现；
+- 当前可移除 SD 卡人工请求是开发 trust override，必须通过构建配置与量产实现区分；
+- 介质从 SD 切换到 eMMC 时，Application/Services 公共语义不变，但 Request Store 的安全属性必须重新验收。
 
 ---
 
@@ -744,7 +789,6 @@ Firmware/
 │   ├── stm32h7boot.ioc
 │   ├── Core/
 │   ├── FATFS/
-│   ├── USB_HOST/
 │   ├── Application/
 │   ├── Services/
 │   ├── Interfaces/
@@ -831,7 +875,7 @@ stm32h7_firmware/
 │   ├── ST/
 │   └── Third_Party/
 ├── FATFS/
-├── USB_HOST/
+├── USB_HOST/（可选）
 ├── Tests/
 ├── cmake/
 ├── CMakeLists.txt
@@ -900,7 +944,7 @@ Services Target 不应获得：
 Core/Inc
 HAL include path
 FatFs include path
-USB Host include path
+SDIO/SDMMC、USB Host include path
 BSP include path
 Device Driver include path
 ```
@@ -970,7 +1014,7 @@ Composition → 所有需要装配的项目模块
 ### 阶段 1：定义 Generated 边界
 
 - 保持 CubeMX 目录不动；
-- 明确 `main.c/h`、IRQ、FATFS 和 USB_HOST 的代码所有权；
+- 明确 `main.c/h`、IRQ、SDMMC/SDIO、FATFS 和可选 USB_HOST 的代码所有权；
 - 禁止业务逻辑进入生成文件；
 - 保留 USER CODE 区域作为接入点。
 

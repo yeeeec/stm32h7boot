@@ -2,7 +2,8 @@
 
 > 适用范围：STM32H7 Bootloader 固件与 Application 固件。  
 > 本文只规定 Application 层、Services 层及其衔接方式，不定义具体产品业务、升级协议、分区地址或设备功能。  
-> 本文用于指导 Codex 判断代码归属、生成模块骨架、建立依赖关系并执行架构验收。
+> 本文用于指导 Codex 判断代码归属、生成模块骨架、建立依赖关系并执行架构验收。  
+> 当前 Bootloader 具体绑定：SD 卡 FatFs Package Source、文件型可信升级请求；Bootloader 只执行 SHA 完整性校验，不执行 Manifest 验签。未来 eMMC 只替换 Adapter。
 
 ---
 
@@ -97,7 +98,7 @@ Application 不负责：
 - Flash 擦写；
 - Hash、CRC 或签名算法执行；
 - Manifest 或协议解析；
-- USB、UART、QSPI、I2C 等技术状态处理；
+- SDIO/SDMMC、USB、UART、QSPI、I2C 等技术状态处理；
 - BSP 设备控制；
 - HAL Handle 访问；
 - Service 内部步骤编排；
@@ -106,6 +107,13 @@ Application 不负责：
 判断原则：
 
 > 涉及整个固件运行模式或多个用例之间切换的逻辑，属于 Application。
+
+项目特定安全边界：
+
+- 正式 Application 固件内的升级准备 Service 负责 Manifest ECDSA 验签；
+- Bootloader Application 层不负责验签，也不接触公钥；
+- Bootloader Update Service 从可信请求中取得 `manifest_sha256`，只执行 Manifest/APP/GUI SHA、格式和安装校验；
+- 可信请求创建属于正式 Application 的升级准备用例，不应直接写在 Application 顶层状态机中。
 
 ---
 
@@ -183,6 +191,12 @@ SHA-256 算法
 
 定义“读取升级文件”的抽象能力
     -> package_source Interface
+
+读取或清除固定可信升级请求文件
+    -> UpdateRequestStore Adapter
+
+定义“加载/清除可信升级请求”的抽象能力
+    -> update_request_store Interface
 ```
 
 ---
@@ -421,7 +435,7 @@ EEPROM_WRITING
 
 判定规则：
 
-> 如果底层从 USB 更换为 eMMC、从 QSPI 更换为其他存储后，Application 状态名称必须修改，则该状态粒度过低。
+> 如果底层从 SD 卡更换为 eMMC、从 QSPI 更换为其他存储后，Application 状态名称必须修改，则该状态粒度过低。
 
 Application 状态机应保持“薄”：
 
@@ -555,7 +569,7 @@ struct update_service
 
     const package_source_t *package_source;
     const component_registry_t *installers;
-    const image_verifier_t *verifier;
+    const sha_integrity_verifier_t *integrity;
     const boot_control_store_t *control_store;
     const boot_watchdog_t *watchdog;
 
@@ -776,7 +790,7 @@ Application 不得按以下错误做系统决策：
 ```text
 HAL_TIMEOUT
 FR_DISK_ERR
-USBH_FAIL
+SDMMC_NATIVE_ERROR
 QSPI 状态寄存器值
 ```
 
@@ -842,18 +856,29 @@ static application_t g_application;
 static update_service_t g_update_service;
 static boot_service_t g_boot_service;
 
-static usb_package_source_t g_usb_source;
+static fatfs_sd_package_source_adapter_t g_package_source;
+static fatfs_update_request_store_adapter_t g_request_store;
 static qspi_installer_t g_qspi_installer;
 
+static uint8_t g_request_buffer[512];
 static uint8_t g_update_io_buffer[4096];
 
 composition_status_t Composition_Init(void)
 {
     composition_status_t status;
 
-    status = usb_package_source_construct(
-        &g_usb_source,
-        BSP_GetUsbStorage());
+    status = fatfs_sd_package_source_construct(
+        &g_package_source,
+        BSP_GetSdStorage());
+
+    if (status != COMPOSITION_OK) {
+        return status;
+    }
+
+    status = fatfs_update_request_store_construct(
+        &g_request_store,
+        BSP_GetSdStorage(),
+        "/boot_update_request.json");
 
     if (status != COMPOSITION_OK) {
         return status;
@@ -869,11 +894,13 @@ composition_status_t Composition_Init(void)
 
     update_service_dependencies_t update_dependencies = {
         .package_source =
-            usb_package_source_interface(&g_usb_source),
+            fatfs_sd_package_source_interface(&g_package_source),
+        .request_store =
+            fatfs_update_request_store_interface(&g_request_store),
         .installers =
             component_registry_get(),
-        .verifier =
-            image_verifier_get(),
+        .integrity =
+            sha_integrity_verifier_get(),
         .control_store =
             boot_control_store_get(),
         .watchdog =
@@ -881,6 +908,8 @@ composition_status_t Composition_Init(void)
     };
 
     update_service_config_t update_config = {
+        .request_buffer = g_request_buffer,
+        .request_buffer_size = sizeof(g_request_buffer),
         .io_buffer = g_update_io_buffer,
         .io_buffer_size = sizeof(g_update_io_buffer)
     };
@@ -906,6 +935,26 @@ composition_status_t Composition_Init(void)
         &application_dependencies);
 }
 ```
+
+当前绑定只存在于 Composition：
+
+```text
+package_source_t       <- SD 卡 FatFs Adapter
+update_request_store_t <- 受信文件系统请求 Adapter
+
+未来切换 eMMC：
+package_source_t       <- eMMC 文件系统 Adapter
+update_request_store_t <- 具备受信写入保证的 eMMC 请求 Adapter
+```
+
+Application 与 Services 不得因介质变化修改状态名、公共 API 或业务流程。
+
+正式 Composition 还必须保证：
+
+- Bootloader 不装配 `signature_verifier_t` 或 Manifest 公钥；
+- `update_request_store_t` 的正式实现满足受信写入合同；
+- 当前 SD 人工实现必须用开发配置显式标识为 trust override；
+- `sha_integrity_verifier_t` 只负责 SHA-256，不承担发布身份认证。
 
 Composition 可以知道所有层，但不得包含：
 
@@ -1024,8 +1073,9 @@ Application 和 Services 不得获得以下 include path：
 Core/Inc
 Drivers/STM32H7xx_HAL_Driver/Inc
 Middlewares/Third_Party/FatFs
-USB_HOST
 FATFS
+Core/Inc（包括 sdmmc.h 等生成头文件）
+USB_HOST（若工程仍保留）
 BSP
 Platform
 Adapters
@@ -1101,7 +1151,7 @@ Interface
 公共 API 必须：
 
 - 使用项目稳定类型；
-- 不包含 HAL、FatFs、USB、Driver 类型；
+- 不包含 HAL、FatFs、SDIO/SDMMC、USB、Driver 类型；
 - 明确对象、请求、结果和生命周期；
 - 明确错误返回；
 - 对长流程提供状态查询；
@@ -1193,13 +1243,13 @@ Codex 必须：
 9. 使用固定容量 Buffer；
 10. 为可选依赖提供 Null 实现或显式 `NULL` 策略；
 11. 先生成最小可编译骨架；
-12. 每一阶段确保 Host 或 Target 编译通过；
+12. 每一阶段确保 Target 编译通过；
 13. 在无法从现有工程确定行为时添加 `TODO`，不得猜测业务规则。
 
 Codex 不得：
 
 1. 在 `main.c` 中实现业务状态机；
-2. 在 Application 中包含 `stm32h7xx_hal.h`、`ff.h`、`usb_host.h`；
+2. 在 Application 中包含 `stm32h7xx_hal.h`、`ff.h`、`sdmmc.h`、`usb_host.h`；
 3. 在 Service 中调用 `HAL_*`、`BSP_*` 或 `MX_*`；
 4. 创建万能 `system_service`、`device_manager` 或全局 Service Locator；
 5. 让 Service Callback 直接修改 Application 状态；
@@ -1219,7 +1269,7 @@ Codex 完成代码生成后必须逐项确认：
 
 - [ ] Application 只包含 Service 公共头文件；
 - [ ] Application 状态表达系统语义；
-- [ ] Application 不含 USB、文件、Flash、DMA 等技术步骤；
+- [ ] Application 不含 SDIO/SDMMC、USB、文件、Flash、DMA 等技术步骤；
 - [ ] Application 不直接访问 Interface；
 - [ ] Application 不直接访问 Composition 的具体实现；
 - [ ] Application 根据 Service 状态和结果做决策；
