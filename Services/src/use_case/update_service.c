@@ -1,6 +1,6 @@
 /**
  * @file update_service.c
- * @brief Bounded APP/GUI update transaction implementation.
+ * @brief Bounded package preparation and inactive-pair installation capability.
  */
 #include "services/use_case/update_service.h"
 
@@ -9,7 +9,6 @@
 
 #include "services/capability/checked_arithmetic.h"
 #include "services/capability/slot_policy.h"
-#include "services/capability/version_policy.h"
 
 static uint32_t ReadU32(const uint8_t *data)
 {
@@ -51,10 +50,6 @@ static void BeginFailure(update_service_t *service, firmware_status_t status, bo
     {
         service->stage = UPDATE_STAGE_CLEANUP_CLOSE;
     }
-    else if (service->media_mounted != 0)
-    {
-        service->stage = UPDATE_STAGE_CLEANUP_UNMOUNT;
-    }
     else
     {
         FinishFailure(service);
@@ -68,10 +63,6 @@ static void BeginCancel(update_service_t *service)
     {
         service->stage = UPDATE_STAGE_CLEANUP_CLOSE;
     }
-    else if (service->media_mounted != 0)
-    {
-        service->stage = UPDATE_STAGE_CLEANUP_UNMOUNT;
-    }
     else
     {
         FinishCancelled(service);
@@ -80,18 +71,18 @@ static void BeginCancel(update_service_t *service)
 
 static firmware_status_t HashReset(update_service_t *service)
 {
-    return service->hash->hash_reset(service->hash->context);
+    return service->hash->reset(service->hash->context);
 }
 
 static firmware_status_t HashUpdate(update_service_t *service, const void *data, uint32_t size)
 {
-    return service->hash->hash_update(service->hash->context, data, (size_t) size);
+    return service->hash->update(service->hash->context, data, (size_t) size);
 }
 
 static firmware_status_t HashFinish(update_service_t *service,
-                                    uint8_t digest[IMAGE_AUTHENTICATOR_SHA256_SIZE])
+                                    uint8_t digest[FIRMWARE_SHA256_DIGEST_SIZE])
 {
-    return service->hash->hash_finish(service->hash->context, digest);
+    return service->hash->finish(service->hash->context, digest);
 }
 
 static firmware_status_t ChecksumReset(update_service_t *service)
@@ -320,38 +311,6 @@ static void UpdateServiceStep(update_service_t *service)
 
     switch (service->stage)
     {
-        case UPDATE_STAGE_WAIT_MEDIA:
-        {
-            int present = 0;
-
-            status = service->package_source->is_media_present(service->package_source->context,
-                                                               &present);
-            if (!FirmwareStatus_IsOk(status) || (present == 0))
-            {
-                BeginFailure(service,
-                             FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_IO_ERROR : status,
-                             BOOT_ERROR_MEDIA_UNAVAILABLE);
-            }
-            else
-            {
-                service->stage = UPDATE_STAGE_MOUNT_MEDIA;
-            }
-            break;
-        }
-
-        case UPDATE_STAGE_MOUNT_MEDIA:
-            status = service->package_source->mount(service->package_source->context);
-            if (!FirmwareStatus_IsOk(status))
-            {
-                BeginFailure(service, status, BOOT_ERROR_MEDIA_UNAVAILABLE);
-            }
-            else
-            {
-                service->media_mounted = 1;
-                service->stage         = UPDATE_STAGE_OPEN_MANIFEST;
-            }
-            break;
-
         case UPDATE_STAGE_OPEN_MANIFEST:
             status = service->package_source->open(service->package_source->context,
                                                    service->manifest_path);
@@ -419,43 +378,25 @@ static void UpdateServiceStep(update_service_t *service)
 
         case UPDATE_STAGE_VERIFY_MANIFEST:
             status =
-                ManifestService_ParseAndVerify(service->manifest_service, service->manifest_buffer,
-                                               service->manifest_size, &service->manifest);
+                ManifestService_ParseAndValidate(service->manifest_service, service->manifest_buffer,
+                                                 service->manifest_size, &service->manifest);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_MANIFEST_FORMAT);
             }
             else
             {
-                service->stage = UPDATE_STAGE_SELECT_TARGET;
+                service->manifest_prepared      = 1;
+                service->state                  = SERVICE_RUN_STATE_SUCCEEDED;
+                service->result.status          = FIRMWARE_STATUS_OK;
+                service->result.error           = BOOT_ERROR_NONE;
+                service->result.stage           = (uint32_t)service->stage;
+                service->result.native_error    = 0;
+                service->stage                  = UPDATE_STAGE_IDLE;
             }
             break;
 
         case UPDATE_STAGE_SELECT_TARGET:
-            /* A power loss after Active Record commit but before Request
-             * cleanup must be idempotent on the next boot.  A verified,
-             * package-id match means this exact release is already active;
-             * clear only the stale request and do not touch either slot. */
-            if (memcmp(service->active_record.package_id_hash, service->manifest.package_id_hash128,
-                       sizeof(service->active_record.package_id_hash)) == 0)
-            {
-                service->clear_request.requested = 0;
-                service->clear_request.reason    = BOOT_UPDATE_REASON_NONE;
-                service->stage                   = UPDATE_STAGE_CLEAR_REQUEST_START;
-                break;
-            }
-            if (VersionPolicy_Compare(&service->bootloader_version,
-                                      &service->manifest.minimum_bootloader_version) < 0)
-            {
-                BeginFailure(service, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_VERSION_REJECTED);
-                break;
-            }
-            if (!VersionPolicy_IsUpgrade(&service->active_record.release_version,
-                                         &service->manifest.release_version))
-            {
-                BeginFailure(service, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_VERSION_REJECTED);
-                break;
-            }
             status = SlotPolicy_SelectInactivePair(service->active_record.active_pair,
                                                    &service->target_layout.pair);
             if (!FirmwareStatus_IsOk(status))
@@ -549,7 +490,7 @@ static void UpdateServiceStep(update_service_t *service)
         case UPDATE_STAGE_HASH_APP:
             if (service->file_offset >= service->file_size)
             {
-                uint8_t digest[IMAGE_AUTHENTICATOR_SHA256_SIZE];
+                uint8_t digest[FIRMWARE_SHA256_DIGEST_SIZE];
 
                 status = HashFinish(service, digest);
                 if (!FirmwareStatus_IsOk(status) ||
@@ -728,7 +669,7 @@ static void UpdateServiceStep(update_service_t *service)
         case UPDATE_STAGE_HASH_GUI:
             if (service->file_offset >= service->file_size)
             {
-                uint8_t digest[IMAGE_AUTHENTICATOR_SHA256_SIZE];
+                uint8_t digest[FIRMWARE_SHA256_DIGEST_SIZE];
 
                 status = HashFinish(service, digest);
                 if (!FirmwareStatus_IsOk(status) ||
@@ -1078,92 +1019,26 @@ static void UpdateServiceStep(update_service_t *service)
             }
             else
             {
-                service->commit_record                 = service->active_record;
-                service->commit_record.active_pair     = service->target_layout.pair;
-                service->commit_record.release_version = service->manifest.release_version;
-                service->commit_record.build_number    = service->manifest.build_number;
-                service->commit_record.app_size        = service->manifest.app.image_size_bytes;
-                service->commit_record.app_crc32       = service->target_app_crc;
-                service->commit_record.gui_size        = service->manifest.gui.file_size_bytes;
-                service->commit_record.gui_crc32       = service->target_gui_crc;
-                memcpy(service->commit_record.package_id_hash, service->manifest.package_id_hash128,
-                       sizeof(service->commit_record.package_id_hash));
-                memcpy(service->commit_record.manifest_sha256, service->manifest.manifest_sha256,
-                       sizeof(service->commit_record.manifest_sha256));
-                service->stage = UPDATE_STAGE_COMMIT_ACTIVE_START;
-            }
-            break;
-
-        case UPDATE_STAGE_COMMIT_ACTIVE_START:
-            status = BootControlService_CommitActiveStart(service->boot_control,
-                                                          &service->commit_record);
-            if (!FirmwareStatus_IsOk(status))
-            {
-                BeginFailure(service, status, BOOT_ERROR_EEPROM_COMMIT);
-            }
-            else
-            {
-                service->stage = UPDATE_STAGE_COMMIT_ACTIVE_PROCESS;
-            }
-            break;
-
-        case UPDATE_STAGE_COMMIT_ACTIVE_PROCESS:
-            BootControlService_Process(service->boot_control);
-            if (BootControlService_GetState(service->boot_control) == SERVICE_RUN_STATE_FAILED)
-            {
-                BeginFailure(service, BootControlService_GetResult(service->boot_control)->status,
-                             BOOT_ERROR_EEPROM_COMMIT);
-            }
-            else if (BootControlService_GetState(service->boot_control) ==
-                     SERVICE_RUN_STATE_SUCCEEDED)
-            {
-                service->clear_request.requested = 0;
-                service->clear_request.reason    = BOOT_UPDATE_REASON_NONE;
-                service->stage                   = UPDATE_STAGE_CLEAR_REQUEST_START;
-            }
-            break;
-
-        case UPDATE_STAGE_CLEAR_REQUEST_START:
-            status = BootControlService_CommitUpdateRequestStart(service->boot_control,
-                                                                 &service->clear_request);
-            if (!FirmwareStatus_IsOk(status))
-            {
-                BeginFailure(service, status, BOOT_ERROR_EEPROM_COMMIT);
-            }
-            else
-            {
-                service->stage = UPDATE_STAGE_CLEAR_REQUEST_PROCESS;
-            }
-            break;
-
-        case UPDATE_STAGE_CLEAR_REQUEST_PROCESS:
-            BootControlService_Process(service->boot_control);
-            if (BootControlService_GetState(service->boot_control) == SERVICE_RUN_STATE_FAILED)
-            {
-                BeginFailure(service, BootControlService_GetResult(service->boot_control)->status,
-                             BOOT_ERROR_EEPROM_COMMIT);
-            }
-            else if (BootControlService_GetState(service->boot_control) ==
-                     SERVICE_RUN_STATE_SUCCEEDED)
-            {
-                service->stage = UPDATE_STAGE_UNMOUNT_MEDIA;
-            }
-            break;
-
-        case UPDATE_STAGE_UNMOUNT_MEDIA:
-            status = service->package_source->unmount(service->package_source->context);
-            if (!FirmwareStatus_IsOk(status))
-            {
-                BeginFailure(service, status, BOOT_ERROR_MEDIA_UNAVAILABLE);
-            }
-            else
-            {
-                service->media_mounted       = 0;
+                service->candidate_record                 = service->active_record;
+                service->candidate_record.active_pair     = service->target_layout.pair;
+                service->candidate_record.release_version = service->manifest.release_version;
+                service->candidate_record.build_number    = service->manifest.build_number;
+                service->candidate_record.app_size        = service->manifest.app.image_size_bytes;
+                service->candidate_record.app_crc32       = service->target_app_crc;
+                service->candidate_record.gui_size        = service->manifest.gui.file_size_bytes;
+                service->candidate_record.gui_crc32       = service->target_gui_crc;
+                memcpy(service->candidate_record.package_id_hash,
+                       service->manifest.package_id_hash128,
+                       sizeof(service->candidate_record.package_id_hash));
+                memcpy(service->candidate_record.manifest_sha256,
+                       service->manifest.manifest_sha256,
+                       sizeof(service->candidate_record.manifest_sha256));
                 service->state               = SERVICE_RUN_STATE_SUCCEEDED;
                 service->result.status       = FIRMWARE_STATUS_OK;
                 service->result.error        = BOOT_ERROR_NONE;
-                service->result.stage        = (uint32_t) service->stage;
+                service->result.stage        = (uint32_t)service->stage;
                 service->result.native_error = 0;
+                service->install_completed   = 1;
                 service->stage               = UPDATE_STAGE_IDLE;
             }
             break;
@@ -1171,24 +1046,6 @@ static void UpdateServiceStep(update_service_t *service)
         case UPDATE_STAGE_CLEANUP_CLOSE:
             (void) service->package_source->close(service->package_source->context);
             service->file_open = 0;
-            service->stage =
-                (service->media_mounted != 0) ? UPDATE_STAGE_CLEANUP_UNMOUNT : UPDATE_STAGE_IDLE;
-            if (service->stage == UPDATE_STAGE_IDLE)
-            {
-                if (service->cancel_requested != 0)
-                {
-                    FinishCancelled(service);
-                }
-                else
-                {
-                    FinishFailure(service);
-                }
-            }
-            break;
-
-        case UPDATE_STAGE_CLEANUP_UNMOUNT:
-            (void) service->package_source->unmount(service->package_source->context);
-            service->media_mounted = 0;
             if (service->cancel_requested != 0)
             {
                 FinishCancelled(service);
@@ -1212,9 +1069,6 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     firmware_status_t status;
 
     if ((service == NULL) || (dependencies == NULL) || (dependencies->package_source == NULL) ||
-        (dependencies->package_source->is_media_present == NULL) ||
-        (dependencies->package_source->mount == NULL) ||
-        (dependencies->package_source->unmount == NULL) ||
         (dependencies->package_source->open == NULL) ||
         (dependencies->package_source->close == NULL) ||
         (dependencies->package_source->get_size == NULL) ||
@@ -1225,9 +1079,9 @@ firmware_status_t UpdateService_Init(update_service_t *service,
         (dependencies->storage->get_operation_result == NULL) || (dependencies->checksum == NULL) ||
         (dependencies->checksum->reset == NULL) || (dependencies->checksum->update == NULL) ||
         (dependencies->checksum->get_value == NULL) || (dependencies->hash == NULL) ||
-        (dependencies->hash->hash_reset == NULL) || (dependencies->hash->hash_update == NULL) ||
-        (dependencies->hash->hash_finish == NULL) || (dependencies->manifest_service == NULL) ||
-        (dependencies->boot_control == NULL) || (dependencies->manifest_path == NULL) ||
+        (dependencies->hash->reset == NULL) || (dependencies->hash->update == NULL) ||
+        (dependencies->hash->finish == NULL) || (dependencies->manifest_service == NULL) ||
+        (dependencies->manifest_path == NULL) ||
         (dependencies->app_path == NULL) || (dependencies->gui_path == NULL) ||
         (dependencies->manifest_buffer == NULL) ||
         (dependencies->manifest_buffer_size < UPDATE_SERVICE_MANIFEST_MAX_SIZE) ||
@@ -1261,8 +1115,6 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     service->checksum                  = dependencies->checksum;
     service->hash                      = dependencies->hash;
     service->manifest_service          = dependencies->manifest_service;
-    service->boot_control              = dependencies->boot_control;
-    service->bootloader_version        = dependencies->bootloader_version;
     service->manifest_path             = dependencies->manifest_path;
     service->app_path                  = dependencies->app_path;
     service->gui_path                  = dependencies->gui_path;
@@ -1284,17 +1136,51 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t UpdateService_Start(struct update_service *service,
-                                      const boot_active_record_t *active_record)
+firmware_status_t UpdateService_PrepareStart(struct update_service *service)
+{
+    update_service_t *implementation = (update_service_t *) service;
+
+    if (implementation == NULL)
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if ((implementation->initialized == 0) || (implementation->state == SERVICE_RUN_STATE_RUNNING))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    implementation->state                  = SERVICE_RUN_STATE_RUNNING;
+    implementation->stage                  = UPDATE_STAGE_OPEN_MANIFEST;
+    implementation->result.status          = FIRMWARE_STATUS_OK;
+    implementation->result.error           = BOOT_ERROR_NONE;
+    implementation->result.stage           = UPDATE_STAGE_OPEN_MANIFEST;
+    implementation->result.native_error    = 0;
+    implementation->failure_pending        = 0;
+    implementation->cancel_requested       = 0;
+    implementation->file_open              = 0;
+    implementation->erase_started          = 0;
+    implementation->relocation_crc_done    = 0;
+    implementation->manifest_size_known    = 0;
+    implementation->manifest_prepared      = 0;
+    implementation->install_completed      = 0;
+    implementation->target_read_offset     = 0U;
+    implementation->gui_target_read_offset = 0U;
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t UpdateService_InstallStart(
+    struct update_service *service,
+    const boot_active_record_t *active_record)
 {
     boot_pair_layout_t layout;
-    update_service_t *implementation = (update_service_t *) service;
+    update_service_t *implementation = (update_service_t *)service;
 
     if ((implementation == NULL) || (active_record == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if ((implementation->initialized == 0) || (implementation->state == SERVICE_RUN_STATE_RUNNING))
+    if ((implementation->initialized == 0) ||
+        (implementation->state == SERVICE_RUN_STATE_RUNNING) ||
+        (implementation->manifest_prepared == 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -1304,22 +1190,18 @@ firmware_status_t UpdateService_Start(struct update_service *service,
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
-    implementation->active_record          = *active_record;
-    implementation->state                  = SERVICE_RUN_STATE_RUNNING;
-    implementation->stage                  = UPDATE_STAGE_WAIT_MEDIA;
-    implementation->result.status          = FIRMWARE_STATUS_OK;
-    implementation->result.error           = BOOT_ERROR_NONE;
-    implementation->result.stage           = UPDATE_STAGE_WAIT_MEDIA;
-    implementation->result.native_error    = 0;
-    implementation->failure_pending        = 0;
-    implementation->cancel_requested       = 0;
-    implementation->file_open              = 0;
-    implementation->media_mounted          = 0;
-    implementation->erase_started          = 0;
-    implementation->relocation_crc_done    = 0;
-    implementation->manifest_size_known    = 0;
-    implementation->target_read_offset     = 0U;
-    implementation->gui_target_read_offset = 0U;
+    implementation->active_record = *active_record;
+    implementation->state = SERVICE_RUN_STATE_RUNNING;
+    implementation->stage = UPDATE_STAGE_SELECT_TARGET;
+    implementation->result.status = FIRMWARE_STATUS_OK;
+    implementation->result.error = BOOT_ERROR_NONE;
+    implementation->result.stage = UPDATE_STAGE_SELECT_TARGET;
+    implementation->result.native_error = 0;
+    implementation->failure_pending = 0;
+    implementation->cancel_requested = 0;
+    implementation->erase_started = 0;
+    implementation->relocation_crc_done = 0;
+    implementation->install_completed = 0;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -1367,4 +1249,26 @@ service_run_state_t UpdateService_GetState(const struct update_service *service)
 const service_result_t *UpdateService_GetResult(const struct update_service *service)
 {
     return (service == NULL) ? NULL : &((const update_service_t *) service)->result;
+}
+
+const validated_manifest_t *UpdateService_GetManifest(
+    const struct update_service *service)
+{
+    const update_service_t *implementation = (const update_service_t *)service;
+
+    return ((implementation == NULL) || (implementation->manifest_prepared == 0))
+               ? NULL
+               : &implementation->manifest;
+}
+
+const boot_active_record_t *UpdateService_GetCandidate(
+    const struct update_service *service)
+{
+    const update_service_t *implementation = (const update_service_t *)service;
+
+    return ((implementation == NULL) ||
+            (implementation->state != SERVICE_RUN_STATE_SUCCEEDED) ||
+            (implementation->install_completed == 0))
+               ? NULL
+               : &implementation->candidate_record;
 }

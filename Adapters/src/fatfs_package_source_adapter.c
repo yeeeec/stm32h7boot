@@ -135,6 +135,52 @@ static firmware_status_t Close(void *context)
     return status;
 }
 
+static firmware_status_t Exists(void *context, const char *path, int *present)
+{
+    fatfs_package_source_adapter_t *adapter =
+        (fatfs_package_source_adapter_t *)context;
+    FIL file;
+    FRESULT result;
+
+    if ((adapter == NULL) || (path == NULL) || (present == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if ((adapter->mounted == 0) || (adapter->file_open != 0))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    result = f_open(&file, path, FA_READ | FA_OPEN_EXISTING);
+    if (result == FR_OK)
+    {
+        (void)f_close(&file);
+        *present = 1;
+        return FIRMWARE_STATUS_OK;
+    }
+    if (result == FR_NO_FILE || result == FR_NO_PATH)
+    {
+        *present = 0;
+        return FIRMWARE_STATUS_OK;
+    }
+    return FatFsStatus(result);
+}
+
+static firmware_status_t Remove(void *context, const char *path)
+{
+    fatfs_package_source_adapter_t *adapter =
+        (fatfs_package_source_adapter_t *)context;
+
+    if ((adapter == NULL) || (path == NULL) || (path[0] == '\0'))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if ((adapter->mounted == 0) || (adapter->file_open != 0))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    return FatFsStatus(f_unlink(path));
+}
+
 static firmware_status_t GetSize(void *context, uint32_t *size)
 {
     const fatfs_package_source_adapter_t *adapter =
@@ -206,6 +252,8 @@ firmware_status_t FatFsPackageSourceAdapter_Init(
     adapter->interface.unmount = Unmount;
     adapter->interface.open = Open;
     adapter->interface.close = Close;
+    adapter->interface.exists = Exists;
+    adapter->interface.remove = Remove;
     adapter->interface.get_size = GetSize;
     adapter->interface.read_at = ReadAt;
     return FIRMWARE_STATUS_OK;

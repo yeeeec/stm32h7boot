@@ -15,26 +15,13 @@
 #define ACTIVE_RECORD_CRC_OFFSET 0x00F8U
 #define ACTIVE_RECORD_MARKER     0x00FCU
 
-#define REQUEST_RECORD_A_ADDRESS  0x0200U
-#define REQUEST_RECORD_B_ADDRESS  0x0240U
-#define REQUEST_RECORD_SIZE       64U
-#define REQUEST_RECORD_CRC_OFFSET 0x0038U
-#define REQUEST_RECORD_MARKER     0x003CU
-
 #define ACTIVE_RECORD_MAGIC  0x52434248UL
-#define REQUEST_RECORD_MAGIC 0x51524248UL
 #define COMMIT_MARKER        0x434F4D54UL
 #define INVALID_MARKER       0xFFFFFFFFUL
 #define RECORD_FORMAT_V1     1U
 #define ACTIVE_VALID_STATE   1U
 #define RECORD_SLOT_NONE     (-1)
 #define RECORD_SLOT_CONFLICT (-2)
-
-typedef enum
-{
-    RECORD_KIND_ACTIVE = 0,
-    RECORD_KIND_REQUEST
-} record_kind_t;
 
 static uint16_t ReadU16(const uint8_t *data)
 {
@@ -174,77 +161,13 @@ static firmware_status_t ValidateActiveBuffer(
     return FIRMWARE_STATUS_OK;
 }
 
-static firmware_status_t ValidateRequestBuffer(
-    boot_control_service_t *service,
-    const uint8_t *buffer,
-    boot_update_request_t *request)
-{
-    uint32_t expected_crc;
-    uint32_t actual_crc;
-    uint32_t index;
-    firmware_status_t status;
-
-    if ((ReadU32(&buffer[0x00U]) != REQUEST_RECORD_MAGIC) ||
-        (ReadU16(&buffer[0x04U]) != RECORD_FORMAT_V1) ||
-        (ReadU16(&buffer[0x06U]) != REQUEST_RECORD_SIZE) ||
-        (buffer[0x0CU] > 1U) || (ReadU16(&buffer[0x0EU]) != 0U) ||
-        (ReadU32(&buffer[REQUEST_RECORD_MARKER]) != COMMIT_MARKER))
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-    if (buffer[0x0DU] > (uint8_t)BOOT_UPDATE_REASON_PRODUCTION)
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-    for (index = 0x10U; index < REQUEST_RECORD_CRC_OFFSET; ++index)
-    {
-        if (buffer[index] != 0xFFU)
-        {
-            return FIRMWARE_STATUS_INVALID_STATE;
-        }
-    }
-
-    status = CalculateCrc(
-        service, buffer, REQUEST_RECORD_CRC_OFFSET, &actual_crc);
-    expected_crc = ReadU32(&buffer[REQUEST_RECORD_CRC_OFFSET]);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-    if (actual_crc != expected_crc)
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-
-    request->sequence = ReadU32(&buffer[0x08U]);
-    request->requested = (buffer[0x0CU] != 0U);
-    request->reason = (boot_update_reason_t)buffer[0x0DU];
-    if ((request->requested == 0) && (request->reason != BOOT_UPDATE_REASON_NONE))
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-    return FIRMWARE_STATUS_OK;
-}
-
 static firmware_status_t ReadAndSelect(
     boot_control_service_t *service,
-    record_kind_t kind,
     int *selected_slot,
     uint32_t *sequence)
 {
-    uint32_t address_a = (kind == RECORD_KIND_ACTIVE)
-                             ? ACTIVE_RECORD_A_ADDRESS
-                             : REQUEST_RECORD_A_ADDRESS;
-    uint32_t address_b = (kind == RECORD_KIND_ACTIVE)
-                             ? ACTIVE_RECORD_B_ADDRESS
-                             : REQUEST_RECORD_B_ADDRESS;
-    uint32_t size = (kind == RECORD_KIND_ACTIVE)
-                        ? ACTIVE_RECORD_SIZE
-                        : REQUEST_RECORD_SIZE;
     boot_active_record_t active_a;
     boot_active_record_t active_b;
-    boot_update_request_t request_a;
-    boot_update_request_t request_b;
     firmware_status_t status;
     firmware_status_t status_a;
     firmware_status_t status_b;
@@ -257,36 +180,24 @@ static firmware_status_t ReadAndSelect(
     *sequence = 0U;
 
     status = service->store->read(
-        service->store->context, address_a, service->write_buffer, size);
+        service->store->context, ACTIVE_RECORD_A_ADDRESS, service->write_buffer,
+        ACTIVE_RECORD_SIZE);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
     status = service->store->read(
-        service->store->context, address_b, service->verify_buffer, size);
+        service->store->context, ACTIVE_RECORD_B_ADDRESS, service->verify_buffer,
+        ACTIVE_RECORD_SIZE);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
 
-    if (kind == RECORD_KIND_ACTIVE)
-    {
-        status_a = ValidateActiveBuffer(
-            service, service->write_buffer, &active_a);
-        status_b = ValidateActiveBuffer(
-            service, service->verify_buffer, &active_b);
-        sequence_a = FirmwareStatus_IsOk(status_a) ? active_a.sequence : 0U;
-        sequence_b = FirmwareStatus_IsOk(status_b) ? active_b.sequence : 0U;
-    }
-    else
-    {
-        status_a = ValidateRequestBuffer(
-            service, service->write_buffer, &request_a);
-        status_b = ValidateRequestBuffer(
-            service, service->verify_buffer, &request_b);
-        sequence_a = FirmwareStatus_IsOk(status_a) ? request_a.sequence : 0U;
-        sequence_b = FirmwareStatus_IsOk(status_b) ? request_b.sequence : 0U;
-    }
+    status_a = ValidateActiveBuffer(service, service->write_buffer, &active_a);
+    status_b = ValidateActiveBuffer(service, service->verify_buffer, &active_b);
+    sequence_a = FirmwareStatus_IsOk(status_a) ? active_a.sequence : 0U;
+    sequence_b = FirmwareStatus_IsOk(status_b) ? active_b.sequence : 0U;
 
     if ((!FirmwareStatus_IsOk(status_a) &&
          (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
@@ -323,7 +234,8 @@ static firmware_status_t ReadAndSelect(
     }
     if (sequence_a == sequence_b)
     {
-        if (memcmp(service->write_buffer, service->verify_buffer, size) != 0)
+        if (memcmp(service->write_buffer, service->verify_buffer,
+                   ACTIVE_RECORD_SIZE) != 0)
         {
             *selected_slot = RECORD_SLOT_CONFLICT;
             return FIRMWARE_STATUS_INVALID_STATE;
@@ -406,42 +318,6 @@ static firmware_status_t EncodeActive(
     return FIRMWARE_STATUS_OK;
 }
 
-static firmware_status_t EncodeRequest(
-    boot_control_service_t *service,
-    const boot_update_request_t *request,
-    uint32_t sequence)
-{
-    uint32_t crc;
-    firmware_status_t status;
-
-    if (((request->requested == 0) &&
-         (request->reason != BOOT_UPDATE_REASON_NONE)) ||
-        ((request->requested != 0) &&
-         ((request->reason <= BOOT_UPDATE_REASON_NONE) ||
-          (request->reason > BOOT_UPDATE_REASON_PRODUCTION))))
-    {
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    }
-
-    memset(service->write_buffer, 0xFF, REQUEST_RECORD_SIZE);
-    WriteU32(&service->write_buffer[0x00U], REQUEST_RECORD_MAGIC);
-    WriteU16(&service->write_buffer[0x04U], RECORD_FORMAT_V1);
-    WriteU16(&service->write_buffer[0x06U], REQUEST_RECORD_SIZE);
-    WriteU32(&service->write_buffer[0x08U], sequence);
-    service->write_buffer[0x0CU] = (request->requested != 0) ? 1U : 0U;
-    service->write_buffer[0x0DU] = (uint8_t)request->reason;
-    WriteU16(&service->write_buffer[0x0EU], 0U);
-    status = CalculateCrc(
-        service, service->write_buffer, REQUEST_RECORD_CRC_OFFSET, &crc);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-    WriteU32(&service->write_buffer[REQUEST_RECORD_CRC_OFFSET], crc);
-    WriteU32(&service->write_buffer[REQUEST_RECORD_MARKER], INVALID_MARKER);
-    return FIRMWARE_STATUS_OK;
-}
-
 static void Fail(boot_control_service_t *service, firmware_status_t status)
 {
     service->state = SERVICE_RUN_STATE_FAILED;
@@ -451,15 +327,61 @@ static void Fail(boot_control_service_t *service, firmware_status_t status)
     service->result.native_error = (int32_t)status;
 }
 
+static firmware_status_t BeginCommit(
+    boot_control_service_t *service,
+    const boot_active_record_t *record,
+    uint32_t target_address,
+    uint32_t next_sequence)
+{
+    firmware_status_t status;
+
+    service->record_size = ACTIVE_RECORD_SIZE;
+    service->marker_offset = ACTIVE_RECORD_MARKER;
+    service->target_address = target_address;
+    status = EncodeActive(service, record, next_sequence);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+
+    service->write_offset = 0U;
+    service->last_write_size = 0U;
+    service->stage = BOOT_CONTROL_STAGE_INVALIDATE_MARKER;
+    service->state = SERVICE_RUN_STATE_RUNNING;
+    service->result.status = FIRMWARE_STATUS_OK;
+    service->result.error = BOOT_ERROR_NONE;
+    service->result.stage = BOOT_CONTROL_STAGE_IDLE;
+    service->result.native_error = 0;
+    return FIRMWARE_STATUS_OK;
+}
+
+static int ActiveRecordsEqual(
+    const boot_active_record_t *left,
+    const boot_active_record_t *right)
+{
+    return (left->sequence == right->sequence) &&
+           (left->active_pair == right->active_pair) &&
+           (left->release_version.major == right->release_version.major) &&
+           (left->release_version.minor == right->release_version.minor) &&
+           (left->release_version.patch == right->release_version.patch) &&
+           (left->build_number == right->build_number) &&
+           (left->app_size == right->app_size) &&
+           (left->app_crc32 == right->app_crc32) &&
+           (left->gui_size == right->gui_size) &&
+           (left->gui_crc32 == right->gui_crc32) &&
+           (memcmp(left->package_id_hash, right->package_id_hash,
+                   sizeof(left->package_id_hash)) == 0) &&
+           (memcmp(left->manifest_sha256, right->manifest_sha256,
+                   sizeof(left->manifest_sha256)) == 0);
+}
+
 static firmware_status_t StartCommit(
     boot_control_service_t *service,
-    record_kind_t kind,
-    const void *record)
+    const boot_active_record_t *record)
 {
     int current_slot = RECORD_SLOT_CONFLICT;
     uint32_t current_sequence = 0U;
     firmware_status_t select_status;
-    firmware_status_t status;
 
     if ((service == NULL) || (record == NULL))
     {
@@ -472,52 +394,18 @@ static firmware_status_t StartCommit(
     }
 
     select_status = ReadAndSelect(
-        service, kind, &current_slot, &current_sequence);
+        service, &current_slot, &current_sequence);
     if (!FirmwareStatus_IsOk(select_status) &&
         (current_slot != RECORD_SLOT_NONE))
     {
         return select_status;
     }
 
-    if (kind == RECORD_KIND_ACTIVE)
-    {
-        service->record_size = ACTIVE_RECORD_SIZE;
-        service->marker_offset = ACTIVE_RECORD_MARKER;
-        service->target_address = (current_slot == 0)
-                                      ? ACTIVE_RECORD_B_ADDRESS
-                                      : ACTIVE_RECORD_A_ADDRESS;
-        status = EncodeActive(
-            service,
-            (const boot_active_record_t *)record,
-            current_sequence + 1U);
-    }
-    else
-    {
-        service->record_size = REQUEST_RECORD_SIZE;
-        service->marker_offset = REQUEST_RECORD_MARKER;
-        service->target_address = (current_slot == 0)
-                                      ? REQUEST_RECORD_B_ADDRESS
-                                      : REQUEST_RECORD_A_ADDRESS;
-        status = EncodeRequest(
-            service,
-            (const boot_update_request_t *)record,
-            current_sequence + 1U);
-    }
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-
-    service->write_offset = 0U;
-    service->last_write_size = 0U;
-    service->record_kind = (int)kind;
-    service->stage = BOOT_CONTROL_STAGE_INVALIDATE_MARKER;
-    service->state = SERVICE_RUN_STATE_RUNNING;
-    service->result.status = FIRMWARE_STATUS_OK;
-    service->result.error = BOOT_ERROR_NONE;
-    service->result.stage = BOOT_CONTROL_STAGE_IDLE;
-    service->result.native_error = 0;
-    return FIRMWARE_STATUS_OK;
+    return BeginCommit(
+        service, record,
+        (current_slot == 0) ? ACTIVE_RECORD_B_ADDRESS
+                            : ACTIVE_RECORD_A_ADDRESS,
+        current_sequence + 1U);
 }
 
 firmware_status_t BootControlService_Init(
@@ -552,7 +440,7 @@ firmware_status_t BootControlService_Init(
     {
         return status;
     }
-    if ((service->store_info.capacity_bytes < 0x0280U) ||
+    if ((service->store_info.capacity_bytes < 0x0200U) ||
         (service->store_info.page_size < sizeof(uint32_t)) ||
         (service->store_info.page_size > BOOT_CONTROL_MAX_RECORD_SIZE) ||
         !MarkerFitsPage(
@@ -562,14 +450,6 @@ firmware_status_t BootControlService_Init(
         !MarkerFitsPage(
             ACTIVE_RECORD_B_ADDRESS,
             ACTIVE_RECORD_MARKER,
-            service->store_info.page_size) ||
-        !MarkerFitsPage(
-            REQUEST_RECORD_A_ADDRESS,
-            REQUEST_RECORD_MARKER,
-            service->store_info.page_size) ||
-        !MarkerFitsPage(
-            REQUEST_RECORD_B_ADDRESS,
-            REQUEST_RECORD_MARKER,
             service->store_info.page_size))
     {
         return FIRMWARE_STATUS_NOT_SUPPORTED;
@@ -603,8 +483,7 @@ firmware_status_t BootControlService_LoadActive(
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    status = ReadAndSelect(
-        service, RECORD_KIND_ACTIVE, &selected_slot, &sequence);
+    status = ReadAndSelect(service, &selected_slot, &sequence);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -616,15 +495,120 @@ firmware_status_t BootControlService_LoadActive(
         record);
 }
 
-firmware_status_t BootControlService_LoadUpdateRequest(
+firmware_status_t BootControlService_LoadPairCandidate(
     boot_control_service_t *service,
-    boot_update_request_t *request)
+    boot_pair_t pair,
+    boot_active_record_t *record)
 {
-    int selected_slot;
-    uint32_t sequence;
+    boot_active_record_t active_a;
+    boot_active_record_t active_b;
     firmware_status_t status;
+    firmware_status_t status_a;
+    firmware_status_t status_b;
+    int valid_a;
+    int valid_b;
 
-    if ((service == NULL) || (request == NULL))
+    if ((service == NULL) || (record == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if ((pair != BOOT_PAIR_1) && (pair != BOOT_PAIR_2))
+    {
+        return FIRMWARE_STATUS_OUT_OF_RANGE;
+    }
+    if ((service->initialized == 0) ||
+        (service->state == SERVICE_RUN_STATE_RUNNING))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+
+    status = service->store->read(
+        service->store->context, ACTIVE_RECORD_A_ADDRESS,
+        service->write_buffer, ACTIVE_RECORD_SIZE);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status = service->store->read(
+        service->store->context, ACTIVE_RECORD_B_ADDRESS,
+        service->verify_buffer, ACTIVE_RECORD_SIZE);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+
+    status_a = ValidateActiveBuffer(service, service->write_buffer, &active_a);
+    status_b = ValidateActiveBuffer(service, service->verify_buffer, &active_b);
+    if ((!FirmwareStatus_IsOk(status_a) &&
+         (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
+         (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)) ||
+        (!FirmwareStatus_IsOk(status_b) &&
+         (status_b != FIRMWARE_STATUS_INVALID_STATE) &&
+         (status_b != FIRMWARE_STATUS_OUT_OF_RANGE)))
+    {
+        return !FirmwareStatus_IsOk(status_a) &&
+                       (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
+                       (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)
+                   ? status_a
+                   : status_b;
+    }
+
+    valid_a = FirmwareStatus_IsOk(status_a) && (active_a.active_pair == pair);
+    valid_b = FirmwareStatus_IsOk(status_b) && (active_b.active_pair == pair);
+    if ((valid_a == 0) && (valid_b == 0))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if ((valid_a != 0) && (valid_b == 0))
+    {
+        *record = active_a;
+        return FIRMWARE_STATUS_OK;
+    }
+    if ((valid_a == 0) && (valid_b != 0))
+    {
+        *record = active_b;
+        return FIRMWARE_STATUS_OK;
+    }
+    if (active_a.sequence == active_b.sequence)
+    {
+        if (memcmp(service->write_buffer, service->verify_buffer,
+                   ACTIVE_RECORD_SIZE) != 0)
+        {
+            return FIRMWARE_STATUS_INVALID_STATE;
+        }
+        *record = active_a;
+        return FIRMWARE_STATUS_OK;
+    }
+    if ((active_a.sequence - active_b.sequence) == 0x80000000UL)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    *record = SequenceIsNewer(active_a.sequence, active_b.sequence)
+                  ? active_a
+                  : active_b;
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t BootControlService_CommitActiveStart(
+    boot_control_service_t *service,
+    const boot_active_record_t *record)
+{
+    return StartCommit(service, record);
+}
+
+firmware_status_t BootControlService_CommitRecoveredStart(
+    boot_control_service_t *service,
+    const boot_active_record_t *record)
+{
+    boot_active_record_t active_a;
+    boot_active_record_t active_b;
+    firmware_status_t status;
+    firmware_status_t status_a;
+    firmware_status_t status_b;
+    int matches_a;
+    int matches_b;
+
+    if ((service == NULL) || (record == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -634,31 +618,52 @@ firmware_status_t BootControlService_LoadUpdateRequest(
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    status = ReadAndSelect(
-        service, RECORD_KIND_REQUEST, &selected_slot, &sequence);
+    status = service->store->read(
+        service->store->context, ACTIVE_RECORD_A_ADDRESS,
+        service->write_buffer, ACTIVE_RECORD_SIZE);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
-    (void)sequence;
-    return ValidateRequestBuffer(
-        service,
-        (selected_slot == 0) ? service->write_buffer : service->verify_buffer,
-        request);
-}
+    status = service->store->read(
+        service->store->context, ACTIVE_RECORD_B_ADDRESS,
+        service->verify_buffer, ACTIVE_RECORD_SIZE);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status_a = ValidateActiveBuffer(service, service->write_buffer, &active_a);
+    status_b = ValidateActiveBuffer(service, service->verify_buffer, &active_b);
+    if ((!FirmwareStatus_IsOk(status_a) &&
+         (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
+         (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)) ||
+        (!FirmwareStatus_IsOk(status_b) &&
+         (status_b != FIRMWARE_STATUS_INVALID_STATE) &&
+         (status_b != FIRMWARE_STATUS_OUT_OF_RANGE)))
+    {
+        return !FirmwareStatus_IsOk(status_a) &&
+                       (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
+                       (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)
+                   ? status_a
+                   : status_b;
+    }
 
-firmware_status_t BootControlService_CommitActiveStart(
-    boot_control_service_t *service,
-    const boot_active_record_t *record)
-{
-    return StartCommit(service, RECORD_KIND_ACTIVE, record);
-}
+    matches_a = FirmwareStatus_IsOk(status_a) &&
+                ActiveRecordsEqual(&active_a, record);
+    matches_b = FirmwareStatus_IsOk(status_b) &&
+                ActiveRecordsEqual(&active_b, record);
+    if ((matches_a == 0) && (matches_b == 0))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
 
-firmware_status_t BootControlService_CommitUpdateRequestStart(
-    boot_control_service_t *service,
-    const boot_update_request_t *request)
-{
-    return StartCommit(service, RECORD_KIND_REQUEST, request);
+    /* Preserve one exact, already-validated source record throughout the
+     * recovery commit. If both copies match, preserve A. */
+    return BeginCommit(
+        service, record,
+        (matches_a != 0) ? ACTIVE_RECORD_B_ADDRESS
+                         : ACTIVE_RECORD_A_ADDRESS,
+        record->sequence + 1U);
 }
 
 void BootControlService_Process(boot_control_service_t *service)
@@ -797,23 +802,11 @@ void BootControlService_Process(boot_control_service_t *service)
                                                 : status);
                 break;
             }
-            if (service->record_kind == (int)RECORD_KIND_ACTIVE)
             {
                 boot_active_record_t active_record;
 
                 status = ValidateActiveBuffer(
                     service, service->verify_buffer, &active_record);
-            }
-            else if (service->record_kind == (int)RECORD_KIND_REQUEST)
-            {
-                boot_update_request_t update_request;
-
-                status = ValidateRequestBuffer(
-                    service, service->verify_buffer, &update_request);
-            }
-            else
-            {
-                status = FIRMWARE_STATUS_INVALID_STATE;
             }
             if (!FirmwareStatus_IsOk(status))
             {

@@ -18,6 +18,13 @@ typedef firmware_status_t (*package_source_open_fn)(
     void *context,
     const char *path);
 typedef firmware_status_t (*package_source_close_fn)(void *context);
+typedef firmware_status_t (*package_source_exists_fn)(
+    void *context,
+    const char *path,
+    int *present);
+typedef firmware_status_t (*package_source_remove_fn)(
+    void *context,
+    const char *path);
 typedef firmware_status_t (*package_source_get_size_fn)(
     void *context,
     uint32_t *size);
@@ -40,6 +47,8 @@ typedef struct
     package_source_unmount_fn unmount; /**< Unmount when no file is open. */
     package_source_open_fn open; /**< Open one caller-named file for reading. */
     package_source_close_fn close; /**< Close the currently open file. */
+    package_source_exists_fn exists; /**< Test for a file without opening it. */
+    package_source_remove_fn remove; /**< Remove a file while the volume is mounted. */
     package_source_get_size_fn get_size; /**< Return open-file size in bytes. */
     package_source_read_at_fn read_at; /**< Read bytes at an absolute file offset. */
 } package_source_t;

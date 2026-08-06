@@ -1,6 +1,6 @@
 /**
  * @file boot_control_types.h
- * @brief Stable Active Record and Update Request domain models.
+ * @brief Stable Active Record domain model.
  */
 #ifndef SERVICES_BOOT_CONTROL_TYPES_H
 #define SERVICES_BOOT_CONTROL_TYPES_H
@@ -25,20 +25,5 @@ typedef struct
     uint8_t package_id_hash[BOOT_CONTROL_PACKAGE_ID_HASH_SIZE];
     uint8_t manifest_sha256[BOOT_CONTROL_MANIFEST_HASH_SIZE];
 } boot_active_record_t;
-
-typedef enum
-{
-    BOOT_UPDATE_REASON_NONE = 0,
-    BOOT_UPDATE_REASON_APPLICATION = 1,
-    BOOT_UPDATE_REASON_RECOVERY = 2,
-    BOOT_UPDATE_REASON_PRODUCTION = 3
-} boot_update_reason_t;
-
-typedef struct
-{
-    uint32_t sequence;
-    int requested;
-    boot_update_reason_t reason;
-} boot_update_request_t;
 
 #endif

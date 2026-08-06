@@ -5,6 +5,7 @@ add_library(firmware_adapters STATIC
     src/spi_nor_block_adapter.c
     src/stm32_clock_adapter.c
     src/stm32_qspi_xip_adapter.c
+    src/stm32_system_reset_adapter.c
     src/stm32_watchdog_adapter.c
     src/uart_log_adapter.c
 )

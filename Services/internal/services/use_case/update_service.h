@@ -1,6 +1,6 @@
 /**
  * @file update_service.h
- * @brief Composition-visible incremental update service state.
+ * @brief Composition-visible package preparation and installer state.
  */
 #ifndef SERVICES_UPDATE_SERVICE_INTERNAL_H
 #define SERVICES_UPDATE_SERVICE_INTERNAL_H
@@ -9,14 +9,13 @@
 
 #include "firmware/async_block_device.h"
 #include "firmware/checksum.h"
-#include "firmware/image_authenticator.h"
+#include "firmware/hash.h"
 #include "firmware/package_source.h"
 #include "services/capability/appx_validation.h"
 #include "services/capability/manifest_service.h"
 #include "services/capability/relocation_service.h"
 #include "services/common/manifest_types.h"
 #include "services/use_case/update_service_api.h"
-#include "services/capability/boot_control_service.h"
 
 #define UPDATE_SERVICE_MANIFEST_MAX_SIZE 16384U
 #define UPDATE_SERVICE_IO_BUFFER_MIN_SIZE 4096U
@@ -27,10 +26,8 @@ typedef struct
     const package_source_t *package_source;
     const async_block_device_t *storage;
     const checksum_t *checksum;
-    const image_authenticator_t *hash;
+    const hash_provider_t *hash;
     manifest_service_t *manifest_service;
-    boot_control_service_t *boot_control;
-    release_version_t bootloader_version;
     const char *manifest_path;
     const char *app_path;
     const char *gui_path;
@@ -47,8 +44,6 @@ typedef struct
 typedef enum
 {
     UPDATE_STAGE_IDLE = 0,
-    UPDATE_STAGE_WAIT_MEDIA,
-    UPDATE_STAGE_MOUNT_MEDIA,
     UPDATE_STAGE_OPEN_MANIFEST,
     UPDATE_STAGE_READ_MANIFEST,
     UPDATE_STAGE_CLOSE_MANIFEST,
@@ -86,13 +81,7 @@ typedef enum
     UPDATE_STAGE_OPEN_GUI_PROGRAM,
     UPDATE_STAGE_READ_GUI_PROGRAM_BLOCK,
     UPDATE_STAGE_CLOSE_GUI_PROGRAM,
-    UPDATE_STAGE_COMMIT_ACTIVE_START,
-    UPDATE_STAGE_COMMIT_ACTIVE_PROCESS,
-    UPDATE_STAGE_CLEAR_REQUEST_START,
-    UPDATE_STAGE_CLEAR_REQUEST_PROCESS,
-    UPDATE_STAGE_UNMOUNT_MEDIA,
-    UPDATE_STAGE_CLEANUP_CLOSE,
-    UPDATE_STAGE_CLEANUP_UNMOUNT
+    UPDATE_STAGE_CLEANUP_CLOSE
 } update_stage_t;
 
 typedef struct update_service
@@ -101,10 +90,8 @@ typedef struct update_service
     const async_block_device_t *storage;
     async_block_device_info_t storage_info;
     const checksum_t *checksum;
-    const image_authenticator_t *hash;
+    const hash_provider_t *hash;
     manifest_service_t *manifest_service;
-    boot_control_service_t *boot_control;
-    release_version_t bootloader_version;
     const char *manifest_path;
     const char *app_path;
     const char *gui_path;
@@ -121,8 +108,9 @@ typedef struct update_service
     boot_pair_layout_t target_layout;
     appx_header_t app_header;
     relocation_service_t relocation;
-    boot_active_record_t commit_record;
-    boot_update_request_t clear_request;
+    boot_active_record_t candidate_record;
+    int manifest_prepared;
+    int install_completed;
     service_run_state_t state;
     service_result_t result;
     update_stage_t stage;
@@ -156,7 +144,6 @@ typedef struct update_service
     uint32_t target_gui_crc;
     int manifest_size_known;
     int file_open;
-    int media_mounted;
     int erase_started;
     int relocation_crc_done;
     int cancel_requested;

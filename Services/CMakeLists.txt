@@ -6,7 +6,6 @@ add_library(firmware_services STATIC
     src/use_case/active_validation_service.c
     src/use_case/launch_service.c
     src/capability/appx_validation.c
-    src/capability/base64.c
     src/capability/checked_arithmetic.c
     src/capability/json_document.c
     src/capability/manifest_service.c

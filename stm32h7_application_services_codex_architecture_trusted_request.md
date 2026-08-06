@@ -3,7 +3,7 @@
 > 适用范围：STM32H7 Bootloader 固件与 Application 固件。  
 > 本文只规定 Application 层、Services 层及其衔接方式，不定义具体产品业务、升级协议、分区地址或设备功能。  
 > 本文用于指导 Codex 判断代码归属、生成模块骨架、建立依赖关系并执行架构验收。  
-> 当前 Bootloader 具体绑定：SD 卡 FatFs Package Source、文件型可信升级请求；Bootloader 只执行 SHA 完整性校验，不执行 Manifest 验签。未来 eMMC 只替换 Adapter。
+> 当前 Bootloader 具体绑定：SD 卡 FatFs Package Source、固定路径请求触发。请求不是信任边界；Bootloader 只执行 SHA 完整性校验，不执行 Manifest 验签。未来 eMMC 只替换 Adapter。
 
 ---
 
@@ -13,7 +13,7 @@ Application 与 Services 的设计应满足：
 
 1. Application 只负责固件级运行编排和顶层状态决策；
 2. Services 提供边界明确、可复用、可测试的系统能力；
-3. Application 不直接访问 Interfaces、Adapters、BSP、Platform、HAL 或 Middleware；
+3. Application 可通过稳定 Interface 执行属于顶层事务的介质、请求和复位动作，但不访问具体 Adapter、BSP、Platform、HAL 或 Middleware；
 4. Services 只通过 Interfaces 使用底层能力；
 5. 具体实现由 Composition Root 创建并注入；
 6. 长流程采用有状态、增量执行模型；
@@ -48,7 +48,7 @@ Composition Root
 编译期依赖必须保持：
 
 ```text
-Application -> Services
+Application -> Services + Interfaces
 Services    -> Interfaces
 Adapters    -> Interfaces
 Composition -> Application + Services + Adapters + Platform + BSP
@@ -57,7 +57,6 @@ Composition -> Application + Services + Adapters + Platform + BSP
 严格禁止：
 
 ```text
-Application -> Interfaces
 Application -> Adapters
 Application -> BSP / Platform / HAL / Middleware
 
@@ -87,33 +86,38 @@ Application 负责：
 - 工作模式选择；
 - 系统级事件处理；
 - Service 的启动顺序；
+- 跨 Service 事务顺序和提交点；
 - Service 完成、失败或取消后的状态转换；
 - 裸机周期调度或 RTOS 任务编排；
 - 系统级恢复策略；
 - 最终的启动、复位、停机或故障决策。
+- 属于顶层事务的介质挂载/卸载、请求探测/清理和提交后复位；
+- 陈旧包、版本接受/拒绝以及何时提交 Active Record。
 
 Application 不负责：
 
-- 文件读写；
+- 发布包内容读写和文件格式处理；
 - Flash 擦写；
 - Hash、CRC 或签名算法执行；
 - Manifest 或协议解析；
 - SDIO/SDMMC、USB、UART、QSPI、I2C 等技术状态处理；
 - BSP 设备控制；
 - HAL Handle 访问；
-- Service 内部步骤编排；
+- 单一 Service 内部的算法和设备步骤编排；
 - Adapter 或 Driver 的创建和查找。
 
 判断原则：
 
 > 涉及整个固件运行模式或多个用例之间切换的逻辑，属于 Application。
 
-项目特定安全边界：
+项目特定边界：
 
-- 正式 Application 固件内的升级准备 Service 负责 Manifest ECDSA 验签；
-- Bootloader Application 层不负责验签，也不接触公钥；
-- Bootloader Update Service 从可信请求中取得 `manifest_sha256`，只执行 Manifest/APP/GUI SHA、格式和安装校验；
-- 可信请求创建属于正式 Application 的升级准备用例，不应直接写在 Application 顶层状态机中。
+- 请求文件只负责存在性触发，不认证或绑定 Manifest；
+- Bootloader Application 和 Services 都不执行 Manifest 验签，也不接触公钥；
+- Manifest Service 严格解析并计算 SHA-256；
+- Update Service 分为 Prepare/Install，只安装非激活槽并返回未提交候选；
+- Recovery Service 只返回未提交恢复候选；
+- Application 负责请求探测/删除、陈旧和版本策略、Active Record 提交、启动和系统复位。
 
 ---
 
@@ -136,7 +140,7 @@ Services 负责：
 - 管理该能力内部执行步骤；
 - 管理长流程内部状态；
 - 通过 Interfaces 调用底层能力；
-- 执行业务规则、顺序约束和数据校验；
+- 执行本能力内部的不变量、技术顺序和数据校验；
 - 将底层错误转换为稳定的 Service 错误；
 - 向 Application 暴露状态、结果和进度；
 - 保证接口调用顺序和模块不变量。
@@ -150,6 +154,8 @@ Services 不负责：
 - 创建 RTOS 任务；
 - 直接改变 Application 状态；
 - 通过 Callback 反向控制 Application。
+- 决定跨 Service 的业务顺序、提交点、请求生命周期或最终复位；
+- 执行属于 Application 的版本/陈旧策略。
 
 判断原则：
 
@@ -164,7 +170,7 @@ Codex 在新增代码前必须使用以下判定表。
 | 问题 | 是 | 否 |
 |---|---|---|
 | 是否决定整个固件进入正常、升级、恢复、诊断或故障模式？ | Application | 继续判断 |
-| 是否协调两个或多个独立 Service 的先后关系？ | Application 或 Use-case Service，按系统范围判断 | 继续判断 |
+| 是否协调两个或多个独立 Service 的先后关系或决定提交点？ | Application | 继续判断 |
 | 是否是一项完整、可独立描述的系统能力？ | Service | 继续判断 |
 | 是否属于某项能力内部的步骤、校验或状态？ | Service 内部模块 | 继续判断 |
 | 是否只是无状态算法或数据转换？ | Utility / Model，不创建 Service | 继续判断 |
@@ -177,10 +183,10 @@ Codex 在新增代码前必须使用以下判定表。
 决定是否进入升级模式
     -> Application
 
-执行完整升级过程
-    -> Update Service
+编排请求、Prepare、版本决策、Install、Commit、Cleanup、Reset
+    -> Application
 
-升级过程中的文件校验、擦除、写入、提交
+发布文件校验、非激活槽擦除/写入和目标校验
     -> Update Service 内部阶段
 
 SHA-256 算法
@@ -192,11 +198,11 @@ SHA-256 算法
 定义“读取升级文件”的抽象能力
     -> package_source Interface
 
-读取或清除固定可信升级请求文件
-    -> UpdateRequestStore Adapter
+探测或清除固定请求文件
+    -> Application 通过 package_source Interface
 
-定义“加载/清除可信升级请求”的抽象能力
-    -> update_request_store Interface
+定义介质、文件存在性和删除能力
+    -> package_source Interface
 ```
 
 ---
@@ -316,9 +322,12 @@ service_status_t update_service_init(
     const update_service_dependencies_t *dependencies,
     const update_service_config_t *config);
 
-service_status_t update_service_start(
+service_status_t update_service_prepare_start(
+    update_service_t *service);
+
+service_status_t update_service_install_start(
     update_service_t *service,
-    const update_request_t *request);
+    const boot_active_record_t *active_record);
 
 void update_service_process(
     update_service_t *service);
@@ -327,6 +336,12 @@ update_service_state_t update_service_get_state(
     const update_service_t *service);
 
 const update_result_t *update_service_get_result(
+    const update_service_t *service);
+
+const validated_manifest_t *update_service_get_manifest(
+    const update_service_t *service);
+
+const boot_active_record_t *update_service_get_candidate(
     const update_service_t *service);
 
 service_status_t update_service_cancel(
@@ -428,7 +443,7 @@ FILE_OPENING
 FLASH_ERASING
 FLASH_PROGRAMMING
 HASH_CALCULATING
-EEPROM_WRITING
+EEPROM_PAGE_WRITING
 ```
 
 这些状态应属于 Service 或 Adapter。
@@ -561,17 +576,18 @@ struct update_service
     update_service_state_t state;
     update_stage_t stage;
 
-    update_request_t request;
     update_result_t result;
+    validated_manifest_t manifest;
+    boot_active_record_t candidate;
 
     uint16_t current_item;
     uint32_t current_offset;
 
     const package_source_t *package_source;
-    const component_registry_t *installers;
-    const sha_integrity_verifier_t *integrity;
-    const boot_control_store_t *control_store;
-    const boot_watchdog_t *watchdog;
+    const async_block_device_t *storage;
+    const hash_provider_t *hash;
+    const checksum_t *checksum;
+    manifest_service_t *manifest_service;
 
     uint8_t *io_buffer;
     size_t io_buffer_size;
@@ -852,109 +868,66 @@ Driver
 Composition Root 是具体对象绑定的唯一位置。
 
 ```c
-static application_t g_application;
-static update_service_t g_update_service;
-static boot_service_t g_boot_service;
+static update_service_t g_update;
+static recovery_service_t g_recovery;
+static boot_control_service_t g_boot_control;
+static fatfs_package_source_adapter_t g_package_source;
+static stm32_system_reset_adapter_t g_system_reset;
+static uint8_t g_manifest_buffer[16 * 1024];
+static uint8_t g_io_buffer[4096];
 
-static fatfs_sd_package_source_adapter_t g_package_source;
-static fatfs_update_request_store_adapter_t g_request_store;
-static qspi_installer_t g_qspi_installer;
-
-static uint8_t g_request_buffer[512];
-static uint8_t g_update_io_buffer[4096];
-
-composition_status_t Composition_Init(void)
+firmware_status_t Composition_Init(void)
 {
-    composition_status_t status;
-
-    status = fatfs_sd_package_source_construct(
-        &g_package_source,
-        BSP_GetSdStorage());
-
-    if (status != COMPOSITION_OK) {
-        return status;
-    }
-
-    status = fatfs_update_request_store_construct(
-        &g_request_store,
-        BSP_GetSdStorage(),
-        "/boot_update_request.json");
-
-    if (status != COMPOSITION_OK) {
-        return status;
-    }
-
-    status = qspi_installer_construct(
-        &g_qspi_installer,
-        BSP_GetExternalFlash());
-
-    if (status != COMPOSITION_OK) {
-        return status;
-    }
-
     update_service_dependencies_t update_dependencies = {
-        .package_source =
-            fatfs_sd_package_source_interface(&g_package_source),
-        .request_store =
-            fatfs_update_request_store_interface(&g_request_store),
-        .installers =
-            component_registry_get(),
-        .integrity =
-            sha_integrity_verifier_get(),
-        .control_store =
-            boot_control_store_get(),
-        .watchdog =
-            boot_watchdog_get()
+        .package_source = FatFsPackageSourceAdapter_Interface(&g_package_source),
+        .storage = SpiNorBlockAdapter_AsyncInterface(&g_flash),
+        .hash = &g_sha256_provider,
+        .checksum = &g_crc32_provider,
+        .manifest_service = &g_manifest,
+        .manifest_buffer = g_manifest_buffer,
+        .manifest_buffer_size = sizeof(g_manifest_buffer),
+        .io_buffer = g_io_buffer,
+        .io_buffer_size = sizeof(g_io_buffer),
     };
 
-    update_service_config_t update_config = {
-        .request_buffer = g_request_buffer,
-        .request_buffer_size = sizeof(g_request_buffer),
-        .io_buffer = g_update_io_buffer,
-        .io_buffer_size = sizeof(g_update_io_buffer)
-    };
-
-    status = update_service_init(
-        &g_update_service,
-        &update_dependencies,
-        &update_config);
-
-    if (status != COMPOSITION_OK) {
-        return status;
-    }
+    /* Initialize Update, Recovery and Boot Control before Application. */
 
     application_dependencies_t application_dependencies = {
-        .update = &g_update_service,
-        .boot = &g_boot_service,
-        .recovery = &g_recovery_service,
-        .diagnostic = &g_diagnostic_service
+        .boot_control = &g_boot_control,
+        .update = &g_update,
+        .recovery = &g_recovery,
+        .validation = &g_validation,
+        .launch = &g_launch,
+        .package_source = FatFsPackageSourceAdapter_Interface(&g_package_source),
+        .system_reset = Stm32SystemResetAdapter_Interface(&g_system_reset),
+        .bootloader_version = {1, 0, 0},
+        .request_path = "/boot_update_request.json",
     };
 
-    return application_init(
-        &g_application,
-        &application_dependencies);
+    return Application_Configure(&application_dependencies);
 }
 ```
 
 当前绑定只存在于 Composition：
 
 ```text
-package_source_t       <- SD 卡 FatFs Adapter
-update_request_store_t <- 受信文件系统请求 Adapter
+package_source_t <- SD 卡 FatFs Adapter
+system_reset_t   <- STM32 System Reset Adapter
 
 未来切换 eMMC：
-package_source_t       <- eMMC 文件系统 Adapter
-update_request_store_t <- 具备受信写入保证的 eMMC 请求 Adapter
+package_source_t <- eMMC 文件系统 Adapter
+system_reset_t   <- STM32 System Reset Adapter
 ```
 
 Application 与 Services 不得因介质变化修改状态名、公共 API 或业务流程。
 
 正式 Composition 还必须保证：
 
-- Bootloader 不装配 `signature_verifier_t` 或 Manifest 公钥；
-- `update_request_store_t` 的正式实现满足受信写入合同；
-- 当前 SD 人工实现必须用开发配置显式标识为 trust override；
-- `sha_integrity_verifier_t` 只负责 SHA-256，不承担发布身份认证。
+- Bootloader 不装配 Manifest 签名验证器或公钥；
+- Manifest/Update 只注入纯 `hash_provider_t`，该接口不包含签名验证；
+- 请求文件只通过 `package_source_t.exists/remove` 处理，不存在独立 Request Store；
+- Application 取得 `system_reset_t`，不直接包含 Platform 复位头文件；
+- Recovery 的候选加载器绑定到 Boot Control 的 Active Record A/B 查询能力。
 
 Composition 可以知道所有层，但不得包含：
 
@@ -1267,10 +1240,10 @@ Codex 完成代码生成后必须逐项确认：
 
 ### Application
 
-- [ ] Application 只包含 Service 公共头文件；
+- [ ] Application 只包含 Service 公共头文件和获准的稳定 Interface；
 - [ ] Application 状态表达系统语义；
 - [ ] Application 不含 SDIO/SDMMC、USB、文件、Flash、DMA 等技术步骤；
-- [ ] Application 不直接访问 Interface；
+- [ ] Application 只通过 Interface 执行属于顶层事务的介质、请求和复位动作；
 - [ ] Application 不直接访问 Composition 的具体实现；
 - [ ] Application 根据 Service 状态和结果做决策；
 - [ ] Application `process()` 单次执行时间有界。
@@ -1283,6 +1256,7 @@ Codex 完成代码生成后必须逐项确认：
 - [ ] 短操作未被无意义地状态机化；
 - [ ] Service 只依赖 Interfaces 或更低层 Capability Service；
 - [ ] Service 不访问 HAL、BSP、Adapter、Middleware；
+- [ ] Update/Recovery Service 不探测或删除请求、不执行版本策略、不提交 Active Record、不复位；
 - [ ] Service 内部状态不泄漏给 Application 修改；
 - [ ] Service 错误已转换为稳定错误；
 - [ ] 无 Service 循环依赖。

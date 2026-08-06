@@ -147,14 +147,19 @@ static void SelectCandidate(recovery_service_t *service)
         return;
     }
     service->selected_record = service->candidates[selected];
-    service->stage           = RECOVERY_STAGE_COMMIT_ACTIVE_START;
+    service->state               = SERVICE_RUN_STATE_SUCCEEDED;
+    service->result.status       = FIRMWARE_STATUS_OK;
+    service->result.error        = BOOT_ERROR_NONE;
+    service->result.stage        = (uint32_t)service->stage;
+    service->result.native_error = 0;
+    service->stage               = RECOVERY_STAGE_IDLE;
 }
 
 firmware_status_t RecoveryService_Init(recovery_service_t *service,
                                        const recovery_service_dependencies_t *dependencies)
 {
     if ((service == NULL) || (dependencies == NULL) || (dependencies->load_candidate == NULL) ||
-        (dependencies->validation == NULL) || (dependencies->boot_control == NULL))
+        (dependencies->validation == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -165,7 +170,6 @@ firmware_status_t RecoveryService_Init(recovery_service_t *service,
     service->load_candidate      = dependencies->load_candidate;
     service->candidate_context   = dependencies->candidate_context;
     service->validation          = dependencies->validation;
-    service->boot_control        = dependencies->boot_control;
     service->state               = SERVICE_RUN_STATE_IDLE;
     service->stage               = RECOVERY_STAGE_IDLE;
     service->result.status       = FIRMWARE_STATUS_OK;
@@ -209,8 +213,6 @@ firmware_status_t RecoveryService_Start(struct recovery_service *service,
 void RecoveryService_Process(struct recovery_service *service)
 {
     recovery_service_t *implementation = (recovery_service_t *) service;
-    service_run_state_t state;
-
     if ((implementation == NULL) || (implementation->state != SERVICE_RUN_STATE_RUNNING))
     {
         return;
@@ -238,40 +240,6 @@ void RecoveryService_Process(struct recovery_service *service)
         case RECOVERY_STAGE_SELECT_PAIR:
             SelectCandidate(implementation);
             break;
-        case RECOVERY_STAGE_COMMIT_ACTIVE_START:
-        {
-            firmware_status_t status = BootControlService_CommitActiveStart(
-                implementation->boot_control, &implementation->selected_record);
-
-            if (!FirmwareStatus_IsOk(status))
-            {
-                Fail(implementation, status, BOOT_ERROR_EEPROM_COMMIT);
-            }
-            else
-            {
-                implementation->stage = RECOVERY_STAGE_COMMIT_ACTIVE_PROCESS;
-            }
-            break;
-        }
-        case RECOVERY_STAGE_COMMIT_ACTIVE_PROCESS:
-            BootControlService_Process(implementation->boot_control);
-            state = BootControlService_GetState(implementation->boot_control);
-            if (state == SERVICE_RUN_STATE_FAILED)
-            {
-                Fail(implementation,
-                     BootControlService_GetResult(implementation->boot_control)->status,
-                     BOOT_ERROR_EEPROM_COMMIT);
-            }
-            else if (state == SERVICE_RUN_STATE_SUCCEEDED)
-            {
-                implementation->state               = SERVICE_RUN_STATE_SUCCEEDED;
-                implementation->result.status       = FIRMWARE_STATUS_OK;
-                implementation->result.error        = BOOT_ERROR_NONE;
-                implementation->result.stage        = (uint32_t) implementation->stage;
-                implementation->result.native_error = 0;
-                implementation->stage               = RECOVERY_STAGE_IDLE;
-            }
-            break;
         default:
             Fail(implementation, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_INTERNAL);
             break;
@@ -287,4 +255,16 @@ service_run_state_t RecoveryService_GetState(const struct recovery_service *serv
 const service_result_t *RecoveryService_GetResult(const struct recovery_service *service)
 {
     return (service == NULL) ? NULL : &((const recovery_service_t *) service)->result;
+}
+
+const boot_active_record_t *RecoveryService_GetCandidate(
+    const struct recovery_service *service)
+{
+    const recovery_service_t *implementation =
+        (const recovery_service_t *)service;
+
+    return ((implementation == NULL) ||
+            (implementation->state != SERVICE_RUN_STATE_SUCCEEDED))
+               ? NULL
+               : &implementation->selected_record;
 }

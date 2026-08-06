@@ -475,7 +475,7 @@ USB_HOST/Target
 
 ## 13. Interfaces 层
 
-Interfaces 定义 Services 所需的稳定能力契约。
+Interfaces 定义 Application 与 Services 所需的稳定能力契约。
 
 接口应从上层需求出发，而不是直接复制 HAL、FatFs 或 Device Driver API。
 
@@ -525,7 +525,7 @@ Interface                         Adapter
 -----------------------------------------------------
 Storage Interface                 FatFs Storage Adapter
 Package Source Interface          FatFs SD/eMMC Package Adapter
-Trusted Request Store Interface   Trusted FatFs Request Store Adapter
+System Reset Interface            STM32H7 System Reset Adapter
 Block Device Interface            External Flash Adapter
 Clock Interface                   STM32H7 Clock Adapter
 Reset Interface                   STM32H7 Reset Adapter
@@ -553,42 +553,43 @@ Adapter 是吸收底层技术细节的主要位置。
 当前 Bootloader 的具体绑定示例：
 
 ```text
-package_source_t       <- FatFs SD Package Source Adapter
-update_request_store_t <- Trusted FatFs Request Store Adapter
-block_device_t         <- W25Q256 Adapter
+package_source_t      <- FatFs SD Package Source Adapter
+system_reset_t        <- STM32H7 System Reset Adapter
+async_block_device_t  <- W25Q256 Adapter
 
 未来恢复 eMMC 后：
-package_source_t       <- eMMC 文件系统 Adapter
-update_request_store_t <- 具备受信写入保证的 eMMC Request Store Adapter
+package_source_t      <- eMMC 文件系统 Adapter
+system_reset_t        <- STM32H7 System Reset Adapter
 ```
 
 介质替换不得影响 Application、Services 或 Interfaces 的公共语义。
 
 ---
 
-## 14.1 可信升级请求的架构边界
+## 14.1 文件请求与升级事务边界
 
-本项目把发布身份认证与 Bootloader 安装完整性拆分：
+请求文件只是触发标记，升级事务由 Application 编排：
 
 ```text
-Application Upgrade Preparation Service
-    -> ECDSA Manifest Verification
-    -> 创建绑定 manifest_sha256 的可信请求
-
-Bootloader Update Service
-    -> 校验可信请求
-    -> SHA256(Manifest/APP/GUI)
-    -> 安装与提交
+Application
+    -> package_source.exists(request_path)
+    -> Update Prepare
+    -> 陈旧/版本决策
+    -> Update Install，取得候选
+    -> Boot Control Commit
+    -> package_source.remove(request_path)
+    -> system_reset.request()
 ```
 
 规则：
 
-- Manifest 验签属于正式 Application 的 Service，不属于 Bootloader Application 顶层状态机；
-- Bootloader 不链接公钥、micro-ecc 或 Manifest Signature Verifier；
-- `update_request_store_t` 是安全边界接口，不能被视为普通任意文件读取接口；
-- Adapter 只实现技术访问，但正式 Composition 只能绑定满足受信写入保证的实现；
-- 当前可移除 SD 卡人工请求是开发 trust override，必须通过构建配置与量产实现区分；
-- 介质从 SD 切换到 eMMC 时，Application/Services 公共语义不变，但 Request Store 的安全属性必须重新验收。
+- 请求不认证发布包，也不绑定 Manifest；
+- EEPROM 只持久化 Active Record A/B；
+- Bootloader 不链接或装配 Manifest 公钥、Micro-ECC 或签名验证器；
+- Manifest/Update 依赖纯 `hash_provider_t`，接口中不存在签名验证；
+- Update/Recovery Service 不探测或删除请求、不提交 Active Record、不决定复位；
+- Active Record 提交后由 Application 尽力删除请求，删除失败不回退；
+- 介质从 SD 切换到 eMMC 时只替换 Package Source Adapter。
 
 ---
 
@@ -641,14 +642,15 @@ Application_CreateTasks
 osKernelStart
 ```
 
-本文不定义 Application 的具体业务内容，只规定：
+本文不定义产品业务内容，只规定：
 
 - Application 调用 Services；
+- Application 可调用获准的稳定 Interface 完成顶层事务动作，例如介质挂载、请求清理和系统复位；
 - Application 不调用 HAL、BSP、FatFs 或具体 Driver；
 - Application 不负责构造底层实现；
 - Application 不访问 CubeMX Handle；
 - Application 不包含生成级外设初始化；
-- Application 的状态机、任务或控制器只使用 Service API。
+- Application 的状态机、任务或控制器只使用 Service API 和稳定 Interface。
 
 ---
 
@@ -995,7 +997,7 @@ Generated   → Application / Services
 允许：
 
 ```text
-Application → Services
+Application → Services / Interfaces
 Services → Interfaces
 Adapters → Interfaces
 Adapters → Platform / BSP / Drivers / Middleware / Generated Glue
@@ -1041,7 +1043,7 @@ Composition → 所有需要装配的项目模块
 - 所有静态对象集中创建；
 - 统一依赖注入；
 - 只有多实现场景采用静态注册表；
-- Application 只获得已装配的 Service API。
+- Application 只获得已装配的 Service API 和获准的稳定 Interface。
 
 ---
 
@@ -1059,7 +1061,7 @@ Composition → 所有需要装配的项目模块
 - Device Driver 不依赖具体 HAL Handle；
 - Middleware 第三方源码中没有项目业务代码；
 - Services 可以脱离 STM32 HAL 在 Host 上编译；
-- Application 只依赖 Services；
+- Application 只依赖 Services 和获准的稳定 Interfaces；
 - Composition 是具体实现绑定的唯一位置；
 - Bootloader 和 Application 拥有独立 Generated Integration；
 - CMake Target 能在编译期阻止 Services 包含 HAL 或 FatFs；
@@ -1073,32 +1075,32 @@ Composition → 所有需要装配的项目模块
 ```text
 ┌──────────────────────────────────────────────┐
 │ CubeMX main.c                                │
-│ Generated 初始化编排和运行入口               │
+│ Generated 初始化编排和运行入口                 │
 └──────────────────────┬───────────────────────┘
                        │
 ┌──────────────────────▼───────────────────────┐
 │ Composition Root                             │
-│ 静态对象创建、依赖注入、实现注册             │
+│ 静态对象创建、依赖注入、实现注册                │
 └──────────────────────┬───────────────────────┘
                        │
 ┌──────────────────────▼───────────────────────┐
 │ Application                                  │
-│ 固件顶层运行编排                             │
+│ 固件顶层运行编排                              │
 └──────────────────────┬───────────────────────┘
                        │
 ┌──────────────────────▼───────────────────────┐
 │ Services                                     │
-│ 稳定系统能力                                 │
+│ 稳定系统能力                                  │
 └──────────────────────┬───────────────────────┘
                        │ depends on
 ┌──────────────────────▼───────────────────────┐
 │ Interfaces                                   │
-│ 与硬件和中间件无关的能力契约                 │
+│ 与硬件和中间件无关的能力契约                   │
 └──────────────────────▲───────────────────────┘
                        │ implemented by
 ┌──────────────────────┴───────────────────────┐
 │ Adapters                                     │
-│ 将底层技术实现转换为 Interface               │
+│ 将底层技术实现转换为 Interface                 │
 └───────────────┬───────────────────┬──────────┘
                 │                   │
 ┌───────────────▼────────────┐ ┌────▼──────────┐
@@ -1108,7 +1110,7 @@ Composition → 所有需要装配的项目模块
                 │                   │
 ┌───────────────▼───────────────────▼──────────┐
 │ Middleware / CubeMX Generated Integration    │
-│ 外设实例、IRQ、Middleware Glue          │
+│ 外设实例、IRQ、Middleware Glue                │
 └──────────────────────┬───────────────────────┘
                        │
 ┌──────────────────────▼───────────────────────┐

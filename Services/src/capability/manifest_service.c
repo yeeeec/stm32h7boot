@@ -1,17 +1,15 @@
 /**
  * @file manifest_service.c
- * @brief Strict production Manifest validation and ECDSA authentication.
+ * @brief Strict production Manifest validation and integrity hashing.
  */
 #include "services/capability/manifest_service.h"
 
 #include <stddef.h>
 #include <string.h>
 
-#include "services/capability/base64.h"
 
 #define APP_MAXIMUM_IMAGE_SIZE 1048576UL
 #define GUI_MAXIMUM_IMAGE_SIZE 8388608UL
-#define ECDSA_SIGNATURE_SIZE   64U
 
 static firmware_status_t FindMember(
     const json_document_t *document,
@@ -534,44 +532,6 @@ static firmware_status_t ParseComponents(
     return FIRMWARE_STATUS_OK;
 }
 
-static firmware_status_t ParseSignature(
-    const json_document_t *document,
-    uint32_t root,
-    validated_manifest_t *manifest,
-    uint32_t *signature_object,
-    uint8_t signature[ECDSA_SIGNATURE_SIZE])
-{
-    static const char *const members[] = {
-        "algorithm", "key_id", "canonicalization", "scope", "encoding", "value"};
-    uint32_t key_id;
-    uint32_t value;
-    size_t decoded_size;
-    firmware_status_t status;
-
-    if (!FirmwareStatus_IsOk(FindMember(document, root, "signature", signature_object)) ||
-        !FirmwareStatus_IsOk(ValidateObjectMembers(document, *signature_object, members, 6U)) ||
-        !FirmwareStatus_IsOk(RequireConstantString(document, *signature_object, "algorithm", "ECDSA-P256-SHA256")) ||
-        !FirmwareStatus_IsOk(RequireConstantString(document, *signature_object, "canonicalization", "RFC8785")) ||
-        !FirmwareStatus_IsOk(RequireConstantString(document, *signature_object, "scope", "all-fields-except-signature.value")) ||
-        !FirmwareStatus_IsOk(RequireConstantString(document, *signature_object, "encoding", "base64")) ||
-        !FirmwareStatus_IsOk(RequireString(document, *signature_object, "key_id", &key_id)) ||
-        !TokenMatchesPattern(document, key_id, 1U, MANIFEST_KEY_ID_MAX_SIZE, "._-") ||
-        !FirmwareStatus_IsOk(JsonDocument_CopyString(document, key_id, manifest->key_id, sizeof(manifest->key_id))) ||
-        !FirmwareStatus_IsOk(RequireString(document, *signature_object, "value", &value)))
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-    status = Base64_DecodeStrict(
-        (const char *)&document->data[document->tokens[value].start],
-        document->tokens[value].end - document->tokens[value].start,
-        signature,
-        ECDSA_SIGNATURE_SIZE,
-        &decoded_size);
-    return (FirmwareStatus_IsOk(status) && (decoded_size == ECDSA_SIGNATURE_SIZE))
-               ? FIRMWARE_STATUS_OK
-               : FIRMWARE_STATUS_INVALID_STATE;
-}
-
 static firmware_status_t ValidateRoot(
     const json_document_t *document,
     validated_manifest_t *manifest)
@@ -604,43 +564,32 @@ static firmware_status_t ValidateRoot(
 }
 
 static firmware_status_t HashBytes(
-    const image_authenticator_t *authenticator,
+    const hash_provider_t *hash,
     const void *data,
     size_t size,
     uint8_t digest[MANIFEST_SHA256_SIZE])
 {
-    firmware_status_t status = authenticator->hash_reset(authenticator->context);
+    firmware_status_t status = hash->reset(hash->context);
 
     if (FirmwareStatus_IsOk(status))
     {
-        status = authenticator->hash_update(authenticator->context, data, size);
+        status = hash->update(hash->context, data, size);
     }
     if (FirmwareStatus_IsOk(status))
     {
-        status = authenticator->hash_finish(authenticator->context, digest);
+        status = hash->finish(hash->context, digest);
     }
     return status;
-}
-
-static firmware_status_t CanonicalHashSink(
-    void *context,
-    const void *data,
-    size_t size)
-{
-    const image_authenticator_t *authenticator =
-        (const image_authenticator_t *)context;
-
-    return authenticator->hash_update(authenticator->context, data, size);
 }
 
 firmware_status_t ManifestService_Init(
     manifest_service_t *service,
     const manifest_service_dependencies_t *dependencies)
 {
-    const image_authenticator_t *authenticator;
+    const hash_provider_t *hash;
 
     if ((service == NULL) || (dependencies == NULL) ||
-        (dependencies->authenticator == NULL))
+        (dependencies->hash == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -648,19 +597,18 @@ firmware_status_t ManifestService_Init(
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    authenticator = dependencies->authenticator;
-    if ((authenticator->context == NULL) || (authenticator->hash_reset == NULL) ||
-        (authenticator->hash_update == NULL) || (authenticator->hash_finish == NULL) ||
-        (authenticator->verify_signature == NULL))
+    hash = dependencies->hash;
+    if ((hash->context == NULL) || (hash->reset == NULL) ||
+        (hash->update == NULL) || (hash->finish == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    service->authenticator = authenticator;
+    service->hash = hash;
     service->initialized = 1;
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t ManifestService_ParseAndVerify(
+firmware_status_t ManifestService_ParseAndValidate(
     struct manifest_service *service,
     const uint8_t *data,
     uint32_t size,
@@ -669,10 +617,7 @@ firmware_status_t ManifestService_ParseAndVerify(
     manifest_service_t *implementation = (manifest_service_t *)service;
     validated_manifest_t parsed;
     json_document_t document;
-    uint8_t signature[ECDSA_SIGNATURE_SIZE];
-    uint8_t canonical_digest[MANIFEST_SHA256_SIZE];
     uint8_t package_digest[MANIFEST_SHA256_SIZE];
-    uint32_t signature_object;
     firmware_status_t status;
 
     if ((implementation == NULL) || (data == NULL) || (manifest == NULL))
@@ -713,18 +658,13 @@ firmware_status_t ManifestService_ParseAndVerify(
     }
     if (FirmwareStatus_IsOk(status))
     {
-        status = ParseSignature(
-            &document, 0U, &parsed, &signature_object, signature);
+        status = HashBytes(
+            implementation->hash, data, size, parsed.manifest_sha256);
     }
     if (FirmwareStatus_IsOk(status))
     {
         status = HashBytes(
-            implementation->authenticator, data, size, parsed.manifest_sha256);
-    }
-    if (FirmwareStatus_IsOk(status))
-    {
-        status = HashBytes(
-            implementation->authenticator,
+            implementation->hash,
             parsed.package_id,
             strlen(parsed.package_id),
             package_digest);
@@ -732,31 +672,6 @@ firmware_status_t ManifestService_ParseAndVerify(
     if (FirmwareStatus_IsOk(status))
     {
         memcpy(parsed.package_id_hash128, package_digest, MANIFEST_PACKAGE_HASH_SIZE);
-        status = implementation->authenticator->hash_reset(
-            implementation->authenticator->context);
-    }
-    if (FirmwareStatus_IsOk(status))
-    {
-        status = JsonDocument_Canonicalize(
-            &document,
-            signature_object,
-            "value",
-            CanonicalHashSink,
-            (void *)implementation->authenticator);
-    }
-    if (FirmwareStatus_IsOk(status))
-    {
-        status = implementation->authenticator->hash_finish(
-            implementation->authenticator->context, canonical_digest);
-    }
-    if (FirmwareStatus_IsOk(status))
-    {
-        status = implementation->authenticator->verify_signature(
-            implementation->authenticator->context,
-            parsed.key_id,
-            canonical_digest,
-            signature,
-            sizeof(signature));
     }
     if (FirmwareStatus_IsOk(status))
     {

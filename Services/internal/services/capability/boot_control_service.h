@@ -47,7 +47,6 @@ typedef struct boot_control_service
     uint32_t marker_offset;
     uint32_t write_offset;
     uint32_t last_write_size;
-    int record_kind;
     int initialized;
 } boot_control_service_t;
 

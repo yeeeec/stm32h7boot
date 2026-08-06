@@ -1,6 +1,6 @@
-# STM32H7 Bootloader SD/eMMC 文件系统升级文档集
+# STM32H7 Bootloader 文件系统升级文档集
 
-> 修订主题：可信升级请求承担发布授权；Bootloader 不重复验签，只执行 SHA 完整性和安装校验。
+本文件是当前实现的入口。文件名为兼容既有链接保留；“trusted_request”不再表示请求文件具备认证能力。
 
 ## 固定目录
 
@@ -13,48 +13,46 @@
     └── hmi.gui.bin
 ```
 
-## 核心信任链
+`/boot_update_request.json` 只按固定路径的存在性触发升级。Bootloader 不读取或解释其内容，也不把它作为发布包的可信凭据。
+
+## 当前升级链
 
 ```text
-Application 验证 Manifest ECDSA 签名
--> 创建包含 manifest_sha256 的可信请求
--> Bootloader 校验 Manifest SHA-256
--> Bootloader 校验 APP/GUI SHA-256
--> 安装非激活槽并提交 Active Record
+Application 探测请求文件
+-> Update Service 读取并严格解析 Manifest、计算 Manifest SHA-256
+-> Application 执行陈旧包、最低 Bootloader 版本和升级版本决策
+-> Update Service 校验源文件并安装到非激活槽，返回 Active Record 候选
+-> Application 调用 Boot Control Service 原子提交 Active Record
+-> Application 尝试删除请求文件并卸载介质
+-> Application 统一请求系统复位
 ```
 
-关键结论：
+固定规则：
 
-- 请求文件 V2 同时承担触发和可信授权；
-- Bootloader 不持有 Manifest 公钥，不链接 Manifest 验签实现；
-- 请求通过 `manifest_sha256` 绑定一个确定的 Manifest；
-- APP/GUI Hash 从已绑定 Manifest 取得；
-- Bootloader 仍执行格式、兼容性、版本、防回滚、APPX、重定位、目标 CRC 和事务提交；
-- 当前人工 SD 方式属于开发 trust override；普通 FAT 文件本身不具备量产级防篡改能力；
-- 正式 eMMC/文件系统实现必须保证请求只能由受信 Application 或生产工具创建。
+- EEPROM 只保存 Active Record A/B，不保存 Update Request；
+- Bootloader 不执行 Manifest ECDSA 验签，不装配公钥或签名验证器；
+- 请求文件负责触发，不负责认证或 Manifest 内容绑定；
+- Manifest 与 APP/GUI 的 SHA-256 用于完整性检查，不等价于来源认证；
+- `package_id_hash128 + manifest_sha256` 与当前 Active Record 相同时，请求属于陈旧请求，只尝试清理，不擦写 Flash；
+- 请求文件只能在新 Active Record 提交成功后删除；陈旧请求也可直接清理；
+- 新 Active Record 提交后，请求删除失败不回退激活对，仍进入系统复位；
+- 安装或提交失败时保留原激活对，并回到原激活对验证/启动路径；
+- Recovery Service 只验证并返回恢复候选，Application 决定是否提交和启动。
 
-## Codex 阅读顺序
+## 文档阅读顺序
 
-1. `stm32h7_bootloader_filesystem_trusted_request_contract_v2.md`  
-   先冻结请求 V2、信任交接、SHA 顺序和 Request Store 安全合同。
+1. `stm32h7_bootloader_filesystem_trusted_request_contract_v2.md`：文件布局、请求触发、完整性与掉电顺序。
+2. `stm32h7_bootloader_business_rules_v0.8_trusted_request.md`：顶层业务规则、模式选择、升级与恢复。
+3. `stm32h7_bootloader_detailed_design_v0.3_trusted_request.md`：记录格式、状态机、Service/Interface/Adapter 和测试。
+4. `stm32h7_application_services_codex_architecture_trusted_request.md`：Application/Services 职责边界。
+5. `stm32h7_firmware_software_architecture_trusted_request.md`：通用分层、Composition 和构建依赖。
 
-2. `stm32h7_bootloader_business_rules_v0.8_trusted_request.md`  
-   冻结顶层业务、不变量、错误决策、恢复和提交顺序。
+## 禁止重新引入的设计
 
-3. `stm32h7_bootloader_detailed_design_v0.3_trusted_request.md`  
-   实现级状态机、Service/Interface/Adapter、内存、错误和测试。
-
-4. `stm32h7_application_services_codex_architecture_trusted_request.md`  
-   约束 Application/Services 边界和 Composition 绑定。
-
-5. `stm32h7_firmware_software_architecture_trusted_request.md`  
-   约束通用层次、Generated Integration、Adapter 和构建依赖。
-
-## 不得恢复的旧规则
-
-- 不得把请求降级为普通触发文件；
-- 不得在 Bootloader 中再次加入 Manifest ECDSA 验签；
-- 不得只比较 `package_id` 而不比较 `manifest_sha256`；
-- 不得在 Manifest SHA 绑定前信任 Manifest 内容；
-- 不得把当前可人工修改的 SD 请求误称为量产级密码学认证；
-- 不得在 Active Record 提交前删除请求。
+- 不得把 Update Request 保存到 EEPROM；
+- 不得把请求文件内容当作可信认证；
+- 不得在 Bootloader 中加入 Manifest 验签、公钥或密钥选择逻辑；
+- 不得让 Update/Recovery Service 探测或删除请求、提交 Active Record、决定版本策略或执行系统复位；
+- 不得在 Active Record 提交前删除请求；
+- 不得因请求删除失败回退已经提交的新激活对；
+- 不得让相同发布包的陈旧请求重复擦写非激活槽。

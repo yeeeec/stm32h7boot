@@ -7,15 +7,13 @@
 
 #include <stdint.h>
 
-#include "services/capability/boot_control_service.h"
 #include "services/common/boot_control_types.h"
 #include "services/use_case/active_validation_service.h"
 #include "services/use_case/recovery_service_api.h"
 
 /**
- * Load trusted metadata for one fixed pair. The loader is deliberately
- * separate from the recovery algorithm so metadata can later live in the
- * reserved EEPROM area without exposing an EEPROM type to Services.
+ * Load one structurally valid retained Active Record for a fixed pair. The
+ * loader keeps EEPROM addressing and the concrete store outside Recovery.
  */
 typedef firmware_status_t (*recovery_candidate_load_fn)(
     void *context,
@@ -27,7 +25,6 @@ typedef struct
     recovery_candidate_load_fn load_candidate;
     void *candidate_context;
     active_validation_service_t *validation;
-    boot_control_service_t *boot_control;
 } recovery_service_dependencies_t;
 
 typedef enum
@@ -39,9 +36,7 @@ typedef enum
     RECOVERY_STAGE_VALIDATE_PAIR_1,
     RECOVERY_STAGE_START_VALIDATE_PAIR_2,
     RECOVERY_STAGE_VALIDATE_PAIR_2,
-    RECOVERY_STAGE_SELECT_PAIR,
-    RECOVERY_STAGE_COMMIT_ACTIVE_START,
-    RECOVERY_STAGE_COMMIT_ACTIVE_PROCESS
+    RECOVERY_STAGE_SELECT_PAIR
 } recovery_stage_t;
 
 typedef struct recovery_service
@@ -49,7 +44,6 @@ typedef struct recovery_service
     recovery_candidate_load_fn load_candidate;
     void *candidate_context;
     active_validation_service_t *validation;
-    boot_control_service_t *boot_control;
     boot_active_record_t candidates[2];
     boot_active_record_t selected_record;
     boot_pair_t preferred_pair;

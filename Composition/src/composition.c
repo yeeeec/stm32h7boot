@@ -5,7 +5,6 @@
 #include "composition/composition.h"
 
 #include <stddef.h>
-#include <string.h>
 
 #include "adapters/cortex_m_application_jump_adapter.h"
 #include "adapters/at24_boot_control_adapter.h"
@@ -13,12 +12,16 @@
 #include "adapters/spi_nor_block_adapter.h"
 #include "adapters/stm32_clock_adapter.h"
 #include "adapters/stm32_qspi_xip_adapter.h"
+#include "adapters/stm32_system_reset_adapter.h"
 #include "adapters/uart_log_adapter.h"
+#include "application/application.h"
+#include "application/application_config.h"
 #include "bsp/bsp_external_flash.h"
 #include "bsp/bsp_eeprom.h"
 #include "checksum/crc32_iso_hdlc.h"
-#include "crypto/micro_ecc_authenticator.h"
+#include "crypto/sha256.h"
 #include "firmware/async_block_device.h"
+#include "firmware/hash.h"
 #include "logging.h"
 #include "logging_setup.h"
 #include "quadspi.h"
@@ -29,6 +32,8 @@
 #include "services/capability/manifest_service.h"
 #include "services/use_case/active_validation_service.h"
 #include "services/use_case/launch_service.h"
+#include "services/use_case/recovery_service.h"
+#include "services/use_case/update_service.h"
 
 #define SERVICE_IO_BUFFER_SIZE 4096U
 
@@ -37,14 +42,24 @@ static uart_log_adapter_t log_adapter;
 static spi_nor_block_adapter_t external_flash_adapter;
 static at24_boot_control_adapter_t eeprom_adapter;
 static boot_control_service_t boot_control_service;
-static micro_ecc_authenticator_t manifest_authenticator;
+static sha256_context_t manifest_hash_context;
 static manifest_service_t manifest_service;
 static fatfs_package_source_adapter_t package_source_adapter;
 static stm32_qspi_xip_adapter_t xip_adapter;
 static cortex_m_application_jump_adapter_t jump_adapter;
+static stm32_system_reset_adapter_t system_reset_adapter;
 static crc32_iso_hdlc_t crc32_provider;
 static active_validation_service_t active_validation_service;
 static launch_service_t launch_service;
+static recovery_service_t recovery_service;
+static update_service_t update_service;
+static uint8_t manifest_buffer[UPDATE_SERVICE_MANIFEST_MAX_SIZE]
+    __attribute__((section(".ram_d2"), aligned(32)));
+static uint8_t relocation_buffer[
+    UPDATE_SERVICE_MAX_RELOCATIONS * APPX_RELOCATION_ENTRY_SIZE]
+    __attribute__((section(".ram_d2"), aligned(32)));
+static appx_relocation_entry_t relocation_entries[UPDATE_SERVICE_MAX_RELOCATIONS]
+    __attribute__((section(".ram_d2"), aligned(32)));
 static uint8_t service_io_buffer[SERVICE_IO_BUFFER_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
 static const memory_region_t application_sram_regions[] = {
@@ -54,60 +69,36 @@ static const memory_region_t application_sram_regions[] = {
     {0x38000000UL, 64UL * 1024UL},
 };
 static int composition_initialized;
-static int manifest_verifier_configured;
-static uint8_t manifest_public_key[COMPOSITION_MANIFEST_PUBLIC_KEY_SIZE];
-static char manifest_key_id[COMPOSITION_MANIFEST_KEY_ID_MAX_SIZE + 1U];
-
-static int IsManifestKeyIdCharacter(uint8_t value)
+static firmware_status_t ManifestHashReset(void *context)
 {
-    return (((value >= 'A') && (value <= 'Z')) ||
-            ((value >= 'a') && (value <= 'z')) ||
-            ((value >= '0') && (value <= '9')) ||
-            (value == '.') || (value == '_') || (value == '-'));
+    return Sha256_Reset((sha256_context_t *)context);
 }
 
-firmware_status_t Composition_ConfigureManifestVerifier(
-    const uint8_t public_key[COMPOSITION_MANIFEST_PUBLIC_KEY_SIZE],
-    const char *key_id)
+static firmware_status_t ManifestHashUpdate(void *context, const void *data, size_t size)
 {
-    micro_ecc_authenticator_t probe = {0};
-    micro_ecc_authenticator_config_t probe_config;
-    size_t key_id_length;
-    size_t index;
+    return Sha256_Update((sha256_context_t *)context, data, size);
+}
 
-    if ((public_key == NULL) || (key_id == NULL))
-    {
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    }
-    if ((composition_initialized != 0) ||
-        (manifest_verifier_configured != 0))
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-    key_id_length = strlen(key_id);
-    if ((key_id_length == 0U) ||
-        (key_id_length > COMPOSITION_MANIFEST_KEY_ID_MAX_SIZE))
-    {
-        return FIRMWARE_STATUS_OUT_OF_RANGE;
-    }
-    for (index = 0U; index < key_id_length; ++index)
-    {
-        if (!IsManifestKeyIdCharacter((uint8_t)key_id[index]))
-        {
-            return FIRMWARE_STATUS_INVALID_ARGUMENT;
-        }
-    }
-    probe_config.key_id = key_id;
-    probe_config.public_key = public_key;
-    if (!FirmwareStatus_IsOk(
-            MicroEccAuthenticator_Init(&probe, &probe_config)))
-    {
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    }
-    memcpy(manifest_public_key, public_key, sizeof(manifest_public_key));
-    memcpy(manifest_key_id, key_id, key_id_length + 1U);
-    manifest_verifier_configured = 1;
-    return FIRMWARE_STATUS_OK;
+static firmware_status_t ManifestHashFinish(
+    void *context, uint8_t digest[FIRMWARE_SHA256_DIGEST_SIZE])
+{
+    return Sha256_Finish((sha256_context_t *)context, digest);
+}
+
+static hash_provider_t manifest_hash_interface = {
+    &manifest_hash_context,
+    ManifestHashReset,
+    ManifestHashUpdate,
+    ManifestHashFinish,
+};
+
+static firmware_status_t LoadRecoveryCandidate(
+    void *context,
+    boot_pair_t pair,
+    boot_active_record_t *candidate)
+{
+    return BootControlService_LoadPairCandidate(
+        (boot_control_service_t *)context, pair, candidate);
 }
 
 firmware_status_t Composition_Init(void) {
@@ -116,6 +107,8 @@ firmware_status_t Composition_Init(void) {
     async_block_device_info_t external_flash_info;
     active_validation_service_dependencies_t validation_dependencies;
     launch_service_dependencies_t launch_dependencies;
+    recovery_service_dependencies_t recovery_dependencies;
+    update_service_dependencies_t update_dependencies;
 
     if (composition_initialized != 0) {
         LOG_WARN("composition", "initialization requested more than once");
@@ -164,23 +157,10 @@ firmware_status_t Composition_Init(void) {
         return status;
     }
 
-    if (manifest_verifier_configured != 0)
     {
-        const micro_ecc_authenticator_config_t authenticator_config = {
-            manifest_key_id,
-            manifest_public_key,
-        };
-        manifest_service_dependencies_t manifest_dependencies;
+        manifest_service_dependencies_t manifest_dependencies = {
+            &manifest_hash_interface};
 
-        status = MicroEccAuthenticator_Init(
-            &manifest_authenticator, &authenticator_config);
-        if (!FirmwareStatus_IsOk(status))
-        {
-            LOG_ERROR("composition", "Manifest public key is invalid: %d", (int) status);
-            return status;
-        }
-        manifest_dependencies.authenticator =
-            MicroEccAuthenticator_Interface(&manifest_authenticator);
         status = ManifestService_Init(&manifest_service, &manifest_dependencies);
         if (!FirmwareStatus_IsOk(status))
         {
@@ -221,6 +201,10 @@ firmware_status_t Composition_Init(void) {
     if (!FirmwareStatus_IsOk(status)) {
         return status;
     }
+    status = Stm32SystemResetAdapter_Init(&system_reset_adapter);
+    if (!FirmwareStatus_IsOk(status)) {
+        return status;
+    }
 
     validation_dependencies.storage = external_flash;
     validation_dependencies.checksum = Crc32IsoHdlc_Interface(&crc32_provider);
@@ -231,6 +215,14 @@ firmware_status_t Composition_Init(void) {
         sizeof(application_sram_regions) / sizeof(application_sram_regions[0]);
     status = ActiveValidationService_Init(
         &active_validation_service, &validation_dependencies);
+    if (!FirmwareStatus_IsOk(status)) {
+        return status;
+    }
+
+    recovery_dependencies.load_candidate = LoadRecoveryCandidate;
+    recovery_dependencies.candidate_context = &boot_control_service;
+    recovery_dependencies.validation = &active_validation_service;
+    status = RecoveryService_Init(&recovery_service, &recovery_dependencies);
     if (!FirmwareStatus_IsOk(status)) {
         return status;
     }
@@ -248,6 +240,50 @@ firmware_status_t Composition_Init(void) {
         return status;
     }
 
+    update_dependencies.package_source =
+        FatFsPackageSourceAdapter_Interface(&package_source_adapter);
+    update_dependencies.storage = external_flash;
+    update_dependencies.checksum = Crc32IsoHdlc_Interface(&crc32_provider);
+    update_dependencies.hash = &manifest_hash_interface;
+    update_dependencies.manifest_service = &manifest_service;
+    update_dependencies.manifest_path = "/firmware/manifest.json";
+    update_dependencies.app_path = "/firmware/hmi.app.bin";
+    update_dependencies.gui_path = "/firmware/hmi.gui.bin";
+    update_dependencies.manifest_buffer = manifest_buffer;
+    update_dependencies.manifest_buffer_size = sizeof(manifest_buffer);
+    update_dependencies.io_buffer = service_io_buffer;
+    update_dependencies.io_buffer_size = sizeof(service_io_buffer);
+    update_dependencies.relocation_buffer = relocation_buffer;
+    update_dependencies.relocation_buffer_size = sizeof(relocation_buffer);
+    update_dependencies.relocation_entries = relocation_entries;
+    update_dependencies.relocation_entry_capacity =
+        UPDATE_SERVICE_MAX_RELOCATIONS;
+    status = UpdateService_Init(&update_service, &update_dependencies);
+    if (!FirmwareStatus_IsOk(status)) {
+        return status;
+    }
+
+    {
+        const application_dependencies_t application_dependencies = {
+            .boot_control = &boot_control_service,
+            .update = &update_service,
+            .recovery = &recovery_service,
+            .validation = &active_validation_service,
+            .launch = &launch_service,
+            .package_source =
+                FatFsPackageSourceAdapter_Interface(&package_source_adapter),
+            .system_reset =
+                Stm32SystemResetAdapter_Interface(&system_reset_adapter),
+            .bootloader_version = {1U, 0U, 0U},
+            .request_path = "/boot_update_request.json",
+        };
+
+        status = Application_Configure(&application_dependencies);
+    }
+    if (!FirmwareStatus_IsOk(status)) {
+        return status;
+    }
+
     LOG_INFO("storage", "external flash ready: capacity=%lu, write=%lu, erase=%lu bytes",
              (unsigned long) external_flash_info.capacity_bytes,
              (unsigned long) external_flash_info.program_size,
@@ -260,14 +296,4 @@ firmware_status_t Composition_Init(void) {
 
 int Composition_IsInitialized(void) {
     return composition_initialized;
-}
-
-struct manifest_service *Composition_ManifestService(void)
-{
-    return (manifest_service.initialized != 0) ? &manifest_service : NULL;
-}
-
-int Composition_IsManifestVerifierConfigured(void)
-{
-    return manifest_verifier_configured;
 }

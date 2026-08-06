@@ -1,37 +1,21 @@
-# STM32H7 Bootloader 文件系统可信升级请求契约
+# STM32H7 Bootloader 文件系统升级触发契约
 
-> 版本：V2  
-> 适用对象：Bootloader、正式 Application、当前人工测试流程、Host 打包/生产工具。  
-> 当前介质：SD 卡 + SDIO/SDMMC + FatFs。  
-> 未来介质：eMMC 或其他文件系统实现，通过 Adapter 替换。  
-> 本文冻结文件路径、可信请求格式、Manifest 内容绑定、组件完整性校验、提交顺序和接口边界。
+> 版本：v3。文件名为兼容旧链接保留；本契约不再定义“可信请求”。
 
-## 1. 核心安全模型
+本文冻结文件布局、请求触发语义、完整性检查、陈旧包识别、提交/清理顺序和 Package Source 接口边界。
 
-升级信任链固定为：
+## 1. 安全与完整性模型
 
-```text
-发布工具使用私钥签名 Manifest
--> Application 使用受信公钥验证 Manifest 签名
--> Application 对最终 manifest.json 计算 SHA-256
--> Application 创建包含 manifest_sha256 的可信升级请求
--> Bootloader 校验 Manifest SHA-256
--> Bootloader 依据该 Manifest 校验 APP/GUI SHA-256
--> Bootloader 安装、目标 CRC 校验并提交 Active Record
-```
+请求文件不是信任边界：
 
-职责结论：
+- `/boot_update_request.json` 的存在只表示“尝试处理固定目录中的发布包”；
+- Bootloader 不打开、不解析、不校验请求文件内容；
+- 请求不绑定 `package_id`、`manifest_sha256`、nonce、状态或签名；
+- FAT 文件可以被修改，因此请求文件不提供来源认证、发布授权或防攻击者替换；
+- Bootloader 不执行 Manifest ECDSA 验签，不持有公钥，不选择 Key ID；
+- Manifest、APP 和 GUI 的 SHA-256 以及目标 CRC 只用于检测格式、传输和存储损坏，不等价于来源认证。
 
-- 请求文件既负责触发，也承担对一个确定 Manifest 的可信升级授权；
-- Bootloader 不重复执行 Manifest ECDSA 验签；
-- Bootloader 不持有 Manifest 验签公钥；
-- Bootloader 必须校验 Manifest、APP 和 GUI 的 SHA-256；
-- Manifest 的签名字段可以保留，但 Bootloader 不解释其安全语义；
-- 请求的可信性来自正式 Application 的验签流程以及 Request Store 的写入保护，不来自普通 JSON 格式本身。
-
-重要限制：
-
-> 普通可移除 SD 卡上的 FAT 文件能够被人工修改，因此不天然具备可信认证能力。当前人工流程把操作者显式视为可信授权源，只适用于开发、调试或受控生产。量产环境若允许不受信主体修改文件系统，必须提供受保护分区、访问控制或其他可信 Request Store。
+若产品需要密码学发布认证，必须在本契约之外增加明确的可信启动或发布认证机制；不得把普通请求文件描述为认证凭据。
 
 ## 2. 固定文件布局
 
@@ -44,327 +28,152 @@
     └── hmi.gui.bin
 ```
 
-| 逻辑对象 | 绝对路径 | Bootloader 权限 |
-|---|---|---|
-| 可信升级请求 | `/boot_update_request.json` | 读取；提交成功后条件删除 |
-| Manifest | `/firmware/manifest.json` | 只读 |
-| APPX | `/firmware/hmi.app.bin` | 只读 |
-| GUI | `/firmware/hmi.gui.bin` | 只读 |
+规则：
 
-禁止：
+- 路径大小写固定，不扫描目录、不接受别名；
+- 发布工具先写入并关闭 `firmware/` 下三个文件，最后创建请求文件；
+- 请求文件允许为空或包含任意内容，因为 Bootloader 不读取内容；
+- 同一时刻只支持一个发布包；
+- 请求存在但任一发布文件缺失、不可读或格式错误时，不擦除目标槽，不删除请求，回到当前激活对启动路径。
 
-- 从请求文件读取任意目录或文件名；
-- 接受绝对路径、`..`、路径分隔符或驱动器前缀；
-- 由 Manifest 或请求扩大目标分区或指定物理地址；
-- Bootloader 修改三个发布文件；
-- 通过 SD 卡插入状态直接触发升级。
-
-## 3. Trusted Update Request V2
-
-### 3.1 JSON Schema
-
-```json
-{
-  "format_version": 2,
-  "requested": true,
-  "package_id": "hmi-release-1.2.3-20260806",
-  "manifest_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-}
-```
-
-### 3.2 字段规则
-
-| 字段 | 类型 | 规则 |
-|---|---|---|
-| `format_version` | unsigned integer | 必须为 `2` |
-| `requested` | boolean | 必须为 `true` |
-| `package_id` | string | UTF-8，长度 `1..63`，仅允许 `[A-Za-z0-9._-]` |
-| `manifest_sha256` | string | 完整 Manifest 文件 SHA-256，64 位小写十六进制 |
-
-### 3.3 文件规则
-
-- 最大文件长度：512 字节；
-- 编码：UTF-8；
-- 不允许 UTF-8 BOM；
-- 允许 JSON 空白，不允许注释；
-- 拒绝重复 Key、未知字段、缺失字段、`null` 和类型错误；
-- 文件不存在与 I/O 错误必须返回不同状态；
-- 请求不允许表达目标槽、跳过 Hash、允许降级或任意路径；
-- 请求内容必须在创建后保持不变，直到 Bootloader 消费或清除。
-
-### 3.4 授权语义
-
-一个合法且来自受信 Request Store 的请求表示：
+## 3. Application 读取顺序
 
 ```text
-创建者已经验证该 Manifest 的发布真实性
-AND
-授权 Bootloader 安装 manifest_sha256 标识的确切 Manifest
+查询介质
+-> 挂载
+-> exists("/boot_update_request.json")
+-> UpdateService_PrepareStart()
+-> 等待 Prepare 终态
+-> Application 执行陈旧与版本决策
+-> UpdateService_InstallStart(active_record)
+-> 等待 Install 终态并取得候选
+-> BootControlService_CommitActiveStart(candidate)
+-> 等待提交终态
+-> remove("/boot_update_request.json")（尽力执行）
+-> 卸载
+-> system_reset.request()
 ```
 
-Bootloader 不能仅因为请求格式合法就默认其可信。Composition 绑定的 Request Store 必须满足本契约的受信来源要求。
+Package Source 的 `mount/unmount/exists/remove` 由 Application 调用。Update Service 只在介质已经挂载时使用 `open/get_size/read_at/close` 读取固定发布文件。
 
-## 4. Manifest 内容绑定
+## 4. Manifest 与组件完整性
 
-Bootloader 必须按原始文件字节计算：
+Update Service 的 Prepare 阶段：
+
+1. 打开固定 `manifest.json`；
+2. 限制文件大小并读取完整字节；
+3. 对完整原始文件计算 SHA-256；
+4. 严格解析冻结 Schema；
+5. 返回解析后的 `validated_manifest_t`。
+
+Manifest Service 不执行：
+
+- ECDSA 或其他签名验证；
+- 公钥、Key ID 或轮换选择；
+- 签名输入 Canonicalization；
+- 请求文件认证或绑定。
+
+Install 擦除前必须完成：
+
+- Manifest 已成功 Prepare；
+- 产品、硬件和格式字段有效；
+- Application 已接受最低 Bootloader 版本和升级版本；
+- APP/GUI 文件大小与 Manifest 一致；
+- APP 完整文件 SHA-256 与 Manifest 一致；
+- APPX Header、重定位表和目标地址范围有效；
+- GUI 完整文件 SHA-256 与 Manifest 一致。
+
+目标写入后必须分别计算目标 APP/GUI CRC32，并与候选 Active Record 的期望值一致。
+
+## 5. 陈旧请求与发布包身份
+
+Active Record 保存：
+
+- `package_id_hash128`：Manifest `package_id` 的 UTF-8 SHA-256 前 16 字节；
+- `manifest_sha256`：本次实际读取的完整 Manifest 文件 SHA-256。
+
+Application 仅在两个字段都相同时判定发布包已经激活：
 
 ```text
-actual_manifest_sha256 = SHA256(/firmware/manifest.json)
+same_package =
+    active.package_id_hash128 == manifest.package_id_hash128
+    && active.manifest_sha256 == manifest.manifest_sha256
 ```
 
-只有满足以下条件，Manifest 内容才可用于后续安装：
+相同发布包的陈旧请求：
+
+- 不调用 Install；
+- 不擦除或编程任何槽；
+- 尝试删除请求并卸载；
+- 删除失败也直接验证并启动当前激活对，不形成“相同包重复擦写”或复位循环。
+
+只有 `package_id` 相同而 Manifest SHA 不同，不视为相同发布包；仍需继续执行版本规则。版本不高于当前激活版本时拒绝 Install，因此不会擦写。
+
+## 6. 提交、删除与复位
+
+新安装的强制顺序：
 
 ```text
-actual_manifest_sha256 == request.manifest_sha256
+目标 APP/GUI 校验成功
+-> Update Service 返回未提交候选
+-> Application 原子提交 Active Record
+-> Application 尝试删除请求
+-> Application 卸载介质
+-> Application 请求系统复位
 ```
 
-随后严格解析 Manifest，并要求：
+不变量：
 
-```text
-manifest.package_id == request.package_id
-```
+- Active Record 提交前不得删除请求；
+- Update Service 不得提交 Active Record；
+- 请求删除失败不得回退或破坏新 Active Record；
+- 请求删除失败不改变“升级成功”结论；
+- 新 Active Record 提交成功后统一进入系统复位，不直接跳转新镜像；
+- 安装或提交失败时不复位到未提交的新槽，而是验证/启动原激活对。
 
-该顺序不能反转。未通过 Manifest SHA 绑定前，不得把 Manifest 中的版本、Hash、长度、目标 CRC 或重定位信息视为受信安装元数据。
+请求删除是清理操作，不是事务提交点。Active Record 的持久化提交是唯一激活提交点。
 
-## 5. 组件完整性校验
+## 7. 掉电矩阵
 
-Manifest SHA 绑定通过后，Bootloader 计算：
-
-```text
-SHA256(/firmware/hmi.app.bin) == manifest.components.app.sha256
-SHA256(/firmware/hmi.gui.bin) == manifest.components.gui.sha256
-```
-
-在擦除目标 APP 前还必须完成：
-
-- Manifest Schema 严格解析；
-- 产品和硬件兼容检查；
-- 版本与防回滚检查；
-- APPX Header CRC、长度和格式检查；
-- Relocation Table CRC、排序、范围和类型检查；
-- 所有地址与长度 checked arithmetic。
-
-Bootloader 不执行：
-
-- Manifest ECDSA 验签；
-- 公钥选择、Key ID 或轮换；
-- 签名 Canonicalization；
-- `signature.value` 的 Base64 解码。
-
-## 6. 当前人工测试流程
-
-人工准备 SD 卡时按以下顺序执行：
-
-1. 删除旧 `/boot_update_request.json`；
-2. 写入三个 `/firmware` 文件；
-3. 确认发布包来源可信；
-4. 对完整 `manifest.json` 原始字节计算 SHA-256；
-5. 从 Manifest 读取 `package_id`；
-6. 生成 V2 请求；
-7. 刷新主机写缓存；
-8. 最后写入 `/boot_update_request.json`；
-9. 安全弹出 SD 卡；
-10. 插入设备并复位。
-
-建议 Host 工具：
-
-```text
-create_update_request.py \
-    --manifest /firmware/manifest.json \
-    --output /boot_update_request.json
-```
-
-该工具必须从实际 Manifest 计算 SHA，禁止由操作者手工抄写 Hash。
-
-人工模式的信任含义是“操作者已授权此 Manifest”，而不是 Bootloader 已完成密码学验签。
-
-## 7. 正式 Application 提交流程
-
-正式 Application 必须：
-
-```text
-下载/解密发布文件
--> 写临时文件并同步
--> 对最终 Manifest 执行 ECDSA P-256 验签
--> 校验产品、硬件和 Application 侧发布策略
--> 计算最终 Manifest SHA-256
--> 原子替换三个正式发布文件
--> 生成 V2 请求
--> 写 boot_update_request.tmp 并同步
--> 原子重命名为 boot_update_request.json
--> 系统复位
-```
-
-约束：
-
-- 验签对象必须与最终正式 `manifest.json` 字节完全一致；
-- 请求必须最后出现；
-- 请求出现后不得再修改任何发布文件；
-- Manifest 验签失败时不得创建请求；
-- Application 不写 EEPROM Active Record；
-- 文件系统无法提供可靠提交语义时，必须扩展本契约，不能暴露半写请求。
-
-## 8. Bootloader 读取与安装顺序
-
-```text
-挂载文件系统
--> 加载并严格解析可信请求
--> 计算 Manifest SHA-256
--> 比较 request.manifest_sha256
--> 解析 Manifest
--> 比较 request.package_id
--> 检查产品/硬件/版本/防回滚
--> 校验 APP SHA-256
--> 校验 APPX/Relocation
--> 校验 GUI SHA-256
--> 检查是否已安装相同 package_id_hash128 + manifest_sha256
--> 安装非激活 APP/GUI 对
--> 校验目标 CRC
--> 提交 EEPROM Active Record
--> 读回验证
--> 条件删除请求
--> 系统复位
-```
-
-禁止：
-
-- 调用 Manifest 签名验证器；
-- Manifest SHA 不匹配时继续解析并安装；
-- APP/GUI SHA 未完成前擦除目标 APP；
-- Active Record 提交前删除请求；
-- 请求删除失败时回退 Active Record；
-- 已提交相同包时重复擦写。
-
-## 9. Package Identity 与陈旧请求
-
-EEPROM Active Record 保存：
-
-```text
-package_id_hash128 = SHA256(UTF-8 package_id)[0..15]
-manifest_sha256     = request.manifest_sha256
-```
-
-相同包识别条件：
-
-```text
-Active Record 有效
-AND active.package_id_hash128 == SHA256(request.package_id)[0..15]
-AND active.manifest_sha256 == request.manifest_sha256
-```
-
-匹配时：
-
-- 不重新擦除或写入；
-- 重新加载请求；
-- 确认 `package_id + manifest_sha256` 未被替换；
-- 删除请求；
-- 删除失败只产生告警；
-- 使用已提交激活对。
-
-## 10. 掉电矩阵
-
-| 掉电位置 | Active Record | 请求文件 | 下次启动行为 |
+| 掉电点 | EEPROM Active Record | 请求 | 下次启动 |
 |---|---|---|---|
-| 发布文件写入期间 | 旧 | 不应存在 | 启动旧 APP；无有效槽时 Recovery |
-| Application 验签前 | 旧 | 不应存在 | 不升级 |
-| 请求创建期间 | 旧 | 可能损坏 | 严格解析失败，不安装 |
-| Manifest/组件 SHA 期间 | 旧 | 存在 | 重新校验 |
-| APP/GUI 擦写期间 | 旧 | 存在 | 从头重写非激活对 |
-| Active Record 提交期间 | 旧或新有效副本 | 存在 | 通过 A/B、CRC、Commit Marker 选择 |
-| Active Record 提交后、请求删除前 | 新 | 存在 | 识别已安装，只清请求 |
-| 请求删除期间 | 新 | 存在或不存在 | 使用新激活对；必要时再次清理 |
-| 请求删除后、系统复位前 | 新 | 不存在 | 使用新激活对 |
+| 创建请求前 | 旧 | 无 | 启动旧对 |
+| 请求已创建，Prepare 前/中 | 旧 | 有 | 重新 Prepare，不擦写或按规则继续 |
+| 非激活槽擦写中 | 旧 | 有 | 重新安装非激活槽，旧对仍可启动 |
+| 候选生成后、提交前 | 旧 | 有 | 重新安装或校验，旧对仍激活 |
+| Active Record 提交中 | 旧或新 | 有 | A/B 选择有效最新记录 |
+| 提交后、删除前 | 新 | 有 | 识别相同发布包，只清理、不重写 |
+| 删除失败后复位 | 新 | 可能有 | 识别陈旧请求，直接启动新对 |
+| 删除后、复位前 | 新 | 无 | 启动新对 |
 
-## 11. Interface 合同
+## 8. `package_source_t` 合同
 
-### 11.1 `package_source_t`
+接口提供：
 
-用途：只读访问固定升级包文件。
+- `is_media_present(context, &present)`：查询可移除介质；
+- `mount(context)` / `unmount(context)`：挂载与卸载单一卷；
+- `exists(context, path, &present)`：不打开文件地探测固定路径；
+- `remove(context, path)`：在已挂载且无打开文件时删除请求；
+- `open(context, path)` / `close(context)`：管理唯一打开文件；
+- `get_size(context, &size)`：读取当前文件大小；
+- `read_at(context, offset, data, size, &bytes_read)`：绝对偏移读取。
 
-```text
-mount
-unmount
-is_media_present
-open
-close
-get_size
-read_at
-```
+边界：
 
-### 11.2 `update_request_store_t`
+- Application 使用介质、挂载、请求探测/删除操作；
+- Update Service 使用只读文件操作；
+- Interface 不表达请求可信性、认证、版本策略或提交语义；
+- FatFs 与未来 eMMC 的差异只存在于 Adapter。
 
-用途：加载和条件删除可信请求。
+## 9. 验收条件
 
-```c
-typedef struct
-{
-    void *context;
-
-    firmware_status_t (*load)(
-        void *context,
-        uint8_t *buffer,
-        size_t capacity,
-        size_t *actual_size);
-
-    firmware_status_t (*remove)(void *context);
-    firmware_status_t (*sync)(void *context);
-} update_request_store_t;
-```
-
-合同要求：
-
-- `load` 只访问 `/boot_update_request.json`；
-- `NOT_FOUND` 与 I/O 错误分离；
-- Adapter 不解析 JSON；
-- Service 在删除前重新确认 `package_id + manifest_sha256`；
-- 正式实现必须保证不受信写入者不能创建、替换或回滚请求；
-- 当前人工 SD 实现必须显式标记为开发信任覆盖，不能误称为量产安全实现。
-
-### 11.3 当前与未来绑定
-
-```text
-当前开发：
-package_source_t       <- FatFs SD Package Source Adapter
-update_request_store_t <- FatFs SD Request Adapter（manual trust override）
-
-正式产品：
-package_source_t       <- eMMC/受控文件系统 Package Adapter
-update_request_store_t <- 具备受信写入保证的 Request Store Adapter
-```
-
-Services 与 Application 不得依赖 SD、eMMC、FatFs 或 HAL 类型。
-
-## 12. 稳定状态与错误
-
-建议稳定状态：
-
-```text
-REQUEST_NOT_FOUND
-REQUEST_VALID
-REQUEST_INVALID
-REQUEST_IO_ERROR
-REQUEST_NOT_TRUSTED
-MANIFEST_HASH_MISMATCH
-REQUEST_PACKAGE_MISMATCH
-REQUEST_ALREADY_INSTALLED
-REQUEST_CLEARED
-REQUEST_CLEAR_WARNING
-```
-
-Bootloader 不定义 `SIGNATURE_INVALID`，因为 Manifest 验签不属于 Bootloader 运行路径。
-
-## 13. 验收条件
-
-- [ ] 请求 Schema 使用 V2；
-- [ ] 请求包含 `manifest_sha256`；
-- [ ] Bootloader 先校验 Manifest SHA，再信任 Manifest 内容；
-- [ ] Bootloader 不链接 Manifest 签名验证器或公钥；
-- [ ] Request `package_id` 只与 SHA 绑定后的 Manifest 比较；
-- [ ] APP/GUI SHA 在擦除前完成；
-- [ ] 请求不能指定目标槽或路径；
-- [ ] Active Record 提交前请求始终存在；
-- [ ] Active Record 提交后请求删除失败不回退；
-- [ ] 相同包陈旧请求不会触发重复擦写；
-- [ ] 当前人工流程明确标记为开发信任覆盖；
-- [ ] 正式 Request Store 的受信写入保证有可验证设计；
-- [ ] 替换 eMMC Adapter 时 Services 无需修改。
+- [ ] EEPROM 地址空间只定义 Active Record A/B；
+- [ ] Bootloader ELF 不含 Manifest 验签、公钥、Micro-ECC/uECC 符号；
+- [ ] 请求文件内容改变不影响触发语义；
+- [ ] 没有请求时不进入 Prepare/Install；
+- [ ] 相同 `package_id_hash128 + manifest_sha256` 不擦写；
+- [ ] Update/Recovery Service 不挂载、不删除请求、不提交 EEPROM、不复位；
+- [ ] Active Record 提交成功后才尝试删除请求；
+- [ ] 删除失败保留新激活对并复位；
+- [ ] 新安装成功统一复位；
+- [ ] 掉电测试满足第 7 节矩阵。

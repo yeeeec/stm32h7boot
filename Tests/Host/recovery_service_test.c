@@ -14,16 +14,10 @@ typedef struct
 
 static candidate_context_t candidates;
 static boot_active_record_t validation_record;
-static boot_active_record_t committed_record;
 static service_run_state_t validation_state;
-static service_run_state_t boot_control_state;
 static service_result_t validation_result;
-static service_result_t boot_control_result;
-static firmware_status_t commit_start_status;
-static uint32_t commit_count;
 
 static active_validation_service_t validation_service;
-static boot_control_service_t boot_control_service;
 static recovery_service_t recovery_service;
 
 static int CandidateIndex(boot_pair_t pair)
@@ -85,41 +79,6 @@ const service_result_t *ActiveValidationService_GetResult(
     return &validation_result;
 }
 
-firmware_status_t BootControlService_CommitActiveStart(
-    struct boot_control_service *service,
-    const boot_active_record_t *record)
-{
-    (void)service;
-    if (!FirmwareStatus_IsOk(commit_start_status))
-    {
-        return commit_start_status;
-    }
-    committed_record = *record;
-    ++commit_count;
-    boot_control_state = SERVICE_RUN_STATE_RUNNING;
-    return FIRMWARE_STATUS_OK;
-}
-
-void BootControlService_Process(struct boot_control_service *service)
-{
-    (void)service;
-    boot_control_state = SERVICE_RUN_STATE_SUCCEEDED;
-}
-
-service_run_state_t BootControlService_GetState(
-    const struct boot_control_service *service)
-{
-    (void)service;
-    return boot_control_state;
-}
-
-const service_result_t *BootControlService_GetResult(
-    const struct boot_control_service *service)
-{
-    (void)service;
-    return &boot_control_result;
-}
-
 static boot_active_record_t MakeRecord(boot_pair_t pair, uint32_t sequence)
 {
     boot_active_record_t record;
@@ -139,20 +98,13 @@ static void ResetFixture(void)
 
     memset(&candidates, 0, sizeof(candidates));
     memset(&validation_record, 0, sizeof(validation_record));
-    memset(&committed_record, 0, sizeof(committed_record));
     memset(&validation_result, 0, sizeof(validation_result));
-    memset(&boot_control_result, 0, sizeof(boot_control_result));
     memset(&validation_service, 0, sizeof(validation_service));
-    memset(&boot_control_service, 0, sizeof(boot_control_service));
     memset(&recovery_service, 0, sizeof(recovery_service));
     validation_state = SERVICE_RUN_STATE_IDLE;
-    boot_control_state = SERVICE_RUN_STATE_IDLE;
-    commit_start_status = FIRMWARE_STATUS_OK;
-    commit_count = 0U;
     dependencies.load_candidate = LoadCandidate;
     dependencies.candidate_context = &candidates;
     dependencies.validation = &validation_service;
-    dependencies.boot_control = &boot_control_service;
     assert(
         RecoveryService_Init(&recovery_service, &dependencies) ==
         FIRMWARE_STATUS_OK);
@@ -187,8 +139,8 @@ static void TestSingleValidPair(void)
     assert(
         RecoveryService_GetState(&recovery_service) ==
         SERVICE_RUN_STATE_SUCCEEDED);
-    assert(commit_count == 1U);
-    assert(committed_record.active_pair == BOOT_PAIR_1);
+    assert(RecoveryService_GetCandidate(&recovery_service) != NULL);
+    assert(RecoveryService_GetCandidate(&recovery_service)->active_pair == BOOT_PAIR_1);
 }
 
 static void TestNewestValidPairWins(void)
@@ -207,8 +159,8 @@ static void TestNewestValidPairWins(void)
     assert(
         RecoveryService_GetState(&recovery_service) ==
         SERVICE_RUN_STATE_SUCCEEDED);
-    assert(commit_count == 1U);
-    assert(committed_record.active_pair == BOOT_PAIR_2);
+    assert(RecoveryService_GetCandidate(&recovery_service) != NULL);
+    assert(RecoveryService_GetCandidate(&recovery_service)->active_pair == BOOT_PAIR_2);
 }
 
 static void TestEqualSequenceConflictIsRejected(void)
@@ -232,30 +184,7 @@ static void TestEqualSequenceConflictIsRejected(void)
         SERVICE_RUN_STATE_FAILED);
     assert(result != NULL);
     assert(result->error == BOOT_ERROR_NO_VALID_PAIR);
-    assert(commit_count == 0U);
-}
-
-static void TestCommitStartFailureIsReported(void)
-{
-    const service_result_t *result;
-
-    ResetFixture();
-    candidates.records[1] = MakeRecord(BOOT_PAIR_2, 3U);
-    candidates.present[1] = 1;
-    candidates.valid[1] = 1;
-    commit_start_status = FIRMWARE_STATUS_IO_ERROR;
-    assert(
-        RecoveryService_Start(&recovery_service, BOOT_PAIR_NONE) ==
-        FIRMWARE_STATUS_OK);
-    RunToTerminal();
-    result = RecoveryService_GetResult(&recovery_service);
-    assert(
-        RecoveryService_GetState(&recovery_service) ==
-        SERVICE_RUN_STATE_FAILED);
-    assert(result != NULL);
-    assert(result->status == FIRMWARE_STATUS_IO_ERROR);
-    assert(result->error == BOOT_ERROR_EEPROM_COMMIT);
-    assert(commit_count == 0U);
+    assert(RecoveryService_GetCandidate(&recovery_service) == NULL);
 }
 
 int main(void)
@@ -263,6 +192,5 @@ int main(void)
     TestSingleValidPair();
     TestNewestValidPairWins();
     TestEqualSequenceConflictIsRejected();
-    TestCommitStartFailureIsReported();
     return 0;
 }

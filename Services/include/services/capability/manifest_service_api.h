@@ -1,6 +1,6 @@
 /**
  * @file manifest_service_api.h
- * @brief Strict signed Manifest parsing and authentication API.
+ * @brief Strict Manifest parsing and integrity hashing API.
  */
 #ifndef SERVICES_MANIFEST_SERVICE_API_H
 #define SERVICES_MANIFEST_SERVICE_API_H
@@ -14,8 +14,8 @@
 
 struct manifest_service;
 
-/** Parse, validate, hash, and authenticate one complete production Manifest. */
-firmware_status_t ManifestService_ParseAndVerify(
+/** Parse, validate, and hash one complete production Manifest. */
+firmware_status_t ManifestService_ParseAndValidate(
     struct manifest_service *service,
     const uint8_t *data,
     uint32_t size,

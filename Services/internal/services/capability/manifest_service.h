@@ -5,7 +5,7 @@
 #ifndef SERVICES_MANIFEST_SERVICE_INTERNAL_H
 #define SERVICES_MANIFEST_SERVICE_INTERNAL_H
 
-#include "firmware/image_authenticator.h"
+#include "firmware/hash.h"
 #include "services/capability/json_document.h"
 #include "services/capability/manifest_service_api.h"
 
@@ -20,12 +20,12 @@ _Static_assert(
 
 typedef struct
 {
-    const image_authenticator_t *authenticator;
+    const hash_provider_t *hash;
 } manifest_service_dependencies_t;
 
 typedef struct manifest_service
 {
-    const image_authenticator_t *authenticator;
+    const hash_provider_t *hash;
     json_token_t tokens[MANIFEST_SERVICE_TOKEN_CAPACITY];
     int initialized;
 } manifest_service_t;

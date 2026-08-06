@@ -292,6 +292,13 @@ static int TestFirstCommitAndSelection(void)
     TEST_ASSERT(
         BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
     TEST_ASSERT((loaded.sequence == 1U) && (loaded.active_pair == BOOT_PAIR_1));
+    TEST_ASSERT(
+        BootControlService_LoadPairCandidate(
+            &service, BOOT_PAIR_1, &loaded) == FIRMWARE_STATUS_OK);
+    TEST_ASSERT((loaded.sequence == 1U) && (loaded.active_pair == BOOT_PAIR_1));
+    TEST_ASSERT(
+        BootControlService_LoadPairCandidate(
+            &service, BOOT_PAIR_2, &loaded) == FIRMWARE_STATUS_INVALID_STATE);
 
     StoreResetCounters(&store);
     TEST_ASSERT(CommitActive(&service, &pair_2) == 0);
@@ -300,6 +307,14 @@ static int TestFirstCommitAndSelection(void)
                 COMMIT_MARKER);
     TEST_ASSERT(
         BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
+    TEST_ASSERT((loaded.sequence == 2U) && (loaded.active_pair == BOOT_PAIR_2));
+    TEST_ASSERT(
+        BootControlService_LoadPairCandidate(
+            &service, BOOT_PAIR_1, &loaded) == FIRMWARE_STATUS_OK);
+    TEST_ASSERT((loaded.sequence == 1U) && (loaded.active_pair == BOOT_PAIR_1));
+    TEST_ASSERT(
+        BootControlService_LoadPairCandidate(
+            &service, BOOT_PAIR_2, &loaded) == FIRMWARE_STATUS_OK);
     TEST_ASSERT((loaded.sequence == 2U) && (loaded.active_pair == BOOT_PAIR_2));
     return 0;
 }
@@ -405,6 +420,42 @@ static int TestCorruptRecordFallback(void)
     return 0;
 }
 
+static int TestRecoveryCommitPreservesCandidate(void)
+{
+    fake_store_t store;
+    boot_control_service_t service;
+    crc32_iso_hdlc_t crc;
+    boot_active_record_t pair_1 = ActiveRecord(BOOT_PAIR_1, 1U);
+    boot_active_record_t pair_2 = ActiveRecord(BOOT_PAIR_2, 2U);
+    boot_active_record_t candidate;
+    boot_active_record_t loaded;
+    uint8_t preserved_record[256U];
+
+    StoreInit(&store);
+    TEST_ASSERT(ServiceInit(&service, &crc, &store) == 0);
+    TEST_ASSERT(CommitActive(&service, &pair_1) == 0);
+    TEST_ASSERT(CommitActive(&service, &pair_2) == 0);
+    TEST_ASSERT(
+        BootControlService_LoadPairCandidate(
+            &service, BOOT_PAIR_1, &candidate) == FIRMWARE_STATUS_OK);
+    memcpy(preserved_record, &store.bytes[ACTIVE_A_ADDRESS],
+           sizeof(preserved_record));
+
+    TEST_ASSERT(
+        BootControlService_CommitRecoveredStart(&service, &candidate) ==
+        FIRMWARE_STATUS_OK);
+    TEST_ASSERT(RunCommit(&service) == 0);
+    TEST_ASSERT(
+        BootControlService_GetState(&service) == SERVICE_RUN_STATE_SUCCEEDED);
+    TEST_ASSERT(memcmp(preserved_record, &store.bytes[ACTIVE_A_ADDRESS],
+                       sizeof(preserved_record)) == 0);
+    TEST_ASSERT(
+        BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
+    TEST_ASSERT((loaded.sequence == 2U) &&
+                (loaded.active_pair == BOOT_PAIR_1));
+    return 0;
+}
+
 static int TestAcceptedWritePowerLoss(void)
 {
     uint32_t cutoff;
@@ -486,43 +537,6 @@ static int TestWriteFailureInjection(void)
     return 0;
 }
 
-static int TestUpdateRequestSetAndClear(void)
-{
-    fake_store_t store;
-    boot_control_service_t service;
-    crc32_iso_hdlc_t crc;
-    boot_update_request_t request;
-    boot_update_request_t loaded;
-
-    StoreInit(&store);
-    TEST_ASSERT(ServiceInit(&service, &crc, &store) == 0);
-    memset(&request, 0, sizeof(request));
-    request.requested = 1;
-    request.reason = BOOT_UPDATE_REASON_APPLICATION;
-    TEST_ASSERT(
-        BootControlService_CommitUpdateRequestStart(&service, &request) ==
-        FIRMWARE_STATUS_OK);
-    TEST_ASSERT(RunCommit(&service) == 0);
-    TEST_ASSERT(
-        BootControlService_LoadUpdateRequest(&service, &loaded) ==
-        FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 1U) && (loaded.requested != 0) &&
-                (loaded.reason == BOOT_UPDATE_REASON_APPLICATION));
-
-    request.requested = 0;
-    request.reason = BOOT_UPDATE_REASON_NONE;
-    TEST_ASSERT(
-        BootControlService_CommitUpdateRequestStart(&service, &request) ==
-        FIRMWARE_STATUS_OK);
-    TEST_ASSERT(RunCommit(&service) == 0);
-    TEST_ASSERT(
-        BootControlService_LoadUpdateRequest(&service, &loaded) ==
-        FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 2U) && (loaded.requested == 0) &&
-                (loaded.reason == BOOT_UPDATE_REASON_NONE));
-    return 0;
-}
-
 static firmware_status_t FailingChecksumReset(void *context)
 {
     return (context == NULL) ? FIRMWARE_STATUS_INVALID_ARGUMENT
@@ -589,9 +603,9 @@ int main(void)
     TEST_ASSERT(TestEqualSequenceRecords() == 0);
     TEST_ASSERT(TestAmbiguousSequenceRecords() == 0);
     TEST_ASSERT(TestCorruptRecordFallback() == 0);
+    TEST_ASSERT(TestRecoveryCommitPreservesCandidate() == 0);
     TEST_ASSERT(TestAcceptedWritePowerLoss() == 0);
     TEST_ASSERT(TestWriteFailureInjection() == 0);
-    TEST_ASSERT(TestUpdateRequestSetAndClear() == 0);
     TEST_ASSERT(TestChecksumFailurePropagation() == 0);
     printf("checksum_boot_control_test: PASS\n");
     return 0;
