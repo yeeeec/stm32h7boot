@@ -27,6 +27,7 @@
 #include "iwdg.h"
 #include "ltdc.h"
 #include "quadspi.h"
+#include "sdmmc.h"
 #include "tim.h"
 #include "usart.h"
 #include "usb_host.h"
@@ -79,7 +80,8 @@ void MX_USB_HOST_Process(void);
  * @brief  The application entry point.
  * @retval int
  */
-int main(void) {
+int main(void)
+{
 
     /* USER CODE BEGIN 1 */
 
@@ -128,32 +130,40 @@ int main(void) {
     MX_I2C1_Init();
     MX_USART1_UART_Init();
     MX_IWDG1_Init();
+    MX_SDMMC1_SD_Init();
     /* USER CODE BEGIN 2 */
-    if (!FirmwareStatus_IsOk(Platform_Init())) {
+    if (!FirmwareStatus_IsOk(Platform_Init()))
+    {
         Error_Handler();
     }
-    if (!FirmwareStatus_IsOk(BSP_Init())) {
+    if (!FirmwareStatus_IsOk(BSP_Init()))
+    {
         Error_Handler();
     }
-    if (!FirmwareStatus_IsOk(Composition_Init())) {
+    if (!FirmwareStatus_IsOk(Composition_Init()))
+    {
         Error_Handler();
     }
-    if (!FirmwareStatus_IsOk(Application_Init())) {
+    if (!FirmwareStatus_IsOk(Application_Init()))
+    {
         Error_Handler();
     }
     /* USER CODE END 2 */
 
     /* Infinite loop */
     /* USER CODE BEGIN WHILE */
-    while (1) {
+    while (1)
+    {
         /* USER CODE END WHILE */
         MX_USB_HOST_Process();
 
         /* USER CODE BEGIN 3 */
-        if (!FirmwareStatus_IsOk(Platform_Process())) {
+        if (!FirmwareStatus_IsOk(Platform_Process()))
+        {
             Error_Handler();
         }
-        if (!FirmwareStatus_IsOk(Application_Process())) {
+        if (!FirmwareStatus_IsOk(Application_Process()))
+        {
             Error_Handler();
         }
     }
@@ -164,7 +174,8 @@ int main(void) {
  * @brief System Clock Configuration
  * @retval None
  */
-void SystemClock_Config(void) {
+void SystemClock_Config(void)
+{
     RCC_OscInitTypeDef RCC_OscInitStruct = {0};
     RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
@@ -176,7 +187,8 @@ void SystemClock_Config(void) {
      */
     __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-    while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {
+    while (!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY))
+    {
     }
 
     /** Initializes the RCC Oscillators according to the specified parameters
@@ -195,7 +207,8 @@ void SystemClock_Config(void) {
     RCC_OscInitStruct.PLL.PLLRGE     = RCC_PLL1VCIRANGE_2;
     RCC_OscInitStruct.PLL.PLLVCOSEL  = RCC_PLL1VCOWIDE;
     RCC_OscInitStruct.PLL.PLLFRACN   = 0;
-    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
+    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+    {
         Error_Handler();
     }
 
@@ -212,7 +225,8 @@ void SystemClock_Config(void) {
     RCC_ClkInitStruct.APB2CLKDivider = RCC_APB2_DIV2;
     RCC_ClkInitStruct.APB4CLKDivider = RCC_APB4_DIV2;
 
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+    {
         Error_Handler();
     }
 }
@@ -221,7 +235,8 @@ void SystemClock_Config(void) {
  * @brief Peripherals Common Clock Configuration
  * @retval None
  */
-void PeriphCommonClock_Config(void) {
+void PeriphCommonClock_Config(void)
+{
     RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
 
     /** Initializes the peripherals clock
@@ -236,7 +251,8 @@ void PeriphCommonClock_Config(void) {
     PeriphClkInitStruct.PLL3.PLL3VCOSEL      = RCC_PLL3VCOWIDE;
     PeriphClkInitStruct.PLL3.PLL3FRACN       = 0;
     PeriphClkInitStruct.UsbClockSelection    = RCC_USBCLKSOURCE_PLL3;
-    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK) {
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
         Error_Handler();
     }
 }
@@ -247,7 +263,8 @@ void PeriphCommonClock_Config(void) {
 
 /* MPU Configuration */
 
-void MPU_Config(void) {
+void MPU_Config(void)
+{
     MPU_Region_InitTypeDef MPU_InitStruct = {0};
 
     /* Disables the MPU */
@@ -276,11 +293,13 @@ void MPU_Config(void) {
  * @brief  This function is executed in case of error occurrence.
  * @retval None
  */
-void Error_Handler(void) {
+void Error_Handler(void)
+{
     /* USER CODE BEGIN Error_Handler_Debug */
     /* User can add his own implementation to report the HAL error return state */
     __disable_irq();
-    while (1) {
+    while (1)
+    {
     }
     /* USER CODE END Error_Handler_Debug */
 }
@@ -292,7 +311,8 @@ void Error_Handler(void) {
  * @param  line: assert_param error line source number
  * @retval None
  */
-void assert_failed(uint8_t *file, uint32_t line) {
+void assert_failed(uint8_t *file, uint32_t line)
+{
     /* USER CODE BEGIN 6 */
     /* User can add his own implementation to report the file name and line number,
        ex: printf("Wrong parameters value: file %s on line %d\r\n", file, line) */
