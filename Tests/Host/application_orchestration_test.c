@@ -26,10 +26,18 @@ static struct launch_service launch;
 static boot_active_record_t active_record;
 static boot_active_record_t candidate_record;
 static validated_manifest_t manifest;
+#if defined(TEST_INITIAL_INSTALL)
+static service_run_state_t recovery_state;
+static service_result_t recovery_result;
+#endif
 static service_run_state_t update_state;
 static service_run_state_t commit_state;
 static service_run_state_t validation_state;
 static uint32_t install_count;
+static uint32_t initial_install_count;
+#if defined(TEST_INITIAL_INSTALL)
+static uint32_t recovery_count;
+#endif
 static uint32_t commit_count;
 static uint32_t recovery_commit_count;
 static uint32_t remove_count;
@@ -41,27 +49,47 @@ firmware_status_t RecoveryService_Start(
     struct recovery_service *service, boot_pair_t preferred_pair)
 {
     (void)service;
+#if defined(TEST_INITIAL_INSTALL)
+    assert(preferred_pair == BOOT_PAIR_NONE);
+    ++recovery_count;
+    recovery_state = SERVICE_RUN_STATE_RUNNING;
+    return FIRMWARE_STATUS_OK;
+#else
     (void)preferred_pair;
     return FIRMWARE_STATUS_INVALID_STATE;
+#endif
 }
 
 void RecoveryService_Process(struct recovery_service *service)
 {
     (void)service;
+#if defined(TEST_INITIAL_INSTALL)
+    recovery_state = SERVICE_RUN_STATE_FAILED;
+    recovery_result.status = FIRMWARE_STATUS_INVALID_STATE;
+    recovery_result.error = BOOT_ERROR_NO_VALID_PAIR;
+#endif
 }
 
 service_run_state_t RecoveryService_GetState(
     const struct recovery_service *service)
 {
     (void)service;
+#if defined(TEST_INITIAL_INSTALL)
+    return recovery_state;
+#else
     return SERVICE_RUN_STATE_FAILED;
+#endif
 }
 
 const service_result_t *RecoveryService_GetResult(
     const struct recovery_service *service)
 {
     (void)service;
+#if defined(TEST_INITIAL_INSTALL)
+    return &recovery_result;
+#else
     return NULL;
+#endif
 }
 
 const boot_active_record_t *RecoveryService_GetCandidate(
@@ -111,15 +139,24 @@ firmware_status_t BootControlService_LoadActive(
     struct boot_control_service *service, boot_active_record_t *record)
 {
     (void)service;
+#if defined(TEST_INITIAL_INSTALL)
+    (void)record;
+    return FIRMWARE_STATUS_INVALID_STATE;
+#else
     *record = active_record;
     return FIRMWARE_STATUS_OK;
+#endif
 }
 
 firmware_status_t BootControlService_CommitActiveStart(
     struct boot_control_service *service, const boot_active_record_t *record)
 {
     (void)service;
+#if defined(TEST_INITIAL_INSTALL)
+    assert(record->active_pair == BOOT_PAIR_1);
+#else
     assert(record->active_pair == BOOT_PAIR_2);
+#endif
     ++commit_count;
     commit_state = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
@@ -171,6 +208,21 @@ firmware_status_t UpdateService_InstallStart(
     return FIRMWARE_STATUS_OK;
 }
 
+firmware_status_t UpdateService_InitialInstallStart(
+    struct update_service *service, boot_pair_t target_pair)
+{
+    (void)service;
+#if defined(TEST_INITIAL_INSTALL)
+    assert(target_pair == BOOT_PAIR_1);
+    ++initial_install_count;
+    update_state = SERVICE_RUN_STATE_RUNNING;
+    return FIRMWARE_STATUS_OK;
+#else
+    (void)target_pair;
+    return FIRMWARE_STATUS_INVALID_STATE;
+#endif
+}
+
 void UpdateService_Process(struct update_service *service)
 {
     (void)service;
@@ -194,7 +246,9 @@ const boot_active_record_t *UpdateService_GetCandidate(
     const struct update_service *service)
 {
     (void)service;
-    return (install_count == 0U) ? NULL : &candidate_record;
+    return ((install_count + initial_install_count) == 0U)
+               ? NULL
+               : &candidate_record;
 }
 
 const service_result_t *UpdateService_GetResult(const struct update_service *service)
@@ -274,12 +328,19 @@ int main(void)
     memset(&active_record, 0, sizeof(active_record));
     memset(&candidate_record, 0, sizeof(candidate_record));
     memset(&manifest, 0, sizeof(manifest));
+#if defined(TEST_INITIAL_INSTALL)
+    memset(&recovery_result, 0, sizeof(recovery_result));
+#endif
+#if defined(TEST_INITIAL_INSTALL)
+    candidate_record.active_pair = BOOT_PAIR_1;
+#else
     active_record.active_pair = BOOT_PAIR_1;
     active_record.app_size = 1U;
     active_record.gui_size = 1U;
     active_record.release_version.major = 1U;
     candidate_record = active_record;
     candidate_record.active_pair = BOOT_PAIR_2;
+#endif
     candidate_record.release_version.major = 2U;
     manifest.release_version.major = 2U;
     manifest.minimum_bootloader_version.major = 1U;
@@ -310,7 +371,14 @@ int main(void)
         }
         assert(0 && "Application did not reset after committed update");
     }
+#if defined(TEST_INITIAL_INSTALL)
+    assert(recovery_count == 1U);
+    assert(initial_install_count == 1U);
+    assert(install_count == 0U);
+    assert(candidate_record.active_pair == BOOT_PAIR_1);
+#else
     assert(install_count == 1U);
+#endif
     assert(commit_count == 1U);
     assert(recovery_commit_count == 0U);
     assert(remove_count == 1U);

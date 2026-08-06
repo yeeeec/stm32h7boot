@@ -271,6 +271,35 @@ endif()
 
 add_test(NAME application_orchestration_test COMMAND application_orchestration_test)
 
+add_executable(application_initial_install_test
+    application_orchestration_test.c
+    ../../Application/src/application.c
+    ../../Services/src/capability/version_policy.c
+)
+
+target_include_directories(application_initial_install_test PRIVATE
+    ../../Application/include
+    ../../Application/internal
+    ../../Services/include
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+target_compile_definitions(application_initial_install_test PRIVATE
+    TEST_INITIAL_INSTALL=1
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(application_initial_install_test PRIVATE
+        -Wall -Wextra -Werror
+    )
+endif()
+
+add_test(
+    NAME application_initial_install_test
+    COMMAND application_initial_install_test
+)
+
 add_executable(application_recovery_orchestration_test
     application_recovery_orchestration_test.c
     ../../Application/src/application.c

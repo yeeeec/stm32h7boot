@@ -48,6 +48,7 @@ static application_stage_t application_commit_failure;
 static int application_configured;
 static int application_initialized;
 static int application_media_mounted;
+static int application_has_active_record;
 static int application_reset_after_cleanup;
 static int application_recovery_attempted;
 static int application_commit_is_recovery;
@@ -123,6 +124,7 @@ firmware_status_t Application_Init(void)
         return status;
     }
     application_media_mounted = 0;
+    application_has_active_record = FirmwareStatus_IsOk(status) ? 1 : 0;
     application_reset_after_cleanup = 0;
     application_recovery_attempted = 0;
     application_commit_is_recovery = 0;
@@ -179,8 +181,17 @@ firmware_status_t Application_Process(void)
                 const service_result_t *result =
                     RecoveryService_GetResult(application_dependencies.recovery);
 
-                return (result == NULL) ? FIRMWARE_STATUS_INVALID_STATE
-                                        : result->status;
+                if ((application_has_active_record == 0) && (result != NULL) &&
+                    (result->error == BOOT_ERROR_NO_VALID_PAIR))
+                {
+                    /* An unprovisioned device may wait for its first package. */
+                    application_stage = APPLICATION_STAGE_WAIT_MEDIA;
+                }
+                else
+                {
+                    return (result == NULL) ? FIRMWARE_STATUS_INVALID_STATE
+                                            : result->status;
+                }
             }
             break;
 
@@ -190,9 +201,19 @@ firmware_status_t Application_Process(void)
 
             status = application_dependencies.package_source->is_media_present(
                 application_dependencies.package_source->context, &present);
-            application_stage = (FirmwareStatus_IsOk(status) && (present != 0))
-                                    ? APPLICATION_STAGE_MOUNT_MEDIA
-                                    : APPLICATION_STAGE_VALIDATE_START;
+            if (FirmwareStatus_IsOk(status) && (present != 0))
+            {
+                application_stage = APPLICATION_STAGE_MOUNT_MEDIA;
+            }
+            else if (application_has_active_record == 0)
+            {
+                /* Stay available for a package inserted after reset. */
+                application_stage = APPLICATION_STAGE_WAIT_MEDIA;
+            }
+            else
+            {
+                application_stage = APPLICATION_STAGE_VALIDATE_START;
+            }
             break;
         }
 
@@ -206,7 +227,9 @@ firmware_status_t Application_Process(void)
             }
             else
             {
-                application_stage = APPLICATION_STAGE_VALIDATE_START;
+                application_stage = (application_has_active_record != 0)
+                                        ? APPLICATION_STAGE_VALIDATE_START
+                                        : APPLICATION_STAGE_WAIT_MEDIA;
             }
             break;
 
@@ -223,7 +246,9 @@ firmware_status_t Application_Process(void)
             }
             else
             {
-                BeginUnmount(APPLICATION_STAGE_VALIDATE_START);
+                BeginUnmount((application_has_active_record != 0)
+                                 ? APPLICATION_STAGE_VALIDATE_START
+                                 : APPLICATION_STAGE_WAIT_MEDIA);
             }
             break;
         }
@@ -236,7 +261,9 @@ firmware_status_t Application_Process(void)
             }
             else
             {
-                BeginUnmount(APPLICATION_STAGE_VALIDATE_START);
+                BeginUnmount((application_has_active_record != 0)
+                                 ? APPLICATION_STAGE_VALIDATE_START
+                                 : APPLICATION_STAGE_WAIT_MEDIA);
             }
             break;
 
@@ -250,7 +277,9 @@ firmware_status_t Application_Process(void)
             else if (UpdateService_GetState(application_dependencies.update) ==
                      SERVICE_RUN_STATE_FAILED)
             {
-                BeginUnmount(APPLICATION_STAGE_VALIDATE_START);
+                BeginUnmount((application_has_active_record != 0)
+                                 ? APPLICATION_STAGE_VALIDATE_START
+                                 : APPLICATION_STAGE_WAIT_MEDIA);
             }
             break;
 
@@ -263,7 +292,7 @@ firmware_status_t Application_Process(void)
             {
                 return FIRMWARE_STATUS_INVALID_STATE;
             }
-            if (IsAlreadyActive(manifest))
+            if ((application_has_active_record != 0) && IsAlreadyActive(manifest))
             {
                 application_reset_after_cleanup = 0;
                 application_stage = APPLICATION_STAGE_REMOVE_REQUEST;
@@ -272,22 +301,31 @@ firmware_status_t Application_Process(void)
             if ((VersionPolicy_Compare(
                      &application_dependencies.bootloader_version,
                      &manifest->minimum_bootloader_version) < 0) ||
-                !VersionPolicy_IsUpgrade(
-                    &application_active_record.release_version,
-                    &manifest->release_version))
+                ((application_has_active_record != 0) &&
+                 !VersionPolicy_IsUpgrade(
+                     &application_active_record.release_version,
+                     &manifest->release_version)))
             {
-                BeginUnmount(APPLICATION_STAGE_VALIDATE_START);
+                BeginUnmount((application_has_active_record != 0)
+                                 ? APPLICATION_STAGE_VALIDATE_START
+                                 : APPLICATION_STAGE_WAIT_MEDIA);
                 break;
             }
-            status = UpdateService_InstallStart(
-                application_dependencies.update, &application_active_record);
+            status = (application_has_active_record != 0)
+                         ? UpdateService_InstallStart(
+                               application_dependencies.update,
+                               &application_active_record)
+                         : UpdateService_InitialInstallStart(
+                               application_dependencies.update, BOOT_PAIR_1);
             if (FirmwareStatus_IsOk(status))
             {
                 application_stage = APPLICATION_STAGE_INSTALL_PROCESS;
             }
             else
             {
-                BeginUnmount(APPLICATION_STAGE_VALIDATE_START);
+                BeginUnmount((application_has_active_record != 0)
+                                 ? APPLICATION_STAGE_VALIDATE_START
+                                 : APPLICATION_STAGE_WAIT_MEDIA);
             }
             break;
         }
@@ -307,13 +345,17 @@ firmware_status_t Application_Process(void)
                 application_candidate_record = *candidate;
                 application_commit_is_recovery = 0;
                 application_after_commit = APPLICATION_STAGE_REMOVE_REQUEST;
-                application_commit_failure = APPLICATION_STAGE_VALIDATE_START;
+                application_commit_failure = (application_has_active_record != 0)
+                                                  ? APPLICATION_STAGE_VALIDATE_START
+                                                  : APPLICATION_STAGE_FAILED;
                 application_stage = APPLICATION_STAGE_COMMIT_START;
             }
             else if (UpdateService_GetState(application_dependencies.update) ==
                      SERVICE_RUN_STATE_FAILED)
             {
-                BeginUnmount(APPLICATION_STAGE_VALIDATE_START);
+                BeginUnmount((application_has_active_record != 0)
+                                 ? APPLICATION_STAGE_VALIDATE_START
+                                 : APPLICATION_STAGE_FAILED);
             }
             break;
 
@@ -341,6 +383,7 @@ firmware_status_t Application_Process(void)
                 SERVICE_RUN_STATE_SUCCEEDED)
             {
                 application_active_record = application_candidate_record;
+                application_has_active_record = 1;
                 application_reset_after_cleanup =
                     (application_after_commit == APPLICATION_STAGE_REMOVE_REQUEST)
                         ? 1

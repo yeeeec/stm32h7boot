@@ -397,11 +397,18 @@ static void UpdateServiceStep(update_service_t *service)
             break;
 
         case UPDATE_STAGE_SELECT_TARGET:
-            status = SlotPolicy_SelectInactivePair(service->active_record.active_pair,
-                                                   &service->target_layout.pair);
+            status = (service->initial_install != 0)
+                         ? SlotPolicy_GetPairLayout(service->initial_target_pair,
+                                                    &service->target_layout)
+                         : SlotPolicy_SelectInactivePair(service->active_record.active_pair,
+                                                         &service->target_layout.pair);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_INTERNAL);
+            }
+            else if (service->initial_install != 0)
+            {
+                service->stage = UPDATE_STAGE_OPEN_APP;
             }
             else
             {
@@ -1019,7 +1026,8 @@ static void UpdateServiceStep(update_service_t *service)
             }
             else
             {
-                service->candidate_record                 = service->active_record;
+                memset(&service->candidate_record, 0,
+                       sizeof(service->candidate_record));
                 service->candidate_record.active_pair     = service->target_layout.pair;
                 service->candidate_record.release_version = service->manifest.release_version;
                 service->candidate_record.build_number    = service->manifest.build_number;
@@ -1128,6 +1136,8 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     service->relocation_entry_capacity = dependencies->relocation_entry_capacity;
     service->state                     = SERVICE_RUN_STATE_IDLE;
     service->stage                     = UPDATE_STAGE_IDLE;
+    service->initial_target_pair       = BOOT_PAIR_NONE;
+    service->initial_install           = 0;
     service->result.status             = FIRMWARE_STATUS_OK;
     service->result.error              = BOOT_ERROR_NONE;
     service->result.stage              = UPDATE_STAGE_IDLE;
@@ -1162,6 +1172,8 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service)
     implementation->manifest_size_known    = 0;
     implementation->manifest_prepared      = 0;
     implementation->install_completed      = 0;
+    implementation->initial_install        = 0;
+    implementation->initial_target_pair   = BOOT_PAIR_NONE;
     implementation->target_read_offset     = 0U;
     implementation->gui_target_read_offset = 0U;
     return FIRMWARE_STATUS_OK;
@@ -1191,6 +1203,46 @@ firmware_status_t UpdateService_InstallStart(
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
     implementation->active_record = *active_record;
+    implementation->initial_install = 0;
+    implementation->initial_target_pair = BOOT_PAIR_NONE;
+    implementation->state = SERVICE_RUN_STATE_RUNNING;
+    implementation->stage = UPDATE_STAGE_SELECT_TARGET;
+    implementation->result.status = FIRMWARE_STATUS_OK;
+    implementation->result.error = BOOT_ERROR_NONE;
+    implementation->result.stage = UPDATE_STAGE_SELECT_TARGET;
+    implementation->result.native_error = 0;
+    implementation->failure_pending = 0;
+    implementation->cancel_requested = 0;
+    implementation->erase_started = 0;
+    implementation->relocation_crc_done = 0;
+    implementation->install_completed = 0;
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t UpdateService_InitialInstallStart(
+    struct update_service *service,
+    boot_pair_t target_pair)
+{
+    update_service_t *implementation = (update_service_t *)service;
+
+    if (implementation == NULL)
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if ((implementation->initialized == 0) ||
+        (implementation->state == SERVICE_RUN_STATE_RUNNING) ||
+        (implementation->manifest_prepared == 0))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if ((target_pair != BOOT_PAIR_1) && (target_pair != BOOT_PAIR_2))
+    {
+        return FIRMWARE_STATUS_OUT_OF_RANGE;
+    }
+
+    memset(&implementation->active_record, 0, sizeof(implementation->active_record));
+    implementation->initial_install = 1;
+    implementation->initial_target_pair = target_pair;
     implementation->state = SERVICE_RUN_STATE_RUNNING;
     implementation->stage = UPDATE_STAGE_SELECT_TARGET;
     implementation->result.status = FIRMWARE_STATUS_OK;

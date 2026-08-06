@@ -177,6 +177,14 @@ firmware_status_t UpdateService_InstallStart(
     return FIRMWARE_STATUS_INVALID_STATE;
 }
 
+firmware_status_t UpdateService_InitialInstallStart(
+    struct update_service *service, boot_pair_t target_pair)
+{
+    (void)service;
+    (void)target_pair;
+    return FIRMWARE_STATUS_INVALID_STATE;
+}
+
 void UpdateService_Process(struct update_service *service)
 {
     (void)service;

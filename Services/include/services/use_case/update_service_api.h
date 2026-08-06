@@ -19,6 +19,17 @@ firmware_status_t UpdateService_InstallStart(
     struct update_service *service,
     const boot_active_record_t *active_record);
 
+/**
+ * Start the first installation when no valid Active Record exists.
+ *
+ * The package is installed into the explicitly selected pair and produces a
+ * complete candidate Active Record. The caller must still commit that
+ * candidate through Boot Control before it can be launched.
+ */
+firmware_status_t UpdateService_InitialInstallStart(
+    struct update_service *service,
+    boot_pair_t target_pair);
+
 /** Advance at most one bounded update operation or state transition. */
 void UpdateService_Process(struct update_service *service);
 

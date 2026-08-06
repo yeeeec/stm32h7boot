@@ -104,12 +104,14 @@ typedef struct update_service
     appx_relocation_entry_t *relocation_entries;
     uint32_t relocation_entry_capacity;
     boot_active_record_t active_record;
+    boot_pair_t initial_target_pair;
     validated_manifest_t manifest;
     boot_pair_layout_t target_layout;
     appx_header_t app_header;
     relocation_service_t relocation;
     boot_active_record_t candidate_record;
     int manifest_prepared;
+    int initial_install;
     int install_completed;
     service_run_state_t state;
     service_result_t result;

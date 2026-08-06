@@ -412,10 +412,29 @@ static void TestPrepareOnlyReturnsManifest(void)
     assert(source_context.file_open == 0);
 }
 
+static void TestInitialInstallSelectsExplicitPair(void)
+{
+    ResetFixture();
+    Initialize(&update_service);
+    assert(UpdateService_PrepareStart(&update_service) == FIRMWARE_STATUS_OK);
+    RunToTerminal(&update_service);
+    assert(UpdateService_InitialInstallStart(
+               &update_service, BOOT_PAIR_NONE) == FIRMWARE_STATUS_OUT_OF_RANGE);
+    assert(UpdateService_InitialInstallStart(
+               &update_service, BOOT_PAIR_1) == FIRMWARE_STATUS_OK);
+    assert(update_service.initial_install != 0);
+    assert(update_service.initial_target_pair == BOOT_PAIR_1);
+    UpdateService_Process(&update_service);
+    assert(update_service.target_layout.pair == BOOT_PAIR_1);
+    assert(update_service.stage == UPDATE_STAGE_OPEN_APP);
+    assert(erase_count == 0U);
+}
+
 int main(void)
 {
     TestCancelBeforeErase();
     TestManifestShortReadDoesNotErase();
     TestPrepareOnlyReturnsManifest();
+    TestInitialInstallSelectsExplicitPair();
     return 0;
 }
