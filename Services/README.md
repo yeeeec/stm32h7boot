@@ -40,7 +40,7 @@ Services/
 | `version_policy` | 无状态 | 已实现 | `major.minor.patch` 排序和严格升级判断 |
 | `vector_validation` | 无状态 | 已实现 | MSP、Thumb Reset Handler 和镜像范围检查 |
 | `boot_control_service` | 增量 Capability | 已实现 | EEPROM A/B 记录选择、校验和原子提交 |
-| `manifest_service` | Capability | 待实现 | 严格解析、兼容性、Hash 和签名验证 |
+| `manifest_service` | Capability | 已实现 | 严格解析、RFC 8785 受限规范化、SHA-256 和 P-256 签名验证 |
 | `relocation_service` | 增量 Capability | 已实现 | APPX Header 和流式重定位 |
 | `update_service` | 异步 Use-case | 待实现 | APP/GUI 原子升级事务 |
 | `active_validation_service` | 异步 Use-case | 已实现 | 激活槽增量校验 |
@@ -89,6 +89,11 @@ Services 使用 `async_block_device_t`。编程和擦除分别通过 `program_st
 
 1. 冻结 CRC 参数和 AT24C128AN 板级参数，实现 checksum 与 boot-control store Interface；
 2. 实现 `boot_control_service` 及逐页掉电注入测试；
-3. 冻结密码学库、公钥和 RFC 8785 测试向量，实现 Manifest Capability；
+3. 冻结密码学库、公钥注入和 RFC 8785 测试向量，实现 Manifest Capability；
 4. 实现 APPX Header 与 relocation Capability；
 5. 实现 `update_service` 状态机，再实现 Validation、Recovery 和 Launch。
+
+Manifest 验签的生产公钥由 Composition 在启动前通过
+`Composition_ConfigureManifestVerifier()` 显式注入并复制；未配置公钥时不创建
+Manifest verifier，避免测试密钥或占位密钥进入生产固件。公钥不是 Manifest 字段，Key ID
+仍由签名对象声明并必须与注入配置完全匹配。

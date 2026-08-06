@@ -4,20 +4,29 @@
  */
 #include "composition/composition.h"
 
+#include <stddef.h>
+#include <string.h>
+
 #include "adapters/cortex_m_application_jump_adapter.h"
+#include "adapters/at24_boot_control_adapter.h"
 #include "adapters/fatfs_package_source_adapter.h"
 #include "adapters/spi_nor_block_adapter.h"
 #include "adapters/stm32_clock_adapter.h"
 #include "adapters/stm32_qspi_xip_adapter.h"
 #include "adapters/uart_log_adapter.h"
 #include "bsp/bsp_external_flash.h"
+#include "bsp/bsp_eeprom.h"
 #include "checksum/crc32_iso_hdlc.h"
+#include "crypto/micro_ecc_authenticator.h"
 #include "firmware/async_block_device.h"
 #include "logging.h"
 #include "logging_setup.h"
 #include "quadspi.h"
 #include "services/capability/slot_policy.h"
 #include "services/capability/vector_validation.h"
+#include "services/capability/boot_control_service_api.h"
+#include "services/capability/boot_control_service.h"
+#include "services/capability/manifest_service.h"
 #include "services/use_case/active_validation_service.h"
 #include "services/use_case/launch_service.h"
 
@@ -26,6 +35,10 @@
 static stm32_clock_adapter_t clock_adapter;
 static uart_log_adapter_t log_adapter;
 static spi_nor_block_adapter_t external_flash_adapter;
+static at24_boot_control_adapter_t eeprom_adapter;
+static boot_control_service_t boot_control_service;
+static micro_ecc_authenticator_t manifest_authenticator;
+static manifest_service_t manifest_service;
 static fatfs_package_source_adapter_t package_source_adapter;
 static stm32_qspi_xip_adapter_t xip_adapter;
 static cortex_m_application_jump_adapter_t jump_adapter;
@@ -41,6 +54,61 @@ static const memory_region_t application_sram_regions[] = {
     {0x38000000UL, 64UL * 1024UL},
 };
 static int composition_initialized;
+static int manifest_verifier_configured;
+static uint8_t manifest_public_key[COMPOSITION_MANIFEST_PUBLIC_KEY_SIZE];
+static char manifest_key_id[COMPOSITION_MANIFEST_KEY_ID_MAX_SIZE + 1U];
+
+static int IsManifestKeyIdCharacter(uint8_t value)
+{
+    return (((value >= 'A') && (value <= 'Z')) ||
+            ((value >= 'a') && (value <= 'z')) ||
+            ((value >= '0') && (value <= '9')) ||
+            (value == '.') || (value == '_') || (value == '-'));
+}
+
+firmware_status_t Composition_ConfigureManifestVerifier(
+    const uint8_t public_key[COMPOSITION_MANIFEST_PUBLIC_KEY_SIZE],
+    const char *key_id)
+{
+    micro_ecc_authenticator_t probe = {0};
+    micro_ecc_authenticator_config_t probe_config;
+    size_t key_id_length;
+    size_t index;
+
+    if ((public_key == NULL) || (key_id == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if ((composition_initialized != 0) ||
+        (manifest_verifier_configured != 0))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    key_id_length = strlen(key_id);
+    if ((key_id_length == 0U) ||
+        (key_id_length > COMPOSITION_MANIFEST_KEY_ID_MAX_SIZE))
+    {
+        return FIRMWARE_STATUS_OUT_OF_RANGE;
+    }
+    for (index = 0U; index < key_id_length; ++index)
+    {
+        if (!IsManifestKeyIdCharacter((uint8_t)key_id[index]))
+        {
+            return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        }
+    }
+    probe_config.key_id = key_id;
+    probe_config.public_key = public_key;
+    if (!FirmwareStatus_IsOk(
+            MicroEccAuthenticator_Init(&probe, &probe_config)))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    memcpy(manifest_public_key, public_key, sizeof(manifest_public_key));
+    memcpy(manifest_key_id, key_id, key_id_length + 1U);
+    manifest_verifier_configured = 1;
+    return FIRMWARE_STATUS_OK;
+}
 
 firmware_status_t Composition_Init(void) {
     firmware_status_t status;
@@ -70,6 +138,7 @@ firmware_status_t Composition_Init(void) {
         LOG_ERROR("composition", "external flash adapter init failed: %d", (int) status);
         return status;
     }
+
     /* Validate device geometry before making storage available to services. */
     external_flash = SpiNorBlockAdapter_AsyncInterface(&external_flash_adapter);
     status = external_flash->get_info(external_flash->context, &external_flash_info);
@@ -94,6 +163,52 @@ firmware_status_t Composition_Init(void) {
     if (!FirmwareStatus_IsOk(status)) {
         return status;
     }
+
+    if (manifest_verifier_configured != 0)
+    {
+        const micro_ecc_authenticator_config_t authenticator_config = {
+            manifest_key_id,
+            manifest_public_key,
+        };
+        manifest_service_dependencies_t manifest_dependencies;
+
+        status = MicroEccAuthenticator_Init(
+            &manifest_authenticator, &authenticator_config);
+        if (!FirmwareStatus_IsOk(status))
+        {
+            LOG_ERROR("composition", "Manifest public key is invalid: %d", (int) status);
+            return status;
+        }
+        manifest_dependencies.authenticator =
+            MicroEccAuthenticator_Interface(&manifest_authenticator);
+        status = ManifestService_Init(&manifest_service, &manifest_dependencies);
+        if (!FirmwareStatus_IsOk(status))
+        {
+            LOG_ERROR("composition", "Manifest service init failed: %d", (int) status);
+            return status;
+        }
+    }
+
+    status = At24BootControlAdapter_Init(
+        &eeprom_adapter, BSP_EepromDevice());
+    if (!FirmwareStatus_IsOk(status)) {
+        LOG_ERROR("composition", "EEPROM adapter init failed: %d", (int) status);
+        return status;
+    }
+    {
+        boot_control_service_dependencies_t boot_control_dependencies = {
+            At24BootControlAdapter_Interface(&eeprom_adapter),
+            Crc32IsoHdlc_Interface(&crc32_provider),
+        };
+
+        status = BootControlService_Init(
+            &boot_control_service, &boot_control_dependencies);
+    }
+    if (!FirmwareStatus_IsOk(status)) {
+        LOG_ERROR("composition", "boot control init failed: %d", (int) status);
+        return status;
+    }
+
     status = FatFsPackageSourceAdapter_Init(&package_source_adapter);
     if (!FirmwareStatus_IsOk(status)) {
         return status;
@@ -145,4 +260,14 @@ firmware_status_t Composition_Init(void) {
 
 int Composition_IsInitialized(void) {
     return composition_initialized;
+}
+
+struct manifest_service *Composition_ManifestService(void)
+{
+    return (manifest_service.initialized != 0) ? &manifest_service : NULL;
+}
+
+int Composition_IsManifestVerifierConfigured(void)
+{
+    return manifest_verifier_configured;
 }

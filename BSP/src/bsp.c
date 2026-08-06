@@ -4,9 +4,13 @@
  */
 #include "bsp/bsp.h"
 
+#include "bsp/bsp_eeprom.h"
 #include "bsp/bsp_external_flash.h"
 #include "bsp/bsp_sdram.h"
 #include "usart.h"
+
+#define BSP_EEPROM_ADDRESS_7BIT       0x50U
+#define BSP_EEPROM_WRITE_TIMEOUT_MS   10U
 
 static int bsp_initialized;
 
@@ -31,6 +35,19 @@ firmware_status_t BSP_Init(void)
     }
 
     status = BSP_ExternalFlashInit();
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+
+    {
+        const bsp_eeprom_config_t eeprom_config = {
+            BSP_EEPROM_ADDRESS_7BIT,
+            BSP_EEPROM_WRITE_TIMEOUT_MS,
+        };
+
+        status = BSP_EepromInit(&eeprom_config);
+    }
     if (!FirmwareStatus_IsOk(status))
     {
         return status;

@@ -1,6 +1,9 @@
 add_library(firmware_services STATIC
     src/capability/appx_validation.c
+    src/capability/base64.c
     src/capability/checked_arithmetic.c
+    src/capability/json_document.c
+    src/capability/manifest_service.c
     src/capability/boot_control_service.c
     src/capability/relocation_service.c
     src/capability/slot_policy.c

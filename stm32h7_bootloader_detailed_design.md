@@ -133,6 +133,16 @@ Manifest 最大长度固定为 16 KiB，使用静态缓冲区。解析器必须�
 
 若继续采用 RFC 8785 JSON Canonicalization，Host 打包工具与 Bootloader 必须使用同一测试向量。密码学库和公钥烧录方式在实现前冻结；未完成签名能力时不得把 CRC 描述为安全认证。
 
+首版签名契约现已冻结：
+
+- 固件只编译 micro-ecc 的 P-256 验签所需纯 C 源码，关闭其它曲线、压缩点和汇编优化；
+- ECDSA 签名输入固定为 64-byte 大端 `r || s`，Manifest 中使用严格 RFC 4648 Base64（必须保留规范填充，不接受空白或非零填充位）；
+- 公钥固定为 64-byte 未压缩 `X || Y`，由 Composition 在 `Composition_Init()` 前通过显式配置接口注入并复制；
+- 配置阶段调用 `uECC_valid_public_key()` 验证曲线点和 Key ID 字符集，验签阶段只接受匹配的 Key ID；
+- SHA-256 使用独立、无动态内存的增量实现；
+- Canonicalization 采用本 Manifest 的 ASCII、无转义字符串、uint32 十进制整数、布尔、数组和对象子集。对象 Key 按字节序排序，拒绝重复 Key，并从签名输入中移除 `signature.value`；
+- 未配置生产公钥时不创建 Manifest verifier，仓库不内置测试私钥或测试公钥作为默认值。
+
 ## 5. APPX 文件格式
 
 `hmi.app.bin` 不是普通裸 `.bin`，而是固定小端格式的 `HMI_XIP_APP_V1` 容器：
@@ -621,7 +631,7 @@ Composition -> Application + Services + Adapters
 
 - AT24C128AN 的板级 I2C 地址、WP 管脚策略和实际页大小；
 - CRC-32 最终参数及 STM32 CRC 外设输入字节序；
-- ECDSA 公钥存储、Key ID 和量产烧录流程；
+- ECDSA 公钥的量产烧录介质、Key ID 生命周期和密钥轮换流程（固件注入接口已冻结）；
 - USB 升级目录；
 - APPX Host 工具允许的 ARM relocation 白名单和最大条目数；
 - GUI 激活槽信息由 EEPROM、共享 SRAM handoff 还是 Boot API 提供给 Application；

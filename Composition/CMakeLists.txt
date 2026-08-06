@@ -18,6 +18,7 @@ target_link_libraries(firmware_composition
         firmware_services
         firmware_adapters
         firmware_checksum
+        firmware_crypto
         firmware_logger
         platform_stm32h7
         board_bsp

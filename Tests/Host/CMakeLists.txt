@@ -7,6 +7,25 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 enable_testing()
 
+add_executable(at24_test
+    at24_test.c
+    ../../Drivers/Devices/At24/at24.c
+    ../../Adapters/src/at24_boot_control_adapter.c
+)
+
+target_include_directories(at24_test PRIVATE
+    ../../Drivers/Devices/At24
+    ../../Adapters/include
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(at24_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
+add_test(NAME at24_test COMMAND at24_test)
+
 add_executable(spi_nor_test
     spi_nor_test.c
     ../../Drivers/Devices/SpiNor/spi_nor.c
@@ -128,3 +147,57 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 add_test(NAME appx_relocation_test COMMAND appx_relocation_test)
+
+add_executable(crypto_json_test
+    crypto_json_test.c
+    ../../Utilities/Crypto/src/sha256.c
+    ../../Utilities/Crypto/src/micro_ecc_authenticator.c
+    ../../Utilities/Crypto/MicroEcc/uECC.c
+    ../../Services/src/capability/base64.c
+    ../../Services/src/capability/json_document.c
+)
+
+target_include_directories(crypto_json_test PRIVATE
+    ../../Utilities/Crypto/include
+    ../../Utilities/Crypto/MicroEcc
+    ../../Services/internal
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+target_compile_definitions(crypto_json_test PRIVATE
+    uECC_PLATFORM=uECC_arch_other
+    uECC_WORD_SIZE=4
+    uECC_OPTIMIZATION_LEVEL=2
+    uECC_SUPPORTS_secp160r1=0
+    uECC_SUPPORTS_secp192r1=0
+    uECC_SUPPORTS_secp224r1=0
+    uECC_SUPPORTS_secp256k1=0
+    uECC_SUPPORT_COMPRESSED_POINT=0
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(crypto_json_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
+add_test(NAME crypto_json_test COMMAND crypto_json_test)
+
+add_executable(manifest_service_test
+    manifest_service_test.c
+    ../../Services/src/capability/base64.c
+    ../../Services/src/capability/json_document.c
+    ../../Services/src/capability/manifest_service.c
+)
+
+target_include_directories(manifest_service_test PRIVATE
+    ../../Services/include
+    ../../Services/internal
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(manifest_service_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
+add_test(NAME manifest_service_test COMMAND manifest_service_test)

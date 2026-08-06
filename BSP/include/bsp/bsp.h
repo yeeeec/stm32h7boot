@@ -10,8 +10,9 @@
 /**
  * @brief Initialize board peripherals used by the firmware.
  *
- * SDRAM is initialized before the external QSPI flash. Generated UART, FMC
- * and QSPI handles must already be initialized by CubeMX startup code.
+ * SDRAM, external QSPI flash, and the configured AT24C128 EEPROM are
+ * initialized in that order. Generated UART, FMC, QSPI, and I2C handles must
+ * already be initialized by CubeMX startup code.
  *
  * @return FIRMWARE_STATUS_OK on success.
  * @return FIRMWARE_STATUS_INVALID_STATE if called twice or a required HAL

@@ -11,6 +11,17 @@ target_include_directories(driver_sdram PUBLIC
 
 target_link_libraries(driver_sdram PUBLIC firmware_types)
 
+# AT24 owns EEPROM protocol and write-cycle state without HAL dependencies.
+add_library(driver_at24 STATIC
+    At24/at24.c
+)
+
+target_include_directories(driver_at24 PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/At24
+)
+
+target_link_libraries(driver_at24 PUBLIC firmware_types)
+
 # SPI-NOR does not inherit CubeMX, HAL, BSP, or middleware include paths. The
 # board-specific QSPI binding is supplied through spi_nor_port_t by the BSP.
 add_library(driver_spi_nor STATIC
