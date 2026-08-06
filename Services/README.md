@@ -42,13 +42,15 @@ Services/
 | `boot_control_service` | 增量 Capability | 已实现 | EEPROM A/B 记录选择、校验和原子提交 |
 | `manifest_service` | Capability | 已实现 | 严格解析、RFC 8785 受限规范化、SHA-256 和 P-256 签名验证 |
 | `relocation_service` | 增量 Capability | 已实现 | APPX Header 和流式重定位 |
-| `update_service` | 异步 Use-case | 待实现 | APP/GUI 原子升级事务 |
+| `update_service` | 异步 Use-case | 已实现 | 介质检测、Manifest/源文件校验、APPX 重定位、异步擦写、目标 CRC、Active Record 提交和 Request 清理 |
 | `active_validation_service` | 异步 Use-case | 已实现 | 激活槽增量校验 |
-| `recovery_service` | 异步 Use-case | 待实现 | 备用槽恢复和记录重建 |
+| `recovery_service` | 异步 Use-case | 已实现 | 双槽候选校验、可启动槽选择和 Active Record 重建 |
 | `launch_service` | 同步、不返回 | 已实现 | XIP、Cache、向量复核和最终跳转 |
 
-“待实现”模块不提供返回成功的占位代码。只有依赖契约、错误映射和测试向量确定后才加入
-构建，避免上层误认为安全能力已经存在。
+Recovery 的候选记录通过 `recovery_candidate_load_fn` 注入。该接口为预留的产品适配点：
+当前 EEPROM Active Record 只保存当前激活对，无法在两个副本同时损坏时推导备用槽的完整
+元数据；候选加载器必须从产品保留元数据区或其他受信存储返回记录。Recovery 不直接依赖
+EEPROM 类型，也不创建动态内存。
 
 ## 4. Use-case 生命周期
 
@@ -87,11 +89,10 @@ Services 使用 `async_block_device_t`。编程和擦除分别通过 `program_st
 
 ## 7. 下一实施批次
 
-1. 冻结 CRC 参数和 AT24C128AN 板级参数，实现 checksum 与 boot-control store Interface；
-2. 实现 `boot_control_service` 及逐页掉电注入测试；
-3. 冻结密码学库、公钥注入和 RFC 8785 测试向量，实现 Manifest Capability；
-4. 实现 APPX Header 与 relocation Capability；
-5. 实现 `update_service` 状态机，再实现 Validation、Recovery 和 Launch。
+1. 在 Composition 实例化 `update_service`、`recovery_service` 及其适配器和静态缓冲区；
+2. 为 `recovery_candidate_load_fn` 接入产品保留元数据区，并定义候选记录的掉电更新策略；
+3. 补齐两个 Use-case 的 Host 掉电注入、完整成功事务、源校验失败和目标写入失败测试；
+4. 在真实 W25Q256、AT24C128AN 和 USB MSC 上验证异步擦写、复位重入和 XIP 交接。
 
 Manifest 验签的生产公钥由 Composition 在启动前通过
 `Composition_ConfigureManifestVerifier()` 显式注入并复制；未配置公钥时不创建

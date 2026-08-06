@@ -1,0 +1,171 @@
+/**
+ * @file update_service.h
+ * @brief Composition-visible incremental update service state.
+ */
+#ifndef SERVICES_UPDATE_SERVICE_INTERNAL_H
+#define SERVICES_UPDATE_SERVICE_INTERNAL_H
+
+#include <stdint.h>
+
+#include "firmware/async_block_device.h"
+#include "firmware/checksum.h"
+#include "firmware/image_authenticator.h"
+#include "firmware/package_source.h"
+#include "services/capability/appx_validation.h"
+#include "services/capability/manifest_service.h"
+#include "services/capability/relocation_service.h"
+#include "services/common/manifest_types.h"
+#include "services/use_case/update_service_api.h"
+#include "services/capability/boot_control_service.h"
+
+#define UPDATE_SERVICE_MANIFEST_MAX_SIZE 16384U
+#define UPDATE_SERVICE_IO_BUFFER_MIN_SIZE 4096U
+#define UPDATE_SERVICE_MAX_RELOCATIONS 128U
+
+typedef struct
+{
+    const package_source_t *package_source;
+    const async_block_device_t *storage;
+    const checksum_t *checksum;
+    const image_authenticator_t *hash;
+    manifest_service_t *manifest_service;
+    boot_control_service_t *boot_control;
+    release_version_t bootloader_version;
+    const char *manifest_path;
+    const char *app_path;
+    const char *gui_path;
+    uint8_t *manifest_buffer;
+    uint32_t manifest_buffer_size;
+    uint8_t *io_buffer;
+    uint32_t io_buffer_size;
+    uint8_t *relocation_buffer;
+    uint32_t relocation_buffer_size;
+    appx_relocation_entry_t *relocation_entries;
+    uint32_t relocation_entry_capacity;
+} update_service_dependencies_t;
+
+typedef enum
+{
+    UPDATE_STAGE_IDLE = 0,
+    UPDATE_STAGE_WAIT_MEDIA,
+    UPDATE_STAGE_MOUNT_MEDIA,
+    UPDATE_STAGE_OPEN_MANIFEST,
+    UPDATE_STAGE_READ_MANIFEST,
+    UPDATE_STAGE_CLOSE_MANIFEST,
+    UPDATE_STAGE_VERIFY_MANIFEST,
+    UPDATE_STAGE_SELECT_TARGET,
+    UPDATE_STAGE_OPEN_APP,
+    UPDATE_STAGE_PREPARE_APP,
+    UPDATE_STAGE_READ_APP_HEADER,
+    UPDATE_STAGE_HASH_APP,
+    UPDATE_STAGE_READ_APP_RELOCATIONS,
+    UPDATE_STAGE_VALIDATE_APP_RELOCATION,
+    UPDATE_STAGE_READ_APP_RELOCATION_WORD,
+    UPDATE_STAGE_CHECK_APP_RELOCATION_WORD,
+    UPDATE_STAGE_CLOSE_APP,
+    UPDATE_STAGE_OPEN_GUI,
+    UPDATE_STAGE_PREPARE_GUI,
+    UPDATE_STAGE_HASH_GUI,
+    UPDATE_STAGE_CLOSE_GUI_SOURCE,
+    UPDATE_STAGE_ERASE_APP_START,
+    UPDATE_STAGE_ERASE_APP_POLL,
+    UPDATE_STAGE_PROGRAM_APP_START,
+    UPDATE_STAGE_PROGRAM_APP_POLL,
+    UPDATE_STAGE_READ_APP_TARGET,
+    UPDATE_STAGE_FINISH_APP_TARGET,
+    UPDATE_STAGE_OPEN_APP_PROGRAM,
+    UPDATE_STAGE_READ_APP_PROGRAM_BLOCK,
+    UPDATE_STAGE_APPLY_APP_PROGRAM_BLOCK,
+    UPDATE_STAGE_CLOSE_APP_PROGRAM,
+    UPDATE_STAGE_ERASE_GUI_START,
+    UPDATE_STAGE_ERASE_GUI_POLL,
+    UPDATE_STAGE_PROGRAM_GUI_START,
+    UPDATE_STAGE_PROGRAM_GUI_POLL,
+    UPDATE_STAGE_READ_GUI_TARGET,
+    UPDATE_STAGE_FINISH_GUI_TARGET,
+    UPDATE_STAGE_OPEN_GUI_PROGRAM,
+    UPDATE_STAGE_READ_GUI_PROGRAM_BLOCK,
+    UPDATE_STAGE_CLOSE_GUI_PROGRAM,
+    UPDATE_STAGE_COMMIT_ACTIVE_START,
+    UPDATE_STAGE_COMMIT_ACTIVE_PROCESS,
+    UPDATE_STAGE_CLEAR_REQUEST_START,
+    UPDATE_STAGE_CLEAR_REQUEST_PROCESS,
+    UPDATE_STAGE_UNMOUNT_MEDIA,
+    UPDATE_STAGE_CLEANUP_CLOSE,
+    UPDATE_STAGE_CLEANUP_UNMOUNT
+} update_stage_t;
+
+typedef struct update_service
+{
+    const package_source_t *package_source;
+    const async_block_device_t *storage;
+    async_block_device_info_t storage_info;
+    const checksum_t *checksum;
+    const image_authenticator_t *hash;
+    manifest_service_t *manifest_service;
+    boot_control_service_t *boot_control;
+    release_version_t bootloader_version;
+    const char *manifest_path;
+    const char *app_path;
+    const char *gui_path;
+    uint8_t *manifest_buffer;
+    uint32_t manifest_buffer_size;
+    uint8_t *io_buffer;
+    uint32_t io_buffer_size;
+    uint8_t *relocation_buffer;
+    uint32_t relocation_buffer_size;
+    appx_relocation_entry_t *relocation_entries;
+    uint32_t relocation_entry_capacity;
+    boot_active_record_t active_record;
+    validated_manifest_t manifest;
+    boot_pair_layout_t target_layout;
+    appx_header_t app_header;
+    relocation_service_t relocation;
+    boot_active_record_t commit_record;
+    boot_update_request_t clear_request;
+    service_run_state_t state;
+    service_result_t result;
+    update_stage_t stage;
+    firmware_status_t failure_status;
+    boot_error_t failure_error;
+    uint32_t failure_stage;
+    uint32_t manifest_size;
+    uint32_t manifest_offset;
+    uint32_t file_size;
+    uint32_t file_offset;
+    uint32_t file_chunk_size;
+    uint32_t app_crc_phase;
+    uint32_t relocation_bytes;
+    uint32_t relocation_index;
+    uint32_t relocation_apply_index;
+    uint32_t app_block_offset;
+    uint32_t app_block_size;
+    uint32_t program_offset;
+    uint32_t erase_offset;
+    uint32_t target_read_offset;
+    uint32_t gui_block_size;
+    uint32_t gui_program_offset;
+    uint32_t gui_target_read_offset;
+    uint32_t pending_program_size;
+    uint32_t pending_relocation_word;
+    appx_relocation_entry_t pending_relocation;
+    uint32_t app_source_crc;
+    uint32_t app_relocation_crc;
+    uint32_t gui_source_crc;
+    uint32_t target_app_crc;
+    uint32_t target_gui_crc;
+    int manifest_size_known;
+    int file_open;
+    int media_mounted;
+    int erase_started;
+    int relocation_crc_done;
+    int cancel_requested;
+    int failure_pending;
+    int initialized;
+} update_service_t;
+
+firmware_status_t UpdateService_Init(
+    update_service_t *service,
+    const update_service_dependencies_t *dependencies);
+
+#endif

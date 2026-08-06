@@ -201,3 +201,50 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 add_test(NAME manifest_service_test COMMAND manifest_service_test)
+
+add_executable(update_service_lifecycle_test
+    update_service_lifecycle_test.c
+    ../../Services/src/use_case/update_service.c
+    ../../Services/src/capability/appx_validation.c
+    ../../Services/src/capability/checked_arithmetic.c
+    ../../Services/src/capability/relocation_service.c
+    ../../Services/src/capability/slot_policy.c
+    ../../Services/src/capability/version_policy.c
+)
+
+target_include_directories(update_service_lifecycle_test PRIVATE
+    ../../Services/include
+    ../../Services/internal
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(update_service_lifecycle_test PRIVATE
+        -Wall -Wextra -Werror
+    )
+endif()
+
+add_test(NAME update_service_lifecycle_test COMMAND update_service_lifecycle_test)
+
+add_executable(recovery_service_test
+    recovery_service_test.c
+    ../../Services/src/use_case/recovery_service.c
+    ../../Services/src/capability/checked_arithmetic.c
+    ../../Services/src/capability/slot_policy.c
+)
+
+target_include_directories(recovery_service_test PRIVATE
+    ../../Services/include
+    ../../Services/internal
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(recovery_service_test PRIVATE
+        -Wall -Wextra -Werror
+    )
+endif()
+
+add_test(NAME recovery_service_test COMMAND recovery_service_test)

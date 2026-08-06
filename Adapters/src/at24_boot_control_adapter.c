@@ -8,9 +8,7 @@
 
 #include "at24.h"
 
-static firmware_status_t GetInfo(
-    void *context,
-    boot_control_store_info_t *info)
+static firmware_status_t GetInfo(void *context, boot_control_store_info_t *info)
 {
     at24_info_t device_info;
     firmware_status_t status;
@@ -19,32 +17,24 @@ static firmware_status_t GetInfo(
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    status = At24_GetInfo((const at24_t *)context, &device_info);
+    status = At24_GetInfo((const at24_t *) context, &device_info);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
     info->capacity_bytes = device_info.capacity_bytes;
-    info->page_size = device_info.page_size;
+    info->page_size      = device_info.page_size;
     return FIRMWARE_STATUS_OK;
 }
 
-static firmware_status_t Read(
-    void *context,
-    uint32_t address,
-    void *data,
-    uint32_t size)
+static firmware_status_t Read(void *context, uint32_t address, void *data, uint32_t size)
 {
-    return At24_Read((at24_t *)context, address, data, size);
+    return At24_Read((at24_t *) context, address, data, size);
 }
 
-static firmware_status_t WritePage(
-    void *context,
-    uint32_t address,
-    const void *data,
-    uint32_t size)
+static firmware_status_t WritePage(void *context, uint32_t address, const void *data, uint32_t size)
 {
-    return At24_WritePageStart((at24_t *)context, address, data, size);
+    return At24_WritePageStart((at24_t *) context, address, data, size);
 }
 
 static firmware_status_t IsReady(void *context, int *ready)
@@ -56,12 +46,12 @@ static firmware_status_t IsReady(void *context, int *ready)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    status = At24_OperationPoll((at24_t *)context);
+    status = At24_OperationPoll((at24_t *) context);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
-    status = At24_GetOperationResult((const at24_t *)context, &result);
+    status = At24_GetOperationResult((const at24_t *) context, &result);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -74,9 +64,8 @@ static firmware_status_t IsReady(void *context, int *ready)
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t At24BootControlAdapter_Init(
-    at24_boot_control_adapter_t *adapter,
-    struct at24 *device)
+firmware_status_t At24BootControlAdapter_Init(at24_boot_control_adapter_t *adapter,
+                                              struct at24 *device)
 {
     at24_info_t info;
     firmware_status_t status;
@@ -85,24 +74,24 @@ firmware_status_t At24BootControlAdapter_Init(
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    status = At24_GetInfo((const at24_t *)device, &info);
+    status = At24_GetInfo((const at24_t *) device, &info);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
-    (void)info;
+    (void) info;
 
-    adapter->device = device;
-    adapter->interface.context = device;
-    adapter->interface.get_info = GetInfo;
-    adapter->interface.read = Read;
+    adapter->device               = device;
+    adapter->interface.context    = device;
+    adapter->interface.get_info   = GetInfo;
+    adapter->interface.read       = Read;
     adapter->interface.write_page = WritePage;
-    adapter->interface.is_ready = IsReady;
+    adapter->interface.is_ready   = IsReady;
     return FIRMWARE_STATUS_OK;
 }
 
-const boot_control_store_t *At24BootControlAdapter_Interface(
-    const at24_boot_control_adapter_t *adapter)
+const boot_control_store_t *
+At24BootControlAdapter_Interface(const at24_boot_control_adapter_t *adapter)
 {
     return (adapter == NULL) ? NULL : &adapter->interface;
 }

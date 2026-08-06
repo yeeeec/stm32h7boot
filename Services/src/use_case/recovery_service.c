@@ -1,0 +1,290 @@
+/**
+ * @file recovery_service.c
+ * @brief Fallback pair validation and Active Record reconstruction.
+ */
+#include "services/use_case/recovery_service.h"
+
+#include <stddef.h>
+#include <string.h>
+
+#include "services/capability/slot_policy.h"
+
+static int SequenceIsNewer(uint32_t candidate, uint32_t reference)
+{
+    uint32_t difference = candidate - reference;
+
+    return (difference != 0U) && (difference < 0x80000000UL);
+}
+
+static void Fail(recovery_service_t *service, firmware_status_t status, boot_error_t error)
+{
+    service->state               = SERVICE_RUN_STATE_FAILED;
+    service->result.status       = status;
+    service->result.error        = error;
+    service->result.stage        = (uint32_t) service->stage;
+    service->result.native_error = (int32_t) status;
+    service->stage               = RECOVERY_STAGE_IDLE;
+}
+
+static int CandidateIndex(boot_pair_t pair)
+{
+    return (pair == BOOT_PAIR_1) ? 0 : 1;
+}
+
+static void LoadCandidate(recovery_service_t *service, boot_pair_t pair)
+{
+    int index = CandidateIndex(pair);
+    firmware_status_t status =
+        service->load_candidate(service->candidate_context, pair, &service->candidates[index]);
+
+    if (FirmwareStatus_IsOk(status))
+    {
+        if ((service->candidates[index].active_pair != pair) ||
+            !FirmwareStatus_IsOk(SlotPolicy_GetPairLayout(pair, &(boot_pair_layout_t) {0})))
+        {
+            service->candidate_present[index] = 0U;
+        }
+        else
+        {
+            service->candidate_present[index] = 1U;
+        }
+    }
+    else if ((status == FIRMWARE_STATUS_INVALID_STATE) || (status == FIRMWARE_STATUS_OUT_OF_RANGE))
+    {
+        service->candidate_present[index] = 0U;
+    }
+    else
+    {
+        Fail(service, status, BOOT_ERROR_CONTROL_RECORD);
+        return;
+    }
+    service->stage =
+        (pair == BOOT_PAIR_1) ? RECOVERY_STAGE_LOAD_PAIR_2 : RECOVERY_STAGE_START_VALIDATE_PAIR_1;
+}
+
+static void StartValidation(recovery_service_t *service, boot_pair_t pair,
+                            recovery_stage_t next_stage)
+{
+    int index = CandidateIndex(pair);
+    firmware_status_t status;
+
+    if (service->candidate_present[index] == 0U)
+    {
+        service->stage = next_stage;
+        return;
+    }
+    status = ActiveValidationService_Start(service->validation, &service->candidates[index]);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        service->candidate_valid[index] = 0U;
+        service->stage                  = next_stage;
+        return;
+    }
+    service->stage =
+        (pair == BOOT_PAIR_1) ? RECOVERY_STAGE_VALIDATE_PAIR_1 : RECOVERY_STAGE_VALIDATE_PAIR_2;
+}
+
+static void ProcessValidation(recovery_service_t *service, boot_pair_t pair,
+                              recovery_stage_t next_stage)
+{
+    int index = CandidateIndex(pair);
+    service_run_state_t state;
+
+    ActiveValidationService_Process(service->validation);
+    state = ActiveValidationService_GetState(service->validation);
+    if (state == SERVICE_RUN_STATE_SUCCEEDED)
+    {
+        service->candidate_valid[index] = 1U;
+        service->stage                  = next_stage;
+    }
+    else if (state == SERVICE_RUN_STATE_FAILED)
+    {
+        service->candidate_valid[index] = 0U;
+        service->stage                  = next_stage;
+    }
+}
+
+static void SelectCandidate(recovery_service_t *service)
+{
+    int valid_one = service->candidate_valid[0] != 0U;
+    int valid_two = service->candidate_valid[1] != 0U;
+    int selected  = -1;
+
+    if ((service->preferred_pair == BOOT_PAIR_1) && valid_one)
+    {
+        selected = 0;
+    }
+    else if ((service->preferred_pair == BOOT_PAIR_2) && valid_two)
+    {
+        selected = 1;
+    }
+    else if (valid_one && !valid_two)
+    {
+        selected = 0;
+    }
+    else if (valid_two && !valid_one)
+    {
+        selected = 1;
+    }
+    else if (valid_one && valid_two)
+    {
+        uint32_t difference = service->candidates[0].sequence - service->candidates[1].sequence;
+
+        /* Pair identity is part of the record, so equal sequence numbers
+         * cannot identify one canonical candidate. */
+        if ((difference != 0U) && (difference != 0x80000000UL))
+        {
+            selected =
+                SequenceIsNewer(service->candidates[0].sequence, service->candidates[1].sequence)
+                    ? 0
+                    : 1;
+        }
+    }
+
+    if (selected < 0)
+    {
+        Fail(service, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_NO_VALID_PAIR);
+        return;
+    }
+    service->selected_record = service->candidates[selected];
+    service->stage           = RECOVERY_STAGE_COMMIT_ACTIVE_START;
+}
+
+firmware_status_t RecoveryService_Init(recovery_service_t *service,
+                                       const recovery_service_dependencies_t *dependencies)
+{
+    if ((service == NULL) || (dependencies == NULL) || (dependencies->load_candidate == NULL) ||
+        (dependencies->validation == NULL) || (dependencies->boot_control == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if (service->initialized != 0)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    service->load_candidate      = dependencies->load_candidate;
+    service->candidate_context   = dependencies->candidate_context;
+    service->validation          = dependencies->validation;
+    service->boot_control        = dependencies->boot_control;
+    service->state               = SERVICE_RUN_STATE_IDLE;
+    service->stage               = RECOVERY_STAGE_IDLE;
+    service->result.status       = FIRMWARE_STATUS_OK;
+    service->result.error        = BOOT_ERROR_NONE;
+    service->result.stage        = RECOVERY_STAGE_IDLE;
+    service->result.native_error = 0;
+    service->initialized         = 1;
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t RecoveryService_Start(struct recovery_service *service,
+                                        boot_pair_t preferred_pair)
+{
+    recovery_service_t *implementation = (recovery_service_t *) service;
+
+    if (implementation == NULL)
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if ((implementation->initialized == 0) || (implementation->state == SERVICE_RUN_STATE_RUNNING))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if ((preferred_pair != BOOT_PAIR_NONE) && (preferred_pair != BOOT_PAIR_1) &&
+        (preferred_pair != BOOT_PAIR_2))
+    {
+        return FIRMWARE_STATUS_OUT_OF_RANGE;
+    }
+    memset(implementation->candidate_present, 0, sizeof(implementation->candidate_present));
+    memset(implementation->candidate_valid, 0, sizeof(implementation->candidate_valid));
+    implementation->preferred_pair      = preferred_pair;
+    implementation->state               = SERVICE_RUN_STATE_RUNNING;
+    implementation->stage               = RECOVERY_STAGE_LOAD_PAIR_1;
+    implementation->result.status       = FIRMWARE_STATUS_OK;
+    implementation->result.error        = BOOT_ERROR_NONE;
+    implementation->result.stage        = RECOVERY_STAGE_LOAD_PAIR_1;
+    implementation->result.native_error = 0;
+    return FIRMWARE_STATUS_OK;
+}
+
+void RecoveryService_Process(struct recovery_service *service)
+{
+    recovery_service_t *implementation = (recovery_service_t *) service;
+    service_run_state_t state;
+
+    if ((implementation == NULL) || (implementation->state != SERVICE_RUN_STATE_RUNNING))
+    {
+        return;
+    }
+    switch (implementation->stage)
+    {
+        case RECOVERY_STAGE_LOAD_PAIR_1:
+            LoadCandidate(implementation, BOOT_PAIR_1);
+            break;
+        case RECOVERY_STAGE_LOAD_PAIR_2:
+            LoadCandidate(implementation, BOOT_PAIR_2);
+            break;
+        case RECOVERY_STAGE_START_VALIDATE_PAIR_1:
+            StartValidation(implementation, BOOT_PAIR_1, RECOVERY_STAGE_START_VALIDATE_PAIR_2);
+            break;
+        case RECOVERY_STAGE_VALIDATE_PAIR_1:
+            ProcessValidation(implementation, BOOT_PAIR_1, RECOVERY_STAGE_START_VALIDATE_PAIR_2);
+            break;
+        case RECOVERY_STAGE_START_VALIDATE_PAIR_2:
+            StartValidation(implementation, BOOT_PAIR_2, RECOVERY_STAGE_SELECT_PAIR);
+            break;
+        case RECOVERY_STAGE_VALIDATE_PAIR_2:
+            ProcessValidation(implementation, BOOT_PAIR_2, RECOVERY_STAGE_SELECT_PAIR);
+            break;
+        case RECOVERY_STAGE_SELECT_PAIR:
+            SelectCandidate(implementation);
+            break;
+        case RECOVERY_STAGE_COMMIT_ACTIVE_START:
+        {
+            firmware_status_t status = BootControlService_CommitActiveStart(
+                implementation->boot_control, &implementation->selected_record);
+
+            if (!FirmwareStatus_IsOk(status))
+            {
+                Fail(implementation, status, BOOT_ERROR_EEPROM_COMMIT);
+            }
+            else
+            {
+                implementation->stage = RECOVERY_STAGE_COMMIT_ACTIVE_PROCESS;
+            }
+            break;
+        }
+        case RECOVERY_STAGE_COMMIT_ACTIVE_PROCESS:
+            BootControlService_Process(implementation->boot_control);
+            state = BootControlService_GetState(implementation->boot_control);
+            if (state == SERVICE_RUN_STATE_FAILED)
+            {
+                Fail(implementation,
+                     BootControlService_GetResult(implementation->boot_control)->status,
+                     BOOT_ERROR_EEPROM_COMMIT);
+            }
+            else if (state == SERVICE_RUN_STATE_SUCCEEDED)
+            {
+                implementation->state               = SERVICE_RUN_STATE_SUCCEEDED;
+                implementation->result.status       = FIRMWARE_STATUS_OK;
+                implementation->result.error        = BOOT_ERROR_NONE;
+                implementation->result.stage        = (uint32_t) implementation->stage;
+                implementation->result.native_error = 0;
+                implementation->stage               = RECOVERY_STAGE_IDLE;
+            }
+            break;
+        default:
+            Fail(implementation, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_INTERNAL);
+            break;
+    }
+}
+
+service_run_state_t RecoveryService_GetState(const struct recovery_service *service)
+{
+    return (service == NULL) ? SERVICE_RUN_STATE_FAILED
+                             : ((const recovery_service_t *) service)->state;
+}
+
+const service_result_t *RecoveryService_GetResult(const struct recovery_service *service)
+{
+    return (service == NULL) ? NULL : &((const recovery_service_t *) service)->result;
+}

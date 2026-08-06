@@ -1,0 +1,79 @@
+{
+  "format_version": 1,
+  "package_id": "hmi-app-gui-sim-1.2.3+42",
+  "product_id": "HMI",
+  "hardware_id": "STM32H743-W25Q256",
+  "build_number": 42,
+  "created_utc": "2026-08-06T12:00:00Z",
+  "minimum_bootloader_version": "1.0.0",
+
+  "release_groups": [
+    {
+      "id": "app-gui",
+      "version": "1.2.3",
+      "atomic": true,
+      "components": [
+        "app",
+        "gui"
+      ]
+    }
+  ],
+
+  "transaction": {
+    "release_group_id": "app-gui",
+    "strategy": "inactive-pair",
+    "commit_store": "eeprom",
+    "commit_condition": "all-components-crc-valid"
+  },
+
+  "crc32_parameters": {
+    "name": "CRC-32/ISO-HDLC",
+    "polynomial": "0x04C11DB7",
+    "initial_value": "0xFFFFFFFF",
+    "reflect_input": true,
+    "reflect_output": true,
+    "xor_output": "0xFFFFFFFF"
+  },
+
+  "components": [
+    {
+      "id": "app",
+      "file": "hmi.app.bin",
+      "format": "hmi-xip-reloc-v1",
+      "target": "inactive-app-slot",
+      "maximum_image_size_bytes": 1048576,
+      "file_size_bytes": 156376,
+      "image_size_bytes": 156312,
+      "source_crc32": "11223344",
+      "target_crc32": {
+        "app1": "55667788",
+        "app2": "99AABBCC"
+      },
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "vector_offset": 0,
+      "relocation": {
+        "embedded": true,
+        "format": "hmi-reloc-v1"
+      }
+    },
+    {
+      "id": "gui",
+      "file": "hmi.gui.bin",
+      "format": "raw",
+      "target": "inactive-gui-slot",
+      "maximum_image_size_bytes": 8388608,
+      "file_size_bytes": 193044,
+      "crc32": "A1B2C3D4",
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
+    }
+  ],
+
+  "signature": {
+    "algorithm": "ECDSA-P256-SHA256",
+    "key_id": "hmi-production-key-01",
+    "canonicalization": "RFC8785",
+    "scope": "all-fields-except-signature.value",
+    "encoding": "base64",
+    "value": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=="
+  }
+}
