@@ -76,12 +76,30 @@ typedef struct
     uint32_t erase_size;
 } spi_nor_info_t;
 
+typedef enum
+{
+    SPI_NOR_OPERATION_IDLE = 0,
+    SPI_NOR_OPERATION_BUSY,
+    SPI_NOR_OPERATION_SUCCEEDED,
+    SPI_NOR_OPERATION_FAILED
+} spi_nor_operation_state_t;
+
+typedef struct
+{
+    spi_nor_operation_state_t state;
+    firmware_status_t status;
+} spi_nor_operation_result_t;
+
 typedef struct spi_nor
 {
     spi_nor_port_t port;
     spi_nor_info_t info;
     uint32_t program_timeout_ms;
     uint32_t erase_timeout_ms;
+    uint32_t operation_started_ms;
+    uint32_t operation_timeout_ms;
+    firmware_status_t operation_status;
+    spi_nor_operation_state_t operation_state;
     uint8_t address_bytes;
     int initialized;
 } spi_nor_t;
@@ -114,10 +132,52 @@ firmware_status_t SpiNor_Program(
     uint32_t address,
     const void *data,
     uint32_t size);
+
+/**
+ * @brief Start one page-bounded program operation without waiting.
+ *
+ * @param[in,out] device Initialized device retaining operation state.
+ * @param[in] address Destination byte offset.
+ * @param[in] data Source copied to the QSPI peripheral before this call returns.
+ * @param[in] size Nonzero size that must fit in the current program page.
+ *
+ * @return FIRMWARE_STATUS_OK when the page-program command is accepted.
+ * @return FIRMWARE_STATUS_INVALID_STATE while another operation is busy.
+ * @return A range, alignment, or transport failure otherwise.
+ */
+firmware_status_t SpiNor_ProgramStart(
+    spi_nor_t *device,
+    uint32_t address,
+    const void *data,
+    uint32_t size);
 /* Address and size must both be aligned to info.erase_size. */
 firmware_status_t SpiNor_Erase(
     spi_nor_t *device,
     uint32_t address,
     uint32_t size);
+
+/**
+ * @brief Start one erase-unit operation without waiting for completion.
+ *
+ * @param[in,out] device Initialized device retaining operation state.
+ * @param[in] address Erase-aligned byte offset.
+ * @param[in] size Must equal the detected erase size.
+ *
+ * @return FIRMWARE_STATUS_OK when the erase command is accepted.
+ * @return FIRMWARE_STATUS_INVALID_STATE while another erase is busy.
+ * @return A range or transport failure otherwise.
+ */
+firmware_status_t SpiNor_EraseStart(
+    spi_nor_t *device,
+    uint32_t address,
+    uint32_t size);
+
+/** Poll a started erase once without delaying or busy-waiting. */
+firmware_status_t SpiNor_OperationPoll(spi_nor_t *device);
+
+/** Return the most recent asynchronous operation state and terminal status. */
+firmware_status_t SpiNor_GetOperationResult(
+    const spi_nor_t *device,
+    spi_nor_operation_result_t *result);
 
 #endif

@@ -156,7 +156,10 @@ int main(void)
     MX_USB_HOST_Process();
 
     /* USER CODE BEGIN 3 */
-    Platform_Process();
+    if (!FirmwareStatus_IsOk(Platform_Process()))
+    {
+      Error_Handler();
+    }
     if (!FirmwareStatus_IsOk(Application_Process()))
     {
       Error_Handler();

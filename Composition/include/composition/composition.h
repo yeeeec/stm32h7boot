@@ -11,8 +11,8 @@
  * @brief Bind concrete platform and BSP implementations to application services.
  *
  * This function configures the logger, validates the external-flash geometry,
- * initializes the runtime service, and makes it available to the application.
- * It is intentionally the single ownership point for these static instances.
+ * constructs available storage, checksum, package, validation, XIP, and jump
+ * objects. It is intentionally the single ownership point for static instances.
  *
  * @return FIRMWARE_STATUS_OK on success.
  * @return FIRMWARE_STATUS_INVALID_STATE if called more than once or a required

@@ -1,0 +1,55 @@
+/**
+ * @file service_result.h
+ * @brief Stable lifecycle and failure types exposed by use-case services.
+ */
+#ifndef SERVICES_SERVICE_RESULT_H
+#define SERVICES_SERVICE_RESULT_H
+
+#include <stdint.h>
+
+#include "firmware/status.h"
+
+typedef enum
+{
+    SERVICE_RUN_STATE_IDLE = 0,
+    SERVICE_RUN_STATE_RUNNING,
+    SERVICE_RUN_STATE_SUCCEEDED,
+    SERVICE_RUN_STATE_FAILED,
+    SERVICE_RUN_STATE_CANCELLED
+} service_run_state_t;
+
+typedef enum
+{
+    BOOT_ERROR_NONE = 0,
+    BOOT_ERROR_CONTROL_RECORD,
+    BOOT_ERROR_NO_VALID_PAIR,
+    BOOT_ERROR_MEDIA_UNAVAILABLE,
+    BOOT_ERROR_MANIFEST_FORMAT,
+    BOOT_ERROR_INCOMPATIBLE_PRODUCT,
+    BOOT_ERROR_VERSION_REJECTED,
+    BOOT_ERROR_SIGNATURE,
+    BOOT_ERROR_APP_SOURCE_HASH,
+    BOOT_ERROR_GUI_SOURCE_HASH,
+    BOOT_ERROR_RELOCATION_FORMAT,
+    BOOT_ERROR_RELOCATION_RANGE,
+    BOOT_ERROR_APP_ERASE,
+    BOOT_ERROR_APP_PROGRAM,
+    BOOT_ERROR_APP_TARGET_CRC,
+    BOOT_ERROR_GUI_ERASE,
+    BOOT_ERROR_GUI_PROGRAM,
+    BOOT_ERROR_GUI_TARGET_CRC,
+    BOOT_ERROR_EEPROM_COMMIT,
+    BOOT_ERROR_XIP_SETUP,
+    BOOT_ERROR_VECTOR_TABLE,
+    BOOT_ERROR_INTERNAL
+} boot_error_t;
+
+typedef struct
+{
+    firmware_status_t status;
+    boot_error_t error;
+    uint32_t stage;
+    int32_t native_error;
+} service_result_t;
+
+#endif

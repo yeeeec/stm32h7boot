@@ -220,9 +220,63 @@ static void TestEraseTimeout(void)
     assert(SpiNor_Erase(&device, 0U, 4096U) == FIRMWARE_STATUS_TIMEOUT);
 }
 
+static void TestAsynchronousErase(void)
+{
+    fake_port_t fake = {0};
+    spi_nor_t device = {0};
+    spi_nor_port_t port = MakePort(&fake);
+    spi_nor_config_t config = {0};
+    spi_nor_operation_result_t result;
+
+    fake.jedec_id[0] = 0xEFU;
+    fake.jedec_id[1] = 0x40U;
+    fake.jedec_id[2] = 0x18U;
+    assert(SpiNor_Init(&device, &port, &config) == FIRMWARE_STATUS_OK);
+
+    assert(SpiNor_EraseStart(&device, 0U, 4096U) == FIRMWARE_STATUS_OK);
+    assert(SpiNor_GetOperationResult(&device, &result) == FIRMWARE_STATUS_OK);
+    assert(result.state == SPI_NOR_OPERATION_BUSY);
+    assert(SpiNor_EraseStart(&device, 4096U, 4096U) ==
+           FIRMWARE_STATUS_INVALID_STATE);
+
+    assert(SpiNor_OperationPoll(&device) == FIRMWARE_STATUS_OK);
+    assert(SpiNor_GetOperationResult(&device, &result) == FIRMWARE_STATUS_OK);
+    assert(result.state == SPI_NOR_OPERATION_BUSY);
+    assert(SpiNor_OperationPoll(&device) == FIRMWARE_STATUS_OK);
+    assert(SpiNor_GetOperationResult(&device, &result) == FIRMWARE_STATUS_OK);
+    assert(result.state == SPI_NOR_OPERATION_SUCCEEDED);
+    assert(result.status == FIRMWARE_STATUS_OK);
+}
+
+static void TestAsynchronousProgram(void)
+{
+    fake_port_t fake = {0};
+    spi_nor_t device = {0};
+    spi_nor_port_t port = MakePort(&fake);
+    spi_nor_config_t config = {0};
+    spi_nor_operation_result_t result;
+    uint8_t data[20] = {0};
+
+    fake.jedec_id[0] = 0xEFU;
+    fake.jedec_id[1] = 0x40U;
+    fake.jedec_id[2] = 0x18U;
+    assert(SpiNor_Init(&device, &port, &config) == FIRMWARE_STATUS_OK);
+
+    assert(SpiNor_ProgramStart(&device, 250U, data, sizeof(data)) ==
+           FIRMWARE_STATUS_INVALID_ARGUMENT);
+    assert(SpiNor_ProgramStart(&device, 0U, data, sizeof(data)) ==
+           FIRMWARE_STATUS_OK);
+    assert(SpiNor_OperationPoll(&device) == FIRMWARE_STATUS_OK);
+    assert(SpiNor_OperationPoll(&device) == FIRMWARE_STATUS_OK);
+    assert(SpiNor_GetOperationResult(&device, &result) == FIRMWARE_STATUS_OK);
+    assert(result.state == SPI_NOR_OPERATION_SUCCEEDED);
+}
+
 int main(void)
 {
     TestDeviceOperations();
     TestEraseTimeout();
+    TestAsynchronousErase();
+    TestAsynchronousProgram();
     return 0;
 }

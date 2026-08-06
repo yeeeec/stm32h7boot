@@ -6,6 +6,7 @@
 #define SPI_NOR_BLOCK_ADAPTER_H
 
 #include "firmware/block_device.h"
+#include "firmware/async_block_device.h"
 
 struct spi_nor;
 
@@ -13,6 +14,7 @@ struct spi_nor;
 typedef struct
 {
     block_device_t interface;
+    async_block_device_t async_interface;
     struct spi_nor *device;
 } spi_nor_block_adapter_t;
 
@@ -41,6 +43,10 @@ firmware_status_t SpiNorBlockAdapter_Init(
  * @note The returned pointer remains valid only while @p adapter remains valid.
  */
 const block_device_t *SpiNorBlockAdapter_Interface(
+    const spi_nor_block_adapter_t *adapter);
+
+/** Return the bounded asynchronous block-device interface. */
+const async_block_device_t *SpiNorBlockAdapter_AsyncInterface(
     const spi_nor_block_adapter_t *adapter);
 
 #endif

@@ -8,7 +8,6 @@
 #include <string.h>
 
 #include "spi_nor.h"
-#include "iwdg.h"
 #include "quadspi.h"
 
 #define BSP_QSPI_COMMAND_TIMEOUT_MS 100U
@@ -151,13 +150,6 @@ static void QspiDelayMs(void *context, uint32_t delay_ms)
     HAL_Delay(delay_ms);
 }
 
-static void QspiPollHook(void *context)
-{
-    (void)context;
-    /* Long erase/program polls must refresh the board watchdog. */
-    (void)HAL_IWDG_Refresh(&hiwdg1);
-}
-
 firmware_status_t BSP_ExternalFlashInit(void)
 {
     spi_nor_port_t port;
@@ -174,7 +166,7 @@ firmware_status_t BSP_ExternalFlashInit(void)
     port.transmit = QspiTransmit;
     port.now_ms = QspiNowMs;
     port.delay_ms = QspiDelayMs;
-    port.poll_hook = QspiPollHook;
+    port.poll_hook = NULL;
     port.max_transfer_size = BSP_QSPI_MAX_TRANSFER_SIZE;
 
     return SpiNor_Init(&external_flash, &port, &config);

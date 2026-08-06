@@ -63,6 +63,12 @@ static firmware_status_t ValidateRange(
     return FIRMWARE_STATUS_OK;
 }
 
+static int OperationIsBusy(const spi_nor_t *device)
+{
+    return (device != NULL) &&
+           (device->operation_state == SPI_NOR_OPERATION_BUSY);
+}
+
 
 static firmware_status_t ReadStatus(spi_nor_t *device, uint8_t *status_register)
 {
@@ -207,6 +213,8 @@ firmware_status_t SpiNor_Init(
     device->info.erase_size = SPI_NOR_ERASE_SIZE;
     device->address_bytes =
         (device->info.capacity_bytes > SPI_NOR_3BYTE_CAPACITY_LIMIT) ? 4U : 3U;
+    device->operation_state = SPI_NOR_OPERATION_IDLE;
+    device->operation_status = FIRMWARE_STATUS_OK;
 
     /* Three address bytes cover 16 MiB; larger devices need four-byte mode. */
     if (device->address_bytes == 4U)
@@ -261,6 +269,10 @@ firmware_status_t SpiNor_Read(
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    if (OperationIsBusy(device))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
     range_status = ValidateRange(device, address, size);
     if (!FirmwareStatus_IsOk(range_status))
     {
@@ -304,6 +316,10 @@ firmware_status_t SpiNor_Program(
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    if (OperationIsBusy(device))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
     range_status = ValidateRange(device, address, size);
     if (!FirmwareStatus_IsOk(range_status))
     {
@@ -318,30 +334,28 @@ firmware_status_t SpiNor_Program(
         uint32_t chunk_size = (remaining < page_remaining)
                                   ? remaining
                                   : page_remaining;
-        spi_nor_transaction_t transaction;
-        firmware_status_t status = WriteEnable(device);
+        firmware_status_t status = SpiNor_ProgramStart(
+            device, address, source, chunk_size);
 
         if (!FirmwareStatus_IsOk(status))
         {
             return status;
         }
-
-        transaction = Transaction(
-            SPI_NOR_COMMAND_PAGE_PROGRAM,
-            address,
-            device->address_bytes,
-            0U);
-        status = device->port.transmit(
-            device->port.context, &transaction, source, chunk_size);
-        if (!FirmwareStatus_IsOk(status))
+        while (device->operation_state == SPI_NOR_OPERATION_BUSY)
         {
-            return status;
-        }
-
-        status = WaitReady(device, device->program_timeout_ms);
-        if (!FirmwareStatus_IsOk(status))
-        {
-            return status;
+            status = SpiNor_OperationPoll(device);
+            if (!FirmwareStatus_IsOk(status))
+            {
+                return status;
+            }
+            if (device->operation_state == SPI_NOR_OPERATION_BUSY)
+            {
+                if (device->port.poll_hook != NULL)
+                {
+                    device->port.poll_hook(device->port.context);
+                }
+                device->port.delay_ms(device->port.context, 1U);
+            }
         }
 
         address += chunk_size;
@@ -349,6 +363,58 @@ firmware_status_t SpiNor_Program(
         remaining -= chunk_size;
     }
 
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t SpiNor_ProgramStart(
+    spi_nor_t *device,
+    uint32_t address,
+    const void *data,
+    uint32_t size)
+{
+    spi_nor_transaction_t transaction;
+    firmware_status_t status;
+
+    if (data == NULL)
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    status = ValidateRange(device, address, size);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    if (OperationIsBusy(device))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if ((size > device->info.page_size) ||
+        ((address % device->info.page_size) > (device->info.page_size - size)))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+
+    status = WriteEnable(device);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    transaction = Transaction(
+        SPI_NOR_COMMAND_PAGE_PROGRAM,
+        address,
+        device->address_bytes,
+        0U);
+    status = device->port.transmit(
+        device->port.context, &transaction, (const uint8_t *)data, size);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+
+    device->operation_started_ms = device->port.now_ms(device->port.context);
+    device->operation_timeout_ms = device->program_timeout_ms;
+    device->operation_status = FIRMWARE_STATUS_OK;
+    device->operation_state = SPI_NOR_OPERATION_BUSY;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -373,34 +439,136 @@ firmware_status_t SpiNor_Erase(
 
     while (remaining > 0U)
     {
-        spi_nor_transaction_t transaction;
-        firmware_status_t status = WriteEnable(device);
+        firmware_status_t status = SpiNor_EraseStart(
+            device, address, device->info.erase_size);
 
         if (!FirmwareStatus_IsOk(status))
         {
             return status;
         }
-
-        transaction = Transaction(
-            SPI_NOR_COMMAND_SECTOR_ERASE,
-            address,
-            device->address_bytes,
-            0U);
-        status = device->port.command(device->port.context, &transaction);
-        if (!FirmwareStatus_IsOk(status))
+        while (device->operation_state == SPI_NOR_OPERATION_BUSY)
         {
-            return status;
-        }
-
-        status = WaitReady(device, device->erase_timeout_ms);
-        if (!FirmwareStatus_IsOk(status))
-        {
-            return status;
+            status = SpiNor_OperationPoll(device);
+            if (!FirmwareStatus_IsOk(status))
+            {
+                return status;
+            }
+            if (device->operation_state == SPI_NOR_OPERATION_BUSY)
+            {
+                if (device->port.poll_hook != NULL)
+                {
+                    device->port.poll_hook(device->port.context);
+                }
+                device->port.delay_ms(device->port.context, 1U);
+            }
         }
 
         address += device->info.erase_size;
         remaining -= device->info.erase_size;
     }
 
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t SpiNor_EraseStart(
+    spi_nor_t *device,
+    uint32_t address,
+    uint32_t size)
+{
+    spi_nor_transaction_t transaction;
+    firmware_status_t status = ValidateRange(device, address, size);
+
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    if (OperationIsBusy(device))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if (((address % device->info.erase_size) != 0U) ||
+        (size != device->info.erase_size))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+
+    status = WriteEnable(device);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+
+    transaction = Transaction(
+        SPI_NOR_COMMAND_SECTOR_ERASE,
+        address,
+        device->address_bytes,
+        0U);
+    status = device->port.command(device->port.context, &transaction);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+
+    device->operation_started_ms = device->port.now_ms(device->port.context);
+    device->operation_timeout_ms = device->erase_timeout_ms;
+    device->operation_status = FIRMWARE_STATUS_OK;
+    device->operation_state = SPI_NOR_OPERATION_BUSY;
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t SpiNor_OperationPoll(spi_nor_t *device)
+{
+    uint8_t status_register;
+    firmware_status_t status;
+
+    if ((device == NULL) || (device->initialized == 0))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if (device->operation_state != SPI_NOR_OPERATION_BUSY)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+
+    status = ReadStatus(device, &status_register);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        device->operation_state = SPI_NOR_OPERATION_FAILED;
+        device->operation_status = status;
+        return status;
+    }
+    if ((status_register & SPI_NOR_STATUS_BUSY) == 0U)
+    {
+        device->operation_state = SPI_NOR_OPERATION_SUCCEEDED;
+        device->operation_status = FIRMWARE_STATUS_OK;
+        return FIRMWARE_STATUS_OK;
+    }
+    /* Unsigned subtraction keeps timeout handling valid across tick wraparound. */
+    if ((uint32_t)(device->port.now_ms(device->port.context) -
+                   device->operation_started_ms) >= device->operation_timeout_ms)
+    {
+        device->operation_state = SPI_NOR_OPERATION_FAILED;
+        device->operation_status = FIRMWARE_STATUS_TIMEOUT;
+        return FIRMWARE_STATUS_TIMEOUT;
+    }
+
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t SpiNor_GetOperationResult(
+    const spi_nor_t *device,
+    spi_nor_operation_result_t *result)
+{
+    if ((device == NULL) || (result == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if (device->initialized == 0)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+
+    result->state = device->operation_state;
+    result->status = device->operation_status;
     return FIRMWARE_STATUS_OK;
 }

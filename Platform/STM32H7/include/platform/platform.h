@@ -18,9 +18,14 @@ firmware_status_t Platform_Init(void);
 /**
  * @brief Run periodic platform maintenance.
  *
- * @note This entry point is currently a no-op and must not be assumed to block.
+ * The call is bounded and refreshes the independent watchdog at the platform
+ * maintenance interval. A stalled upper layer therefore stops refreshing it.
+ *
+ * @return FIRMWARE_STATUS_OK when maintenance succeeds.
+ * @return FIRMWARE_STATUS_INVALID_STATE before Platform_Init.
+ * @return FIRMWARE_STATUS_IO_ERROR if watchdog refresh fails.
  */
-void Platform_Process(void);
+firmware_status_t Platform_Process(void);
 
 /**
  * @brief Query whether Platform_Init completed successfully.

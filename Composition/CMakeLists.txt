@@ -7,8 +7,8 @@ target_include_directories(firmware_composition PUBLIC
 )
 
 target_include_directories(firmware_composition PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/../Services/internal
     ${CMAKE_CURRENT_SOURCE_DIR}/../Utilities/Logger/internal
+    ${CMAKE_CURRENT_SOURCE_DIR}/../Services/internal
 )
 
 target_link_libraries(firmware_composition
@@ -17,7 +17,9 @@ target_link_libraries(firmware_composition
         firmware_application
         firmware_services
         firmware_adapters
+        firmware_checksum
         firmware_logger
         platform_stm32h7
         board_bsp
+        cubemx_generated_stm32h7boot
 )

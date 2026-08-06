@@ -62,3 +62,69 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 add_test(NAME logger_test COMMAND logger_test)
+
+add_executable(services_test
+    services_test.c
+    ../../Services/src/capability/checked_arithmetic.c
+    ../../Services/src/capability/slot_policy.c
+    ../../Services/src/capability/vector_validation.c
+    ../../Services/src/capability/version_policy.c
+)
+
+target_include_directories(services_test PRIVATE
+    ../../Services/include
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(services_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
+add_test(NAME services_test COMMAND services_test)
+
+add_executable(checksum_boot_control_test
+    checksum_boot_control_test.c
+    ../../Utilities/Checksum/src/crc32_iso_hdlc.c
+    ../../Services/src/capability/boot_control_service.c
+    ../../Services/src/capability/checked_arithmetic.c
+    ../../Services/src/capability/slot_policy.c
+)
+
+target_include_directories(checksum_boot_control_test PRIVATE
+    ../../Utilities/Checksum/include
+    ../../Services/include
+    ../../Services/internal
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(checksum_boot_control_test PRIVATE
+        -Wall -Wextra -Werror
+    )
+endif()
+
+add_test(NAME checksum_boot_control_test COMMAND checksum_boot_control_test)
+
+add_executable(appx_relocation_test
+    appx_relocation_test.c
+    ../../Utilities/Checksum/src/crc32_iso_hdlc.c
+    ../../Services/src/capability/appx_validation.c
+    ../../Services/src/capability/checked_arithmetic.c
+    ../../Services/src/capability/relocation_service.c
+)
+
+target_include_directories(appx_relocation_test PRIVATE
+    ../../Utilities/Checksum/include
+    ../../Services/include
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(appx_relocation_test PRIVATE
+        -Wall -Wextra -Werror
+    )
+endif()
+
+add_test(NAME appx_relocation_test COMMAND appx_relocation_test)
