@@ -110,6 +110,8 @@ typedef struct update_service
     int source_file_open;
     int candidate_ready;
     int runtime_may_be_modified;
+    update_stage_t logged_stage;
+    int stage_logged;
     int initialized;
 } update_service_t;
 

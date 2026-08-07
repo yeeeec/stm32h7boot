@@ -110,7 +110,7 @@ int main(void)
     FakeHash_Init(&fake);
     ASSERT_TRUE(TestValidManifest(&fake, &service, &manifest) == 0);
 
-    /* V1 is a distinct contract: old V2 and relocation fields are rejected. */
+    /* V1 is a distinct contract and rejects unsupported legacy members. */
     memcpy(invalid_manifest, valid_manifest, sizeof(valid_manifest));
     field = strstr(invalid_manifest, "\"format_version\":1");
     ASSERT_TRUE(field != NULL);

@@ -7,7 +7,43 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "logging.h"
 #include "services/capability/update_request_service_api.h"
+
+static const char *UpdateStageName(update_stage_t stage)
+{
+    switch (stage)
+    {
+        case UPDATE_STAGE_SOURCE_APP_OPEN: return "source-app-open";
+        case UPDATE_STAGE_SOURCE_APP_SIZE: return "source-app-size";
+        case UPDATE_STAGE_SOURCE_APP_HASH: return "source-app-hash";
+        case UPDATE_STAGE_SOURCE_APP_VERIFY: return "source-app-verify";
+        case UPDATE_STAGE_SOURCE_GUI_OPEN: return "source-gui-open";
+        case UPDATE_STAGE_SOURCE_GUI_SIZE: return "source-gui-size";
+        case UPDATE_STAGE_SOURCE_GUI_HASH: return "source-gui-hash";
+        case UPDATE_STAGE_SOURCE_GUI_VERIFY: return "source-gui-verify";
+        case UPDATE_STAGE_APP_ERASE: return "app-erase";
+        case UPDATE_STAGE_APP_ERASE_POLL: return "app-erase-poll";
+        case UPDATE_STAGE_APP_PROGRAM_OPEN: return "app-program-open";
+        case UPDATE_STAGE_APP_PROGRAM_READ: return "app-program-read";
+        case UPDATE_STAGE_APP_PROGRAM_START: return "app-program-start";
+        case UPDATE_STAGE_APP_PROGRAM_POLL: return "app-program-poll";
+        case UPDATE_STAGE_APP_PROGRAM_HASH: return "app-program-hash";
+        case UPDATE_STAGE_APP_TARGET_READ: return "app-target-read";
+        case UPDATE_STAGE_APP_TARGET_HASH: return "app-target-hash";
+        case UPDATE_STAGE_GUI_ERASE: return "gui-erase";
+        case UPDATE_STAGE_GUI_ERASE_POLL: return "gui-erase-poll";
+        case UPDATE_STAGE_GUI_PROGRAM_OPEN: return "gui-program-open";
+        case UPDATE_STAGE_GUI_PROGRAM_READ: return "gui-program-read";
+        case UPDATE_STAGE_GUI_PROGRAM_START: return "gui-program-start";
+        case UPDATE_STAGE_GUI_PROGRAM_POLL: return "gui-program-poll";
+        case UPDATE_STAGE_GUI_PROGRAM_HASH: return "gui-program-hash";
+        case UPDATE_STAGE_GUI_TARGET_READ: return "gui-target-read";
+        case UPDATE_STAGE_GUI_TARGET_HASH: return "gui-target-hash";
+        case UPDATE_STAGE_BUILD_RECORD_CANDIDATE: return "build-record-candidate";
+        default: return "other";
+    }
+}
 
 static uint32_t MinU32(uint32_t left, uint32_t right)
 {
@@ -520,9 +556,19 @@ static void ProcessErase(update_service_t *service, int app)
             /* From this point onward any failure may leave Runtime partial. */
             service->runtime_may_be_modified = 1;
         }
+        if ((service->erase_offset == 0U) ||
+            ((service->erase_offset % (64U * 1024U)) == 0U))
+        {
+            LOG_INFO("update", "%s start offset=0x%08lx/%lu",
+                     app != 0 ? "app-erase" : "gui-erase",
+                     (unsigned long)service->erase_offset, (unsigned long)size);
+        }
         status = StartErase(service, base, size, service->erase_offset);
         if (!FirmwareStatus_IsOk(status))
         {
+            LOG_ERROR("update", "%s start failed: status=%d offset=0x%08lx",
+                      app != 0 ? "app-erase" : "gui-erase", (int)status,
+                      (unsigned long)service->erase_offset);
             Fail(service, status, app != 0 ? BOOT_ERROR_APP_ERASE : BOOT_ERROR_GUI_ERASE);
             return;
         }
@@ -533,6 +579,9 @@ static void ProcessErase(update_service_t *service, int app)
     status = PollOperation(service, &operation);
     if (!FirmwareStatus_IsOk(status))
     {
+        LOG_ERROR("update", "%s poll failed: status=%d offset=0x%08lx",
+                  app != 0 ? "app-erase" : "gui-erase", (int)status,
+                  (unsigned long)service->erase_offset);
         Fail(service, status, app != 0 ? BOOT_ERROR_APP_ERASE : BOOT_ERROR_GUI_ERASE);
     }
     else if (operation.state == ASYNC_BLOCK_DEVICE_OPERATION_BUSY)
@@ -542,6 +591,9 @@ static void ProcessErase(update_service_t *service, int app)
     else if ((operation.state != ASYNC_BLOCK_DEVICE_OPERATION_SUCCEEDED) ||
              !FirmwareStatus_IsOk(operation.status))
     {
+        LOG_ERROR("update", "%s operation failed: state=%d status=%d offset=0x%08lx",
+                  app != 0 ? "app-erase" : "gui-erase", (int)operation.state,
+                  (int)operation.status, (unsigned long)service->erase_offset);
         Fail(service, FirmwareStatus_IsOk(operation.status) ? FIRMWARE_STATUS_IO_ERROR
                                                              : operation.status,
              app != 0 ? BOOT_ERROR_APP_ERASE : BOOT_ERROR_GUI_ERASE);
@@ -749,6 +801,17 @@ void UpdateService_Process(struct update_service *service)
         (implementation->state != SERVICE_RUN_STATE_RUNNING))
     {
         return;
+    }
+    if ((implementation->stage != implementation->logged_stage) ||
+        (implementation->stage_logged == 0))
+    {
+        LOG_INFO("update", "stage=%s(%u) erase=0x%08lx program=0x%08lx target=0x%08lx",
+                 UpdateStageName(implementation->stage), (unsigned)implementation->stage,
+                 (unsigned long)implementation->erase_offset,
+                 (unsigned long)implementation->program_offset,
+                 (unsigned long)implementation->target_offset);
+        implementation->logged_stage = implementation->stage;
+        implementation->stage_logged = 1;
     }
     if ((implementation->stage >= UPDATE_STAGE_PREPARE_MANIFEST_OPEN) &&
         (implementation->stage <= UPDATE_STAGE_PREPARE_MANIFEST_PARSE))

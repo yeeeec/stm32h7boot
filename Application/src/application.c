@@ -229,10 +229,12 @@ firmware_status_t Application_Process(void)
                 &application_request_raw_size);
             if (status == FIRMWARE_STATUS_NOT_FOUND)
             {
+                LOG_WARN("app", "trusted request not found: status=%d", (int)status);
                 ContinueCurrentRuntime();
             }
             else if (!FirmwareStatus_IsOk(status))
             {
+                LOG_WARN("app", "trusted request load failed: status=%d", (int)status);
                 ContinueCurrentRuntime();
             }
             else
