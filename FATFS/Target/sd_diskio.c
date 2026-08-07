@@ -30,14 +30,8 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
-/* use the default SD timout as defined in the platform BSP driver*/
-#if defined(SDMMC_DATATIMEOUT)
-#define SD_TIMEOUT SDMMC_DATATIMEOUT
-#elif defined(SD_DATATIMEOUT)
-#define SD_TIMEOUT SD_DATATIMEOUT
-#else
-#define SD_TIMEOUT 30 * 1000
-#endif
+#define SD_TIMEOUT 100U
+#define SD_TRANSFER_STATE_TIMEOUT 100U
 
 #define SD_DEFAULT_BLOCK_SIZE 512
 
@@ -54,6 +48,21 @@
 /* Private variables ---------------------------------------------------------*/
 /* Disk status */
 static volatile DSTATUS Stat = STA_NOINIT;
+
+static int SD_WaitForTransfer(void)
+{
+  uint32_t start = HAL_GetTick();
+
+  while(BSP_SD_GetCardState() != MSD_OK)
+  {
+    if((BSP_SD_IsDetected() != SD_PRESENT) ||
+       ((uint32_t)(HAL_GetTick() - start) >= SD_TRANSFER_STATE_TIMEOUT))
+    {
+      return 0;
+    }
+  }
+  return 1;
+}
 
 /* Private function prototypes -----------------------------------------------*/
 static DSTATUS SD_CheckStatus(BYTE lun);
@@ -152,11 +161,11 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
                        (uint32_t) (sector),
                        count, SD_TIMEOUT) == MSD_OK)
   {
-    /* wait until the read operation is finished */
-    while(BSP_SD_GetCardState()!= MSD_OK)
+    /* The polling read is complete on return; keep the card-state check bounded. */
+    if(SD_WaitForTransfer() != 0)
     {
+      res = RES_OK;
     }
-    res = RES_OK;
   }
 
   return res;
@@ -183,11 +192,11 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
                         (uint32_t)(sector),
                         count, SD_TIMEOUT) == MSD_OK)
   {
-	/* wait until the Write operation is finished */
-    while(BSP_SD_GetCardState() != MSD_OK)
+	/* A card may remain busy while completing its internal programming. */
+    if(SD_WaitForTransfer() != 0)
     {
+      res = RES_OK;
     }
-    res = RES_OK;
   }
 
   return res;

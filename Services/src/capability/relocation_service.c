@@ -14,6 +14,11 @@ static uint32_t ReadU32(const uint8_t *data)
            ((uint32_t)data[2] << 16U) | ((uint32_t)data[3] << 24U);
 }
 
+static uint16_t ReadU16(const uint8_t *data)
+{
+    return (uint16_t)data[0] | ((uint16_t)data[1] << 8U);
+}
+
 static void WriteU32(uint8_t *data, uint32_t value)
 {
     data[0] = (uint8_t)value;
@@ -27,12 +32,22 @@ firmware_status_t RelocationService_Init(
     uint32_t image_size,
     uint32_t target_xip_base)
 {
+    return RelocationService_InitEx(service, image_size, 0U, target_xip_base);
+}
+
+firmware_status_t RelocationService_InitEx(
+    relocation_service_t *service,
+    uint32_t image_size,
+    uint32_t source_xip_base,
+    uint32_t target_xip_base)
+{
     if ((service == NULL) || (image_size == 0U) || (target_xip_base == 0U))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
     service->image_size = image_size;
+    service->source_xip_base = source_xip_base;
     service->target_xip_base = target_xip_base;
     service->next_block_offset = 0U;
     service->last_relocation_offset = 0U;
@@ -42,12 +57,26 @@ firmware_status_t RelocationService_Init(
     return FIRMWARE_STATUS_OK;
 }
 
+firmware_status_t RelocationService_DecodeEntry(
+    const uint8_t bytes[HMI_RELOCATION_ENTRY_SIZE],
+    hmi_relocation_entry_t *entry)
+{
+    if ((bytes == NULL) || (entry == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    entry->target_offset = ReadU32(&bytes[0]);
+    entry->type = ReadU16(&bytes[4]);
+    entry->reserved = ReadU16(&bytes[6]);
+    return FIRMWARE_STATUS_OK;
+}
+
 firmware_status_t RelocationService_ApplyBlock(
     relocation_service_t *service,
     uint32_t block_offset,
     uint8_t *data,
     uint32_t data_size,
-    const appx_relocation_entry_t *entries,
+    const hmi_relocation_entry_t *entries,
     uint32_t entry_count)
 {
     uint32_t block_end;
@@ -75,13 +104,14 @@ firmware_status_t RelocationService_ApplyBlock(
     validation_has_relocation = service->has_relocation;
     for (index = 0U; index < entry_count; ++index)
     {
-        const appx_relocation_entry_t *entry = &entries[index];
+        const hmi_relocation_entry_t *entry = &entries[index];
         uint32_t entry_end;
         uint32_t local_offset;
+        uint32_t raw_word;
         uint32_t canonical_word;
         uint32_t ignored_relocated_word;
 
-        if ((entry->type != APPX_RELOCATION_ABS32_ADD_XIP_BASE) ||
+        if ((entry->type != HMI_RELOCATION_ABS32_ADD_XIP_BASE) ||
             (entry->reserved != 0U) ||
             ((entry->target_offset & 3U) != 0U) ||
             (entry->target_offset == 0U) ||
@@ -98,7 +128,12 @@ firmware_status_t RelocationService_ApplyBlock(
         }
 
         local_offset = entry->target_offset - block_offset;
-        canonical_word = ReadU32(&data[local_offset]);
+        raw_word = ReadU32(&data[local_offset]);
+        if (raw_word < service->source_xip_base)
+        {
+            return FIRMWARE_STATUS_OUT_OF_RANGE;
+        }
+        canonical_word = raw_word - service->source_xip_base;
         if (!CheckedArithmetic_AddU32(
                 canonical_word,
                 service->target_xip_base,
@@ -112,10 +147,11 @@ firmware_status_t RelocationService_ApplyBlock(
 
     for (index = 0U; index < entry_count; ++index)
     {
-        const appx_relocation_entry_t *entry = &entries[index];
+        const hmi_relocation_entry_t *entry = &entries[index];
         uint32_t local_offset = entry->target_offset - block_offset;
+        uint32_t raw_word = ReadU32(&data[local_offset]);
         uint32_t relocated_word =
-            ReadU32(&data[local_offset]) + service->target_xip_base;
+            (raw_word - service->source_xip_base) + service->target_xip_base;
 
         WriteU32(&data[local_offset], relocated_word);
     }

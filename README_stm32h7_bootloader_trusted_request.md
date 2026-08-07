@@ -10,6 +10,7 @@
 └── firmware/
     ├── manifest.json
     ├── hmi.app.bin
+    ├── hmi.app.reloc.bin
     └── hmi.gui.bin
 ```
 

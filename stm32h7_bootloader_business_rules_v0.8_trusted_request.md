@@ -18,11 +18,11 @@
 | 槽位 | Flash 偏移 | CPU 地址 | 大小 | 结束偏移（不含） |
 |---|---:|---:|---:|---:|
 | APP1 | `0x000000` | `0x90000000` | 1 MiB | `0x100000` |
-| APP2 | `0x100000` | `0x90100000` | 1 MiB | `0x200000` |
+| APP2 | `0xA00000` | `0x90A00000` | 1 MiB | `0xB00000` |
 | GUI1 | `0x200000` | `0x90200000` | 8 MiB | `0xA00000` |
-| GUI2 | `0xA00000` | `0x90A00000` | 8 MiB | `0x1200000` |
+| GUI2 | `0xC00000` | `0x90C00000` | 8 MiB | `0x1400000` |
 
-`0x1200000..0x2000000` 的 14 MiB 保留，不是第三槽。QSPI `FlashSize` 应按 32 MiB 核对为 24（地址位数减一）。
+`0x1400000..0x2000000` 的 12 MiB 以及两个 1 MiB 配对隔离间隙保留，不是第三槽。QSPI `FlashSize` 应按 32 MiB 核对为 24（地址位数减一）。
 
 ## 2. 成对交替激活
 
@@ -59,6 +59,7 @@ APP1+GUI1 和 APP2+GUI2 是两组不可拆分发布对：
 └── firmware/
     ├── manifest.json
     ├── hmi.app.bin
+    ├── hmi.app.reloc.bin
     └── hmi.gui.bin
 ```
 
@@ -70,7 +71,7 @@ APP1+GUI1 和 APP2+GUI2 是两组不可拆分发布对：
 4. 请求不携带包身份、目标槽、路径、状态、nonce 或签名；
 5. 请求不提供来源认证、发布授权、Manifest 绑定或防篡改；
 6. SD/FAT 可被修改，Manifest 和组件 SHA 只提供完整性检查；
-7. 发布方必须先完整写入并关闭三个发布文件，最后创建请求；
+7. 发布方必须先完整写入并关闭四个发布文件，最后创建请求；
 8. 请求删除只能发生在新 Active Record 提交成功后；相同发布包的陈旧请求可直接清理；
 9. 请求删除失败不回退新激活对，也不得造成相同包再次擦写。
 
@@ -111,9 +112,9 @@ Application 的主要业务状态为：
 - 格式版本、产品/硬件兼容标识；
 - APP/GUI 共同发布版本和 `package_id`；
 - 最低 Bootloader 版本；
-- APPX 文件大小、SHA-256、源/目标 CRC 和重定位信息；
+- 裸 APP 文件大小、链接地址、SHA-256、源/目标 CRC 和重定位信息；
 - GUI 文件大小、SHA-256 和 CRC；
-- APPX、精简重定位表和 GUI 数据。
+- 裸 APP、外置精简重定位表和 GUI 数据。
 
 Manifest 中存在的签名相关字段不在 Bootloader 安全语义内，Manifest Service 不解析为认证结果。
 
@@ -127,7 +128,7 @@ Update/Manifest Service 负责：
 
 - 严格 Schema、产品/硬件和数值边界；
 - APP/GUI 完整源文件 SHA-256；
-- APPX Header、重定位表和目标地址；
+- Manifest V2 APP 元数据、外置重定位表和目标地址；
 - 目标 APP/GUI CRC。
 
 低版本、同版本但非相同发布包默认拒绝。工厂降级或解锁不属于当前基线。
@@ -140,7 +141,7 @@ Update/Manifest Service 负责：
 Application 挂载并探测请求
 -> Update Prepare：读取 Manifest、计算 SHA-256、严格解析
 -> Application：陈旧/最低 Bootloader/升级版本决策
--> Update Install：校验 APP/GUI 源文件和 APPX 元数据
+-> Update Install：校验裸 APP/GUI 源文件和 Manifest V2 重定位元数据
 -> 选择非激活目标对
 -> 擦写并校验目标 APP
 -> 擦写并校验目标 GUI
@@ -152,7 +153,7 @@ Application 挂载并探测请求
 
 事务不变量：
 
-- 源文件 SHA、APPX Header、重定位表全部通过前不得擦除目标 APP；
+- 源文件 SHA、Manifest V2 元数据、重定位表全部通过前不得擦除目标 APP；
 - APP 目标 CRC 未通过不得开始 GUI 更新；
 - GUI 目标 CRC 未通过不得提交 Active Record；
 - 擦除开始后取消也不得把残缺目标对激活；
@@ -209,7 +210,7 @@ Recovery 只能基于 Active Record A/B 中保留的完整元数据恢复；不�
 
 1. 校验 Active Record 和固定 pair 布局；
 2. 按记录长度重算 APP/GUI CRC；
-3. 从固定映射表选择 `0x90000000` 或 `0x90100000`；
+3. 从固定映射表选择 `0x90000000` 或 `0x90A00000`；
 4. 配置 W25Q256 4-byte 地址和 QSPI Memory-Mapped；
 5. 复核 MSP、Thumb Reset Handler 和地址范围；
 6. 按交接契约处理中断、Cache、MPU、SysTick、时钟和外设所有权；

@@ -1,6 +1,6 @@
 /**
  * @file relocation_service.h
- * @brief Incremental APPX relocation validation and application.
+ * @brief Incremental XIP relocation validation and application.
  */
 #ifndef SERVICES_RELOCATION_SERVICE_H
 #define SERVICES_RELOCATION_SERVICE_H
@@ -8,12 +8,13 @@
 #include <stdint.h>
 
 #include "firmware/status.h"
-#include "services/common/appx_types.h"
+#include "services/common/relocation_types.h"
 
 /** State retained while canonical APP blocks are processed in order. */
 typedef struct
 {
     uint32_t image_size;
+    uint32_t source_xip_base;
     uint32_t target_xip_base;
     uint32_t next_block_offset;
     uint32_t last_relocation_offset;
@@ -36,6 +37,18 @@ firmware_status_t RelocationService_Init(
     relocation_service_t *service,
     uint32_t image_size,
     uint32_t target_xip_base);
+
+/** Initialize relocation processing for a raw image linked at a fixed base. */
+firmware_status_t RelocationService_InitEx(
+    relocation_service_t *service,
+    uint32_t image_size,
+    uint32_t source_xip_base,
+    uint32_t target_xip_base);
+
+/** Decode one little-endian relocation-table entry. */
+firmware_status_t RelocationService_DecodeEntry(
+    const uint8_t bytes[HMI_RELOCATION_ENTRY_SIZE],
+    hmi_relocation_entry_t *entry);
 
 /**
  * @brief Validate and apply all relocation entries belonging to one APP block.
@@ -60,14 +73,14 @@ firmware_status_t RelocationService_ApplyBlock(
     uint32_t block_offset,
     uint8_t *data,
     uint32_t data_size,
-    const appx_relocation_entry_t *entries,
+    const hmi_relocation_entry_t *entries,
     uint32_t entry_count);
 
 /**
  * @brief Confirm that the full image and expected relocation table were consumed.
  *
  * @param[in] service Initialized stream state.
- * @param[in] expected_relocations Relocation count declared by the APPX header.
+ * @param[in] expected_relocations Relocation count declared by the Manifest.
  *
  * @return FIRMWARE_STATUS_OK when processing is complete.
  * @return FIRMWARE_STATUS_INVALID_ARGUMENT if @p service is NULL.

@@ -37,6 +37,7 @@
 #include "application/application.h"
 #include "bsp/bsp.h"
 #include "composition/composition.h"
+#include "logging.h"
 #include "platform/platform.h"
 /* USER CODE END Includes */
 
@@ -158,13 +159,23 @@ int main(void)
         MX_USB_HOST_Process();
 
         /* USER CODE BEGIN 3 */
-        if (!FirmwareStatus_IsOk(Platform_Process()))
         {
-            Error_Handler();
+            firmware_status_t status = Platform_Process();
+
+            if (!FirmwareStatus_IsOk(status))
+            {
+                LOG_ERROR("main", "platform process failed: status=%d", (int)status);
+                Error_Handler();
+            }
         }
-        if (!FirmwareStatus_IsOk(Application_Process()))
         {
-            Error_Handler();
+            firmware_status_t status = Application_Process();
+
+            if (!FirmwareStatus_IsOk(status))
+            {
+                LOG_ERROR("main", "application process failed: status=%d", (int)status);
+                Error_Handler();
+            }
         }
     }
     /* USER CODE END 3 */

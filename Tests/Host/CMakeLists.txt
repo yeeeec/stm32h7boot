@@ -135,28 +135,25 @@ endif()
 
 add_test(NAME checksum_boot_control_test COMMAND checksum_boot_control_test)
 
-add_executable(appx_relocation_test
-    appx_relocation_test.c
-    ../../Utilities/Checksum/src/crc32_iso_hdlc.c
-    ../../Services/src/capability/appx_validation.c
+add_executable(relocation_service_test
+    relocation_service_test.c
     ../../Services/src/capability/checked_arithmetic.c
     ../../Services/src/capability/relocation_service.c
 )
 
-target_include_directories(appx_relocation_test PRIVATE
-    ../../Utilities/Checksum/include
+target_include_directories(relocation_service_test PRIVATE
     ../../Services/include
     ../../Interfaces/include
     ../../Shared/include
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(appx_relocation_test PRIVATE
+    target_compile_options(relocation_service_test PRIVATE
         -Wall -Wextra -Werror
     )
 endif()
 
-add_test(NAME appx_relocation_test COMMAND appx_relocation_test)
+add_test(NAME relocation_service_test COMMAND relocation_service_test)
 
 add_executable(crypto_json_test
     crypto_json_test.c
@@ -187,7 +184,10 @@ target_compile_definitions(crypto_json_test PRIVATE
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(crypto_json_test PRIVATE -Wall -Wextra -Werror)
+    target_compile_options(crypto_json_test PRIVATE
+        -Wall -Wextra -Werror
+        -Wno-unknown-pragmas
+    )
 endif()
 
 add_test(NAME crypto_json_test COMMAND crypto_json_test)
@@ -215,7 +215,6 @@ add_test(NAME manifest_service_test COMMAND manifest_service_test)
 add_executable(update_service_lifecycle_test
     update_service_lifecycle_test.c
     ../../Services/src/use_case/update_service.c
-    ../../Services/src/capability/appx_validation.c
     ../../Services/src/capability/checked_arithmetic.c
     ../../Services/src/capability/relocation_service.c
     ../../Services/src/capability/slot_policy.c
@@ -313,6 +312,43 @@ add_test(
     NAME application_initial_install_test
     COMMAND application_initial_install_test
 )
+
+foreach(media_test IN ITEMS
+    application_media_removal_test
+    application_mount_failure_retry_test
+)
+    add_executable(${media_test}
+        application_orchestration_test.c
+        ../../Application/src/application.c
+        ../../Services/src/capability/version_policy.c
+    )
+
+    target_include_directories(${media_test} PRIVATE
+        ../../Application/include
+        ../../Application/internal
+        ../../Services/include
+        ../../Interfaces/include
+        ../../Shared/include
+    )
+    disable_firmware_logging(${media_test})
+    target_compile_definitions(${media_test} PRIVATE
+        TEST_INITIAL_INSTALL=1
+        TEST_MEDIA_REMOVAL=1
+    )
+    if(media_test STREQUAL "application_mount_failure_retry_test")
+        target_compile_definitions(${media_test} PRIVATE
+            TEST_MEDIA_MOUNT_FAILURE=1
+        )
+    endif()
+
+    if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(${media_test} PRIVATE
+            -Wall -Wextra -Werror
+        )
+    endif()
+
+    add_test(NAME ${media_test} COMMAND ${media_test})
+endforeach()
 
 add_executable(application_recovery_orchestration_test
     application_recovery_orchestration_test.c

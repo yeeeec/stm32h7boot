@@ -23,6 +23,11 @@ typedef struct
     uint32_t target_crc32_app1;
     uint32_t target_crc32_app2;
     uint8_t sha256[MANIFEST_SHA256_SIZE];
+    uint32_t link_address;
+    uint32_t entry_offset;
+    char relocation_file[MANIFEST_FILE_NAME_MAX_SIZE + 1U];
+    uint32_t relocation_count;
+    uint32_t relocation_crc32;
 } manifest_app_component_t;
 
 typedef struct

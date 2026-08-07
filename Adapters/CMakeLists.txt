@@ -22,4 +22,5 @@ target_link_libraries(firmware_adapters
         board_bsp
         driver_at24
         driver_spi_nor
+        firmware_logger
 )

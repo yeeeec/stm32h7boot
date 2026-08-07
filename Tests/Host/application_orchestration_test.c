@@ -44,6 +44,10 @@ static uint32_t remove_count;
 static uint32_t unmount_count;
 static uint32_t reset_count;
 static jmp_buf reset_jump;
+#if defined(TEST_MEDIA_REMOVAL)
+static int media_present = 1;
+static uint32_t mount_count;
+#endif
 
 firmware_status_t RecoveryService_Start(
     struct recovery_service *service, boot_pair_t preferred_pair)
@@ -102,13 +106,23 @@ const boot_active_record_t *RecoveryService_GetCandidate(
 static firmware_status_t MediaPresent(void *context, int *present)
 {
     (void)context;
+#if defined(TEST_MEDIA_REMOVAL)
+    *present = media_present;
+#else
     *present = 1;
+#endif
     return FIRMWARE_STATUS_OK;
 }
 
 static firmware_status_t Mount(void *context)
 {
     (void)context;
+#if defined(TEST_MEDIA_REMOVAL)
+    ++mount_count;
+#if defined(TEST_MEDIA_MOUNT_FAILURE)
+    return FIRMWARE_STATUS_IO_ERROR;
+#endif
+#endif
     return FIRMWARE_STATUS_OK;
 }
 
@@ -123,7 +137,11 @@ static firmware_status_t Exists(void *context, const char *path, int *present)
 {
     (void)context;
     assert(strcmp(path, "/boot_update_request.json") == 0);
+#if defined(TEST_MEDIA_REMOVAL)
+    *present = 0;
+#else
     *present = 1;
+#endif
     return FIRMWARE_STATUS_OK;
 }
 
@@ -337,6 +355,8 @@ int main(void)
     active_record.active_pair = BOOT_PAIR_1;
     active_record.app_size = 1U;
     active_record.gui_size = 1U;
+    /* Keep the package distinct from the active record for the install path. */
+    active_record.package_id_hash[0] = 1U;
     active_record.release_version.major = 1U;
     candidate_record = active_record;
     candidate_record.active_pair = BOOT_PAIR_2;
@@ -363,6 +383,22 @@ int main(void)
 
     assert(Application_Configure(&dependencies) == FIRMWARE_STATUS_OK);
     assert(Application_Init() == FIRMWARE_STATUS_OK);
+#if defined(TEST_MEDIA_REMOVAL)
+    for (step = 0U; step < 16U; ++step)
+    {
+        assert(Application_Process() == FIRMWARE_STATUS_OK);
+    }
+    assert(recovery_count == 1U);
+    assert(mount_count == 1U);
+
+    media_present = 0;
+    assert(Application_Process() == FIRMWARE_STATUS_OK);
+    media_present = 1;
+    assert(Application_Process() == FIRMWARE_STATUS_OK);
+    assert(Application_Process() == FIRMWARE_STATUS_OK);
+    assert(mount_count == 2U);
+    return 0;
+#else
     if (setjmp(reset_jump) == 0)
     {
         for (step = 0U; step < 32U; ++step)
@@ -385,4 +421,5 @@ int main(void)
     assert(unmount_count == 1U);
     assert(reset_count == 1U);
     return 0;
+#endif
 }

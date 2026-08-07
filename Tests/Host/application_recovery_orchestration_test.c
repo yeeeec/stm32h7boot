@@ -227,7 +227,13 @@ firmware_status_t ActiveValidationService_Start(
     const boot_active_record_t *record)
 {
     (void)service;
+#if defined(TEST_ACTIVE_VALIDATION_FAILURE)
+    assert((record->active_pair == BOOT_PAIR_1) ||
+           (record->active_pair == BOOT_PAIR_2));
+#else
     assert(record->active_pair == BOOT_PAIR_2);
+#endif
+    validating_pair = record->active_pair;
     ++validation_count;
     validation_state = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;

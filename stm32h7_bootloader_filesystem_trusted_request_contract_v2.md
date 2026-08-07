@@ -25,13 +25,14 @@
 └── firmware/
     ├── manifest.json
     ├── hmi.app.bin
+    ├── hmi.app.reloc.bin
     └── hmi.gui.bin
 ```
 
 规则：
 
 - 路径大小写固定，不扫描目录、不接受别名；
-- 发布工具先写入并关闭 `firmware/` 下三个文件，最后创建请求文件；
+- 发布工具先写入并关闭 `firmware/` 下四个文件，最后创建请求文件；
 - 请求文件允许为空或包含任意内容，因为 Bootloader 不读取内容；
 - 同一时刻只支持一个发布包；
 - 请求存在但任一发布文件缺失、不可读或格式错误时，不擦除目标槽，不删除请求，回到当前激活对启动路径。
@@ -80,7 +81,7 @@ Install 擦除前必须完成：
 - Application 已接受最低 Bootloader 版本和升级版本；
 - APP/GUI 文件大小与 Manifest 一致；
 - APP 完整文件 SHA-256 与 Manifest 一致；
-- APPX Header、重定位表和目标地址范围有效；
+- Manifest V2 裸 APP 元数据、外置重定位表和目标地址范围有效；
 - GUI 完整文件 SHA-256 与 Manifest 一致。
 
 目标写入后必须分别计算目标 APP/GUI CRC32，并与候选 Active Record 的期望值一致。

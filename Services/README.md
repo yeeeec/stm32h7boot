@@ -28,7 +28,7 @@ Services 负责：
 
 - 严格解析 Manifest 并计算 SHA-256；
 - 固定槽布局、边界、版本比较、向量表等可复用规则；
-- 镜像源 Hash、APPX 重定位、非激活槽擦写和目标 CRC；
+- 镜像源 Hash、裸 APP 外置重定位表、非激活槽擦写和目标 CRC；
 - Active Record A/B 的结构校验、选择和原子提交机制；
 - 激活镜像和恢复候选的校验；
 - XIP 配置、跳转前复核和交接。
@@ -51,7 +51,7 @@ Services 不负责：
 | `vector_validation` | 无状态 Capability | MSP、Thumb Reset Handler 和镜像范围检查 |
 | `boot_control_service` | 增量 Capability | EEPROM Active Record A/B 读取、选择和原子提交机制 |
 | `manifest_service` | Capability | 严格 JSON/Schema 解析和完整 Manifest SHA-256 |
-| `relocation_service` | 增量 Capability | APPX Header 和流式重定位 |
+| `relocation_service` | 增量 Capability | Manifest V2 外置表和流式重定位 |
 | `update_service` | 异步安装能力 | Prepare Manifest；Install 到非激活槽并返回未提交候选 |
 | `active_validation_service` | 异步校验能力 | 指定 Active Record 对应镜像的增量校验 |
 | `recovery_service` | 异步恢复能力 | 扫描、验证、选择并返回未提交恢复候选 |

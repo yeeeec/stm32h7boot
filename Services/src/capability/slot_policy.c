@@ -20,8 +20,10 @@ static const boot_pair_layout_t pair_layouts[] = {
     },
     {
         .pair = BOOT_PAIR_2,
-        .app = {0x00100000UL, QSPI_MAPPED_BASE + 0x00100000UL, APP_CAPACITY},
-        .gui = {0x00A00000UL, QSPI_MAPPED_BASE + 0x00A00000UL, GUI_CAPACITY},
+        /* Keep the APP and GUI relative layout identical to pair-1 while
+         * leaving a complete non-overlapping copy for atomic A/B updates. */
+        .app = {0x00A00000UL, QSPI_MAPPED_BASE + 0x00A00000UL, APP_CAPACITY},
+        .gui = {0x00C00000UL, QSPI_MAPPED_BASE + 0x00C00000UL, GUI_CAPACITY},
     },
 };
 

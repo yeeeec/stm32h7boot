@@ -28,8 +28,8 @@ static manifest_service_t manifest_service;
 static uint8_t manifest_buffer[UPDATE_SERVICE_MANIFEST_MAX_SIZE];
 static uint8_t io_buffer[UPDATE_SERVICE_IO_BUFFER_MIN_SIZE];
 static uint8_t relocation_buffer[
-    UPDATE_SERVICE_MAX_RELOCATIONS * APPX_RELOCATION_ENTRY_SIZE];
-static appx_relocation_entry_t relocation_entries[
+    UPDATE_SERVICE_MAX_RELOCATIONS * HMI_RELOCATION_ENTRY_SIZE];
+static hmi_relocation_entry_t relocation_entries[
     UPDATE_SERVICE_MAX_RELOCATIONS];
 
 static firmware_status_t SourceIsPresent(void *context, int *present)
@@ -337,6 +337,7 @@ static void Initialize(update_service_t *service)
     dependencies.manifest_service = &manifest_service;
     dependencies.manifest_path = "manifest.json";
     dependencies.app_path = "hmi.app.bin";
+    dependencies.relocation_path = "hmi.app.reloc.bin";
     dependencies.gui_path = "hmi.gui.bin";
     dependencies.manifest_buffer = manifest_buffer;
     dependencies.manifest_buffer_size = sizeof(manifest_buffer);

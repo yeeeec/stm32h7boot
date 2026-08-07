@@ -21,7 +21,7 @@
   ],
   "properties": {
     "format_version": {
-      "const": 1
+      "const": 2
     },
     "package_id": {
       "type": "string",
@@ -244,6 +244,8 @@
         "target_crc32",
         "sha256",
         "vector_offset",
+        "entry_offset",
+        "link_address",
         "relocation"
       ],
       "properties": {
@@ -254,7 +256,7 @@
           "const": "hmi.app.bin"
         },
         "format": {
-          "const": "hmi-xip-reloc-v1"
+          "const": "raw-xip-reloc-v2"
         },
         "target": {
           "const": "inactive-app-slot"
@@ -266,7 +268,7 @@
           "oneOf": [
             {
               "type": "integer",
-              "minimum": 64,
+              "minimum": 1,
               "maximum": 4294967295
             },
             {
@@ -311,16 +313,48 @@
         "vector_offset": {
           "const": 0
         },
+        "entry_offset": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "link_address": {
+          "const": 2415919104
+        },
         "relocation": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "embedded",
+            "file",
+            "count",
+            "crc32",
             "format"
           ],
           "properties": {
-            "embedded": {
-              "const": true
+            "file": {
+              "const": "hmi.app.reloc.bin"
+            },
+            "count": {
+              "oneOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 4096
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "crc32": {
+              "$ref": "#/$defs/templateCrc32"
             },
             "format": {
               "const": "hmi-reloc-v1"

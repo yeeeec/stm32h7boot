@@ -56,9 +56,9 @@ static update_service_t update_service;
 static uint8_t manifest_buffer[UPDATE_SERVICE_MANIFEST_MAX_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
 static uint8_t relocation_buffer[
-    UPDATE_SERVICE_MAX_RELOCATIONS * APPX_RELOCATION_ENTRY_SIZE]
+    UPDATE_SERVICE_MAX_RELOCATIONS * HMI_RELOCATION_ENTRY_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
-static appx_relocation_entry_t relocation_entries[UPDATE_SERVICE_MAX_RELOCATIONS]
+static hmi_relocation_entry_t relocation_entries[UPDATE_SERVICE_MAX_RELOCATIONS]
     __attribute__((section(".ram_d2"), aligned(32)));
 static uint8_t service_io_buffer[SERVICE_IO_BUFFER_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
@@ -248,6 +248,7 @@ firmware_status_t Composition_Init(void) {
     update_dependencies.manifest_service = &manifest_service;
     update_dependencies.manifest_path = "/firmware/manifest.json";
     update_dependencies.app_path = "/firmware/hmi.app.bin";
+    update_dependencies.relocation_path = "/firmware/hmi.app.reloc.bin";
     update_dependencies.gui_path = "/firmware/hmi.gui.bin";
     update_dependencies.manifest_buffer = manifest_buffer;
     update_dependencies.manifest_buffer_size = sizeof(manifest_buffer);

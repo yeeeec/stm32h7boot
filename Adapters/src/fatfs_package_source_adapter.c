@@ -10,6 +10,7 @@
 
 #include "bsp_driver_sd.h"
 #include "fatfs.h"
+#include "logging.h"
 
 #define FATFS_PACKAGE_SOURCE_PATH_BUFFER_SIZE (_MAX_LFN + 16U)
 
@@ -110,7 +111,17 @@ static firmware_status_t Mount(void *context)
         return FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE
                                             : status;
     }
-    status = FatFsStatus(f_mount(&SDFatFS, SDPath, 1U));
+    {
+        FRESULT mount_result = f_mount(&SDFatFS, SDPath, 1U);
+
+        status = FatFsStatus(mount_result);
+        if (!FirmwareStatus_IsOk(status))
+        {
+            /* Firmware status is coarse; retain the FatFs code on UART. */
+            LOG_WARN("sd", "FatFs mount failed: fresult=%d status=%d",
+                     (int)mount_result, (int)status);
+        }
+    }
     if (FirmwareStatus_IsOk(status))
     {
         adapter->mounted = 1;

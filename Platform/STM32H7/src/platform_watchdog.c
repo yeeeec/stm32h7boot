@@ -8,10 +8,14 @@
 
 firmware_status_t Platform_WatchdogRefresh(void)
 {
+#if defined(DEBUG)
+    return FIRMWARE_STATUS_OK;
+#else
     if (HAL_IWDG_Refresh(&hiwdg1) != HAL_OK)
     {
         return FIRMWARE_STATUS_IO_ERROR;
     }
 
     return FIRMWARE_STATUS_OK;
+#endif
 }

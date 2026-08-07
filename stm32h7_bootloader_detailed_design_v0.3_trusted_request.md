@@ -5,7 +5,7 @@
 ## 1. 设计结论
 
 - APP1+GUI1 与 APP2+GUI2 成对交替；
-- APP 从 QSPI XIP 运行，APPX 在安装时按目标槽基址重定位；
+- APP 从 QSPI XIP 运行；升级包保留裸 APP，Manifest V2 描述外置重定位表；
 - EEPROM 只保存 Active Record A/B；
 - 请求文件只按存在性触发，不解析内容、不做认证；
 - Manifest Service 只做严格 Schema 解析、字段校验和 SHA-256；
@@ -22,12 +22,13 @@
 | 区域 | Flash 偏移 | CPU 地址 | 大小 | 用途 |
 |---|---:|---:|---:|---|
 | APP1 | `0x000000` | `0x90000000` | 1 MiB | pair 1 XIP APP |
-| APP2 | `0x100000` | `0x90100000` | 1 MiB | pair 2 XIP APP |
+| APP2 | `0xA00000` | `0x90A00000` | 1 MiB | pair 2 XIP APP |
 | GUI1 | `0x200000` | `0x90200000` | 8 MiB | pair 1 GUI |
-| GUI2 | `0xA00000` | `0x90A00000` | 8 MiB | pair 2 GUI |
-| RESERVED | `0x1200000` | `0x91200000` | 14 MiB | 禁止隐式使用 |
+| GUI2 | `0xC00000` | `0x90C00000` | 8 MiB | pair 2 GUI |
+| RESERVED | `0x1400000` | `0x91400000` | 12 MiB | 禁止隐式使用 |
 
 全部按 4 KiB 擦除边界对齐。物理地址只来自 `slot_policy` 固定表。
+`0x100000..0x200000` 与 `0xB00000..0xC00000` 是配对隔离间隙，不得分配。
 
 W25Q256 需要 25 个地址位，HAL `FlashSize` 应为 24。初始 Memory-Mapped 读取使用 Fast Read `0x0B`、4-byte 地址、8 dummy cycles、单线 SDR；切换 Quad 模式需另行验证。
 
@@ -49,12 +50,13 @@ EEPROM 不保存 Update Request、请求状态、升级阶段或逐块进度。
 └── firmware/
     ├── manifest.json
     ├── hmi.app.bin
+    ├── hmi.app.reloc.bin
     └── hmi.gui.bin
 ```
 
 路径由 Composition 配置冻结。请求文件内容完全不读取；存在即触发。Application 调用 `is_media_present/mount/exists/remove/unmount`，Update Service 只调用 `open/get_size/read_at/close`。
 
-发布顺序是三个发布文件全部写入并关闭后，最后创建请求。清理顺序是 Active Record 提交成功后再删除请求；删除失败不回退。
+发布顺序是四个发布文件全部写入并关闭后，最后创建请求。清理顺序是 Active Record 提交成功后再删除请求；删除失败不回退。
 
 ## 4. Manifest
 
@@ -75,45 +77,28 @@ Manifest 最大 16 KiB，使用静态缓冲区与 192 个 JSON token。解析器
 
 | 字段 | 覆盖范围 |
 |---|---|
-| APP `sha256` | 完整 APPX 文件：Header + Canonical Image + Relocation Table |
-| APP `source_crc32` | Canonical APP Image |
+| APP `sha256` | 完整裸 APP 文件 |
+| APP `source_crc32` | 完整裸 APP 文件 |
 | APP `target_crc32.app1/app2` | 重定位后写入对应目标槽的数据 |
+| APP `relocation.crc32` | 完整外置重定位表 |
 | GUI `sha256` | 完整 GUI 文件 |
 | GUI `crc32` | 完整 GUI 文件 |
 
-## 5. APPX V1
+## 5. 裸 APP + 外置重定位表 V2
 
 ```text
-+----------------------------+
-| 64-byte APPX header        |
-+----------------------------+
-| canonical APP image        |
-+----------------------------+
-| relocation entries         |
-+----------------------------+
+hmi.app.bin          = 原始链接输出，不添加包头
+hmi.app.reloc.bin    = 严格递增的 8-byte 重定位条目
+manifest.json        = 大小、入口、链接地址、Hash/CRC、表数量和表 CRC
 ```
 
-### 5.1 Header
+### 5.1 Manifest V2 APP 字段
 
-| 偏移 | 大小 | 字段 | 规则 |
-|---:|---:|---|---|
-| `0x00` | 4 | magic | `HAPX` |
-| `0x04` | 2 | format_version | `1` |
-| `0x06` | 2 | header_size | `64` |
-| `0x08` | 4 | canonical_base | `0` |
-| `0x0C` | 4 | image_size | `1..1048576` |
-| `0x10` | 4 | vector_offset | `0` |
-| `0x14` | 4 | entry_offset | Reset Handler 相对偏移 |
-| `0x18` | 4 | relocation_offset | 4-byte 对齐 |
-| `0x1C` | 4 | relocation_count | 不超过静态容量 |
-| `0x20` | 2 | relocation_entry_size | `8` |
-| `0x22` | 2 | flags | `0` |
-| `0x24` | 4 | image_crc32 | Canonical image CRC |
-| `0x28` | 4 | relocation_crc32 | 重定位表 CRC |
-| `0x2C` | 4 | header_crc32 | 本字段按 0 计算 |
-| `0x30` | 16 | reserved | 全 0 |
-
-重定位表必须紧随 Image，且 `relocation_offset + count*8 == file_size`。
+`format` 固定为 `raw-xip-reloc-v2`，`file_size_bytes` 必须等于
+`image_size_bytes`，`link_address` 固定为 `0x90000000`。`entry_offset`
+必须与裸 APP Reset Handler 去除 Thumb 位后的相对偏移一致。重定位对象固定
+文件名 `hmi.app.reloc.bin`，并给出 `count`、`crc32` 和
+`hmi-reloc-v1` 格式。
 
 ### 5.2 Relocation
 
@@ -123,10 +108,15 @@ typedef struct
     uint32_t target_offset;
     uint16_t type;
     uint16_t reserved;
-} appx_relocation_entry_t;
+} relocation_entry_t;
 ```
 
-V1 只允许 `ABS32_ADD_XIP_BASE`：`final_word = canonical_word + target_xip_base`。条目必须严格递增、4-byte 对齐、不重复、不越界、reserved 为 0，所有加法执行溢出检查。MSP、MMIO 和 SRAM 地址不得重定位。Bootloader 不解析 ELF；Host 工具负责生成白名单条目和两个目标 CRC。
+V1 只允许 `ABS32_ADD_XIP_BASE`：
+`final_word = raw_word - link_address + target_xip_base`。条目必须严格递增、
+4-byte 对齐、不重复、不越界、reserved 为 0；第一项必须是 Reset Handler
+所在的偏移 4。MSP、MMIO 和 SRAM 地址不得重定位。Bootloader 不解析 ELF；
+Host 工具只从带 `--emit-relocs` 的 ELF 导出 `R_ARM_ABS32` XIP 白名单并生成
+两个目标 CRC。
 
 ## 6. Active Record V1
 
@@ -306,7 +296,7 @@ Service 使用 `firmware_status_t + service_run_state_t + service_result_t`。`b
 
 ## 15. 验收测试
 
-Host：Manifest 严格解析但不调用签名验证；Update Prepare/Install 生命周期；Application 提交/清理失败容忍/复位编排；Recovery 候选提交/再校验/启动；Active Record A/B 掉电、序列回绕与 per-pair 查询；APPX/重定位边界；相同发布包不 Install。
+Host：Manifest 严格解析但不调用签名验证；Update Prepare/Install 生命周期；Application 提交/清理失败容忍/复位编排；Recovery 候选提交/再校验/启动；Active Record A/B 掉电、序列回绕与 per-pair 查询；原始 APP/重定位表边界；相同发布包不 Install。
 
 Target：SD 缺失/移除/写保护；W25Q256 几何与 XIP；APP1/APP2 启动；随机掉电覆盖擦写、EEPROM 提交、提交后删除前和删除后复位前；请求删除失败后相同包不重写；IWDG 和 Cache/MPU 一致性。
 

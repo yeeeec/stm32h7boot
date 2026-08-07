@@ -37,8 +37,6 @@ typedef enum
 #define LOGGING_PRINTF_FORMAT(format_index, argument_index)
 #endif
 
-#if FIRMWARE_LOG_ENABLE
-
 /**
  * Format one log line and send it to the configured sink.
  * Messages written before configuration are discarded.
@@ -48,6 +46,8 @@ void Logging_Write(
     const char *tag,
     const char *format,
     ...) LOGGING_PRINTF_FORMAT(3, 4);
+
+#if FIRMWARE_LOG_ENABLE
 
 #if FIRMWARE_LOG_LEVEL >= FIRMWARE_LOG_LEVEL_ERROR
 #define LOG_ERROR(tag, format, ...) \
@@ -83,11 +83,25 @@ void Logging_Write(
 
 #else
 
-#define LOG_ERROR(...) ((void)0)
-#define LOG_WARN(...)  ((void)0)
-#define LOG_INFO(...)  ((void)0)
-#define LOG_DEBUG(...) ((void)0)
-#define LOG_PANIC(...) ((void)0)
+#define LOG_DISABLED(level, tag, format, ...)                         \
+    do                                                               \
+    {                                                                \
+        if (0)                                                       \
+        {                                                            \
+            Logging_Write(level, tag, format, ##__VA_ARGS__);       \
+        }                                                            \
+    } while (0)
+
+#define LOG_ERROR(tag, format, ...) \
+    LOG_DISABLED(LOGGING_LEVEL_ERROR, tag, format, ##__VA_ARGS__)
+#define LOG_WARN(tag, format, ...) \
+    LOG_DISABLED(LOGGING_LEVEL_WARN, tag, format, ##__VA_ARGS__)
+#define LOG_INFO(tag, format, ...) \
+    LOG_DISABLED(LOGGING_LEVEL_INFO, tag, format, ##__VA_ARGS__)
+#define LOG_DEBUG(tag, format, ...) \
+    LOG_DISABLED(LOGGING_LEVEL_DEBUG, tag, format, ##__VA_ARGS__)
+#define LOG_PANIC(tag, format, ...) \
+    LOG_DISABLED(LOGGING_LEVEL_ERROR, tag, format, ##__VA_ARGS__)
 
 #endif
 

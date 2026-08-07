@@ -8,8 +8,11 @@
 #include <string.h>
 
 
+#define MANIFEST_FORMAT_VERSION 2U
 #define APP_MAXIMUM_IMAGE_SIZE 1048576UL
 #define GUI_MAXIMUM_IMAGE_SIZE 8388608UL
+#define APP_LINK_ADDRESS 0x90000000UL
+#define APP_MAXIMUM_RELOCATIONS 4096U
 
 static firmware_status_t FindMember(
     const json_document_t *document,
@@ -448,23 +451,25 @@ static firmware_status_t ParseAppComponent(
     static const char *const members[] = {
         "id", "file", "format", "target", "maximum_image_size_bytes",
         "file_size_bytes", "image_size_bytes", "source_crc32", "target_crc32",
-        "sha256", "vector_offset", "relocation"};
+        "sha256", "vector_offset", "entry_offset", "link_address", "relocation"};
     static const char *const target_members[] = {"app1", "app2"};
-    static const char *const relocation_members[] = {"embedded", "format"};
+    static const char *const relocation_members[] = {"file", "count", "crc32", "format"};
     uint32_t target;
     uint32_t relocation;
     uint32_t sha;
+    uint32_t relocation_file;
 
-    if (!FirmwareStatus_IsOk(ValidateObjectMembers(document, object, members, 12U)) ||
+    if (!FirmwareStatus_IsOk(ValidateObjectMembers(document, object, members, 14U)) ||
         !FirmwareStatus_IsOk(RequireConstantString(document, object, "id", "app")) ||
         !FirmwareStatus_IsOk(RequireConstantString(document, object, "file", "hmi.app.bin")) ||
-        !FirmwareStatus_IsOk(RequireConstantString(document, object, "format", "hmi-xip-reloc-v1")) ||
+        !FirmwareStatus_IsOk(RequireConstantString(document, object, "format", "raw-xip-reloc-v2")) ||
         !FirmwareStatus_IsOk(RequireConstantString(document, object, "target", "inactive-app-slot")) ||
         !FirmwareStatus_IsOk(RequireConstantU32(document, object, "maximum_image_size_bytes", APP_MAXIMUM_IMAGE_SIZE)) ||
         !FirmwareStatus_IsOk(RequireU32(document, object, "file_size_bytes", &app->file_size_bytes)) ||
-        (app->file_size_bytes < 64U) ||
+        (app->file_size_bytes == 0U) ||
         !FirmwareStatus_IsOk(RequireU32(document, object, "image_size_bytes", &app->image_size_bytes)) ||
         (app->image_size_bytes == 0U) || (app->image_size_bytes > APP_MAXIMUM_IMAGE_SIZE) ||
+        (app->file_size_bytes != app->image_size_bytes) ||
         !FirmwareStatus_IsOk(ParseCrc32(document, object, "source_crc32", &app->source_crc32)) ||
         !FirmwareStatus_IsOk(FindMember(document, object, "target_crc32", &target)) ||
         !FirmwareStatus_IsOk(ValidateObjectMembers(document, target, target_members, 2U)) ||
@@ -473,9 +478,21 @@ static firmware_status_t ParseAppComponent(
         !FirmwareStatus_IsOk(RequireString(document, object, "sha256", &sha)) ||
         !FirmwareStatus_IsOk(ParseHex(document, sha, app->sha256, MANIFEST_SHA256_SIZE, 1)) ||
         !FirmwareStatus_IsOk(RequireConstantU32(document, object, "vector_offset", 0U)) ||
+        !FirmwareStatus_IsOk(RequireU32(document, object, "entry_offset", &app->entry_offset)) ||
+        (app->entry_offset >= app->image_size_bytes) || ((app->entry_offset & 1U) != 0U) ||
+        !FirmwareStatus_IsOk(RequireU32(document, object, "link_address", &app->link_address)) ||
+        (app->link_address != APP_LINK_ADDRESS) ||
         !FirmwareStatus_IsOk(FindMember(document, object, "relocation", &relocation)) ||
-        !FirmwareStatus_IsOk(ValidateObjectMembers(document, relocation, relocation_members, 2U)) ||
-        !FirmwareStatus_IsOk(RequireConstantBoolean(document, relocation, "embedded", 1)) ||
+        !FirmwareStatus_IsOk(ValidateObjectMembers(document, relocation, relocation_members, 4U)) ||
+        !FirmwareStatus_IsOk(RequireString(document, relocation, "file", &relocation_file)) ||
+        !FirmwareStatus_IsOk(RequireConstantString(document, relocation, "file", "hmi.app.reloc.bin")) ||
+        !TokenMatchesPattern(document, relocation_file, 1U, MANIFEST_FILE_NAME_MAX_SIZE, "._+-") ||
+        !FirmwareStatus_IsOk(JsonDocument_CopyString(
+            document, relocation_file, app->relocation_file, sizeof(app->relocation_file))) ||
+        !FirmwareStatus_IsOk(RequireU32(document, relocation, "count", &app->relocation_count)) ||
+        (app->relocation_count == 0U) ||
+        (app->relocation_count > APP_MAXIMUM_RELOCATIONS) ||
+        !FirmwareStatus_IsOk(ParseCrc32(document, relocation, "crc32", &app->relocation_crc32)) ||
         !FirmwareStatus_IsOk(RequireConstantString(document, relocation, "format", "hmi-reloc-v1")))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
@@ -546,7 +563,7 @@ static firmware_status_t ValidateRoot(
     uint32_t version;
 
     if (!FirmwareStatus_IsOk(ValidateObjectMembers(document, 0U, members, 12U)) ||
-        !FirmwareStatus_IsOk(RequireConstantU32(document, 0U, "format_version", 1U)) ||
+        !FirmwareStatus_IsOk(RequireConstantU32(document, 0U, "format_version", MANIFEST_FORMAT_VERSION)) ||
         !FirmwareStatus_IsOk(RequireConstantString(document, 0U, "product_id", "HMI")) ||
         !FirmwareStatus_IsOk(RequireConstantString(document, 0U, "hardware_id", "STM32H743-W25Q256")) ||
         !FirmwareStatus_IsOk(RequireString(document, 0U, "package_id", &package_id)) ||
