@@ -82,8 +82,7 @@ static void LoadCandidate(recovery_service_t *service, boot_pair_t pair)
 
     if (FirmwareStatus_IsOk(status))
     {
-        if ((service->candidates[index].active_pair != pair) ||
-            !FirmwareStatus_IsOk(SlotPolicy_GetPairLayout(pair, &(boot_pair_layout_t) {0})))
+        if (!FirmwareStatus_IsOk(SlotPolicy_GetPairLayout(pair, &(boot_pair_layout_t) {0})))
         {
             service->candidate_present[index] = 0U;
             LOG_WARN("recovery", "candidate rejected: pair=%s", BootPairName(pair));
@@ -193,8 +192,8 @@ static void SelectCandidate(recovery_service_t *service)
     {
         uint32_t difference = service->candidates[0].sequence - service->candidates[1].sequence;
 
-        /* Pair identity is part of the record, so equal sequence numbers
-         * cannot identify one canonical candidate. */
+        /* V2 has no pair identity in the record. An equal serial therefore
+         * remains ambiguous in this legacy recovery path. */
         if ((difference != 0U) && (difference != 0x80000000UL))
         {
             selected =
@@ -211,7 +210,7 @@ static void SelectCandidate(recovery_service_t *service)
     }
     service->selected_record = service->candidates[selected];
     LOG_INFO("recovery", "selected candidate: pair=%s sequence=%lu",
-             BootPairName(service->selected_record.active_pair),
+             BootPairName((selected == 0) ? BOOT_PAIR_1 : BOOT_PAIR_2),
              (unsigned long) service->selected_record.sequence);
     service->state               = SERVICE_RUN_STATE_SUCCEEDED;
     service->result.status       = FIRMWARE_STATUS_OK;

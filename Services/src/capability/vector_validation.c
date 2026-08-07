@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include "services/capability/checked_arithmetic.h"
-#include "services/capability/slot_policy.h"
 
 static int StackPointerInRegion(uint32_t address, const memory_region_t *region)
 {
@@ -37,7 +36,7 @@ firmware_status_t VectorValidation_Validate(const vector_table_values_t *vectors
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if (!FirmwareStatus_IsOk(SlotPolicy_ValidateImageSize(app_region, app_image_size)))
+    if ((app_image_size == 0U) || (app_image_size > app_region->capacity_bytes))
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }

@@ -8,11 +8,11 @@
 #include <string.h>
 
 #include "logging.h"
-#include "services/capability/slot_policy.h"
+#include "services/common/runtime_layout.h"
 
 #define ACTIVE_RECORD_A_ADDRESS  0x0000U
 #define ACTIVE_RECORD_B_ADDRESS  0x0100U
-#define ACTIVE_RECORD_SIZE       256U
+#define ACTIVE_RECORD_SIZE       BOOT_ACTIVE_RECORD_SIZE
 #define ACTIVE_RECORD_CRC_OFFSET 0x00F8U
 #define ACTIVE_RECORD_MARKER     0x00FCU
 
@@ -20,24 +20,10 @@
 #define COMMIT_MARKER        0x434F4D54UL
 #define INVALID_MARKER       0xFFFFFFFFUL
 #define RECORD_FORMAT_V1     1U
+#define RECORD_FORMAT_V2     BOOT_ACTIVE_RECORD_FORMAT_V2
 #define ACTIVE_VALID_STATE   1U
 #define RECORD_SLOT_NONE     (-1)
 #define RECORD_SLOT_CONFLICT (-2)
-
-static const char *BootPairName(boot_pair_t pair)
-{
-    switch (pair)
-    {
-        case BOOT_PAIR_NONE:
-            return "none";
-        case BOOT_PAIR_1:
-            return "pair-1";
-        case BOOT_PAIR_2:
-            return "pair-2";
-        default:
-            return "unknown";
-    }
-}
 
 static const char *BootControlStageName(boot_control_stage_t stage)
 {
@@ -138,24 +124,40 @@ static int MarkerFitsPage(uint32_t record_address, uint32_t marker_offset, uint3
     return page_offset <= (page_size - sizeof(uint32_t));
 }
 
+static int IsRecordUnavailable(firmware_status_t status)
+{
+    return (status == FIRMWARE_STATUS_INVALID_STATE) ||
+           (status == FIRMWARE_STATUS_OUT_OF_RANGE) ||
+           (status == FIRMWARE_STATUS_NOT_SUPPORTED);
+}
+
 static firmware_status_t ValidateActiveBuffer(boot_control_service_t *service,
                                               const uint8_t *buffer, boot_active_record_t *record)
 {
-    boot_pair_layout_t layout;
     uint32_t expected_crc;
     uint32_t actual_crc;
     uint32_t index;
     firmware_status_t status;
+    const boot_runtime_layout_t *layout = BootRuntimeLayout_Get();
 
-    if ((ReadU32(&buffer[0x00U]) != ACTIVE_RECORD_MAGIC) ||
-        (ReadU16(&buffer[0x04U]) != RECORD_FORMAT_V1) ||
+    if (ReadU32(&buffer[0x00U]) != ACTIVE_RECORD_MAGIC)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if (ReadU16(&buffer[0x04U]) == RECORD_FORMAT_V1)
+    {
+        /* V1 has pair identity and CRC fields with different semantics. It
+         * is deliberately unsupported and must never be reinterpreted. */
+        return FIRMWARE_STATUS_NOT_SUPPORTED;
+    }
+    if ((ReadU16(&buffer[0x04U]) != RECORD_FORMAT_V2) ||
         (ReadU16(&buffer[0x06U]) != ACTIVE_RECORD_SIZE) || (buffer[0x0CU] != ACTIVE_VALID_STATE) ||
         (ReadU16(&buffer[0x0EU]) != 0U) || (ReadU16(&buffer[0x16U]) != 0U) ||
         (ReadU32(&buffer[ACTIVE_RECORD_MARKER]) != COMMIT_MARKER))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    for (index = 0x5CU; index < ACTIVE_RECORD_CRC_OFFSET; ++index)
+    for (index = 0x94U; index < ACTIVE_RECORD_CRC_OFFSET; ++index)
     {
         if (buffer[index] != 0xFFU)
         {
@@ -174,28 +176,25 @@ static firmware_status_t ValidateActiveBuffer(boot_control_service_t *service,
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    record->sequence    = ReadU32(&buffer[0x08U]);
-    record->active_pair = (boot_pair_t) buffer[0x0DU];
-    status              = SlotPolicy_GetPairLayout(record->active_pair, &layout);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
+    record->format_version        = ReadU16(&buffer[0x04U]);
+    record->sequence              = ReadU32(&buffer[0x08U]);
+    record->state                 = buffer[0x0CU];
+    record->flags                 = buffer[0x0DU];
     record->release_version.major = ReadU16(&buffer[0x10U]);
     record->release_version.minor = ReadU16(&buffer[0x12U]);
     record->release_version.patch = ReadU16(&buffer[0x14U]);
     record->build_number          = ReadU32(&buffer[0x18U]);
     record->app_size              = ReadU32(&buffer[0x1CU]);
-    record->app_crc32             = ReadU32(&buffer[0x20U]);
-    record->gui_size              = ReadU32(&buffer[0x24U]);
-    record->gui_crc32             = ReadU32(&buffer[0x28U]);
-    if (!FirmwareStatus_IsOk(SlotPolicy_ValidateImageSize(&layout.app, record->app_size)) ||
-        !FirmwareStatus_IsOk(SlotPolicy_ValidateImageSize(&layout.gui, record->gui_size)))
+    record->gui_size              = ReadU32(&buffer[0x20U]);
+    if ((record->app_size == 0U) || (record->app_size > layout->app_max_size) ||
+        (record->gui_size == 0U) || (record->gui_size > layout->gui_max_size))
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
-    memcpy(record->package_id_hash, &buffer[0x2CU], BOOT_CONTROL_PACKAGE_ID_HASH_SIZE);
-    memcpy(record->manifest_sha256, &buffer[0x3CU], BOOT_CONTROL_MANIFEST_HASH_SIZE);
+    memcpy(record->package_id_hash, &buffer[0x24U], BOOT_CONTROL_PACKAGE_ID_HASH_SIZE);
+    memcpy(record->manifest_sha256, &buffer[0x34U], BOOT_CONTROL_MANIFEST_HASH_SIZE);
+    memcpy(record->app_sha256, &buffer[0x54U], BOOT_CONTROL_IMAGE_HASH_SIZE);
+    memcpy(record->gui_sha256, &buffer[0x74U], BOOT_CONTROL_IMAGE_HASH_SIZE);
     return FIRMWARE_STATUS_OK;
 }
 
@@ -233,15 +232,11 @@ static firmware_status_t ReadAndSelect(boot_control_service_t *service, int *sel
     sequence_a = FirmwareStatus_IsOk(status_a) ? active_a.sequence : 0U;
     sequence_b = FirmwareStatus_IsOk(status_b) ? active_b.sequence : 0U;
 
-    if ((!FirmwareStatus_IsOk(status_a) && (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
-         (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)) ||
-        (!FirmwareStatus_IsOk(status_b) && (status_b != FIRMWARE_STATUS_INVALID_STATE) &&
-         (status_b != FIRMWARE_STATUS_OUT_OF_RANGE)))
+    if ((!FirmwareStatus_IsOk(status_a) && !IsRecordUnavailable(status_a)) ||
+        (!FirmwareStatus_IsOk(status_b) && !IsRecordUnavailable(status_b)))
     {
-        return !FirmwareStatus_IsOk(status_a) && (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
-                       (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)
-                   ? status_a
-                   : status_b;
+        return !FirmwareStatus_IsOk(status_a) && !IsRecordUnavailable(status_a) ? status_a
+                                                                                   : status_b;
     }
     valid_a = FirmwareStatus_IsOk(status_a);
     valid_b = FirmwareStatus_IsOk(status_b);
@@ -250,22 +245,25 @@ static firmware_status_t ReadAndSelect(boot_control_service_t *service, int *sel
     {
         *selected_slot = RECORD_SLOT_NONE;
         LOG_WARN("bootctl", "no valid active record found");
-        return FIRMWARE_STATUS_INVALID_STATE;
+        return (status_a == FIRMWARE_STATUS_NOT_SUPPORTED) ||
+                       (status_b == FIRMWARE_STATUS_NOT_SUPPORTED)
+                   ? FIRMWARE_STATUS_NOT_SUPPORTED
+                   : FIRMWARE_STATUS_INVALID_STATE;
     }
     if ((valid_a != 0) && (valid_b == 0))
     {
         *selected_slot = 0;
         *sequence      = sequence_a;
-        LOG_INFO("bootctl", "selected active record: slot=A sequence=%lu pair=%s",
-                 (unsigned long) sequence_a, BootPairName(active_a.active_pair));
+        LOG_INFO("bootctl", "selected active record: slot=A sequence=%lu",
+                 (unsigned long) sequence_a);
         return FIRMWARE_STATUS_OK;
     }
     if ((valid_a == 0) && (valid_b != 0))
     {
         *selected_slot = 1;
         *sequence      = sequence_b;
-        LOG_INFO("bootctl", "selected active record: slot=B sequence=%lu pair=%s",
-                 (unsigned long) sequence_b, BootPairName(active_b.active_pair));
+        LOG_INFO("bootctl", "selected active record: slot=B sequence=%lu",
+                 (unsigned long) sequence_b);
         return FIRMWARE_STATUS_OK;
     }
     if (sequence_a == sequence_b)
@@ -278,8 +276,8 @@ static firmware_status_t ReadAndSelect(boot_control_service_t *service, int *sel
         }
         *selected_slot = 0;
         *sequence      = sequence_a;
-        LOG_INFO("bootctl", "selected duplicate active record: sequence=%lu pair=%s",
-                 (unsigned long) sequence_a, BootPairName(active_a.active_pair));
+        LOG_INFO("bootctl", "selected duplicate active record: sequence=%lu",
+                 (unsigned long) sequence_a);
         return FIRMWARE_STATUS_OK;
     }
     /* RFC 1982 serial arithmetic cannot order values exactly half a cycle apart. */
@@ -299,33 +297,40 @@ static firmware_status_t ReadAndSelect(boot_control_service_t *service, int *sel
         *selected_slot = 1;
         *sequence      = sequence_b;
     }
-    LOG_INFO("bootctl", "selected active record: slot=%s sequence=%lu pair=%s",
-             RecordSlotName(*selected_slot), (unsigned long) *sequence,
-             BootPairName((*selected_slot == 0) ? active_a.active_pair : active_b.active_pair));
+    LOG_INFO("bootctl", "selected active record: slot=%s sequence=%lu",
+             RecordSlotName(*selected_slot), (unsigned long) *sequence);
     return FIRMWARE_STATUS_OK;
 }
 
 static firmware_status_t EncodeActive(boot_control_service_t *service,
                                       const boot_active_record_t *record, uint32_t sequence)
 {
-    boot_pair_layout_t layout;
     uint32_t crc;
-    firmware_status_t status = SlotPolicy_GetPairLayout(record->active_pair, &layout);
+    const boot_runtime_layout_t *layout = BootRuntimeLayout_Get();
+    firmware_status_t status;
 
-    if (!FirmwareStatus_IsOk(status) ||
-        !FirmwareStatus_IsOk(SlotPolicy_ValidateImageSize(&layout.app, record->app_size)) ||
-        !FirmwareStatus_IsOk(SlotPolicy_ValidateImageSize(&layout.gui, record->gui_size)))
+    if ((record->format_version != 0U) &&
+        (record->format_version != RECORD_FORMAT_V2))
+    {
+        return FIRMWARE_STATUS_NOT_SUPPORTED;
+    }
+    if ((record->state != 0U) && (record->state != ACTIVE_VALID_STATE))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if ((record->app_size == 0U) || (record->app_size > layout->app_max_size) ||
+        (record->gui_size == 0U) || (record->gui_size > layout->gui_max_size))
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
 
     memset(service->write_buffer, 0xFF, ACTIVE_RECORD_SIZE);
     WriteU32(&service->write_buffer[0x00U], ACTIVE_RECORD_MAGIC);
-    WriteU16(&service->write_buffer[0x04U], RECORD_FORMAT_V1);
+    WriteU16(&service->write_buffer[0x04U], RECORD_FORMAT_V2);
     WriteU16(&service->write_buffer[0x06U], ACTIVE_RECORD_SIZE);
     WriteU32(&service->write_buffer[0x08U], sequence);
     service->write_buffer[0x0CU] = ACTIVE_VALID_STATE;
-    service->write_buffer[0x0DU] = (uint8_t) record->active_pair;
+    service->write_buffer[0x0DU] = record->flags;
     WriteU16(&service->write_buffer[0x0EU], 0U);
     WriteU16(&service->write_buffer[0x10U], record->release_version.major);
     WriteU16(&service->write_buffer[0x12U], record->release_version.minor);
@@ -333,12 +338,12 @@ static firmware_status_t EncodeActive(boot_control_service_t *service,
     WriteU16(&service->write_buffer[0x16U], 0U);
     WriteU32(&service->write_buffer[0x18U], record->build_number);
     WriteU32(&service->write_buffer[0x1CU], record->app_size);
-    WriteU32(&service->write_buffer[0x20U], record->app_crc32);
-    WriteU32(&service->write_buffer[0x24U], record->gui_size);
-    WriteU32(&service->write_buffer[0x28U], record->gui_crc32);
-    memcpy(&service->write_buffer[0x2CU], record->package_id_hash,
+    WriteU32(&service->write_buffer[0x20U], record->gui_size);
+    memcpy(&service->write_buffer[0x24U], record->package_id_hash,
            BOOT_CONTROL_PACKAGE_ID_HASH_SIZE);
-    memcpy(&service->write_buffer[0x3CU], record->manifest_sha256, BOOT_CONTROL_MANIFEST_HASH_SIZE);
+    memcpy(&service->write_buffer[0x34U], record->manifest_sha256, BOOT_CONTROL_MANIFEST_HASH_SIZE);
+    memcpy(&service->write_buffer[0x54U], record->app_sha256, BOOT_CONTROL_IMAGE_HASH_SIZE);
+    memcpy(&service->write_buffer[0x74U], record->gui_sha256, BOOT_CONTROL_IMAGE_HASH_SIZE);
     status = CalculateCrc(service, service->write_buffer, ACTIVE_RECORD_CRC_OFFSET, &crc);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -383,25 +388,27 @@ static firmware_status_t BeginCommit(boot_control_service_t *service,
     service->result.error        = BOOT_ERROR_NONE;
     service->result.stage        = BOOT_CONTROL_STAGE_IDLE;
     service->result.native_error = 0;
-    LOG_INFO("bootctl", "commit begin: target=0x%08lx sequence=%lu pair=%s",
-             (unsigned long) target_address, (unsigned long) next_sequence,
-             BootPairName(record->active_pair));
+    LOG_INFO("bootctl", "commit begin: target=0x%08lx sequence=%lu",
+             (unsigned long) target_address, (unsigned long) next_sequence);
     return FIRMWARE_STATUS_OK;
 }
 
 static int ActiveRecordsEqual(const boot_active_record_t *left, const boot_active_record_t *right)
 {
-    return (left->sequence == right->sequence) && (left->active_pair == right->active_pair) &&
+    return (left->format_version == right->format_version) &&
+           (left->state == right->state) && (left->flags == right->flags) &&
+           (left->sequence == right->sequence) &&
            (left->release_version.major == right->release_version.major) &&
            (left->release_version.minor == right->release_version.minor) &&
            (left->release_version.patch == right->release_version.patch) &&
            (left->build_number == right->build_number) && (left->app_size == right->app_size) &&
-           (left->app_crc32 == right->app_crc32) && (left->gui_size == right->gui_size) &&
-           (left->gui_crc32 == right->gui_crc32) &&
+           (left->gui_size == right->gui_size) &&
            (memcmp(left->package_id_hash, right->package_id_hash, sizeof(left->package_id_hash)) ==
             0) &&
            (memcmp(left->manifest_sha256, right->manifest_sha256, sizeof(left->manifest_sha256)) ==
-            0);
+            0) &&
+           (memcmp(left->app_sha256, right->app_sha256, sizeof(left->app_sha256)) == 0) &&
+           (memcmp(left->gui_sha256, right->gui_sha256, sizeof(left->gui_sha256)) == 0);
 }
 
 static firmware_status_t StartCommit(boot_control_service_t *service,
@@ -421,7 +428,8 @@ static firmware_status_t StartCommit(boot_control_service_t *service,
     }
 
     select_status = ReadAndSelect(service, &current_slot, &current_sequence);
-    if (!FirmwareStatus_IsOk(select_status) && (current_slot != RECORD_SLOT_NONE))
+    if (!FirmwareStatus_IsOk(select_status) &&
+        ((current_slot != RECORD_SLOT_NONE) || (select_status == FIRMWARE_STATUS_NOT_SUPPORTED)))
     {
         return select_status;
     }
@@ -505,9 +513,8 @@ firmware_status_t BootControlService_LoadActive(boot_control_service_t *service,
         service, (selected_slot == 0) ? service->write_buffer : service->verify_buffer, record);
     if (FirmwareStatus_IsOk(status))
     {
-        LOG_INFO("bootctl", "loaded active record: slot=%s pair=%s sequence=%lu",
-                 RecordSlotName(selected_slot), BootPairName(record->active_pair),
-                 (unsigned long) record->sequence);
+        LOG_INFO("bootctl", "loaded active record: slot=%s sequence=%lu",
+                 RecordSlotName(selected_slot), (unsigned long) record->sequence);
     }
     return status;
 }
@@ -516,14 +523,6 @@ firmware_status_t BootControlService_LoadPairCandidate(boot_control_service_t *s
                                                        boot_pair_t pair,
                                                        boot_active_record_t *record)
 {
-    boot_active_record_t active_a;
-    boot_active_record_t active_b;
-    firmware_status_t status;
-    firmware_status_t status_a;
-    firmware_status_t status_b;
-    int valid_a;
-    int valid_b;
-
     if ((service == NULL) || (record == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
@@ -532,76 +531,12 @@ firmware_status_t BootControlService_LoadPairCandidate(boot_control_service_t *s
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
-    if ((service->initialized == 0) || (service->state == SERVICE_RUN_STATE_RUNNING))
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
 
-    status = service->store->read(service->store->context, ACTIVE_RECORD_A_ADDRESS,
-                                  service->write_buffer, ACTIVE_RECORD_SIZE);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-    status = service->store->read(service->store->context, ACTIVE_RECORD_B_ADDRESS,
-                                  service->verify_buffer, ACTIVE_RECORD_SIZE);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-
-    status_a = ValidateActiveBuffer(service, service->write_buffer, &active_a);
-    status_b = ValidateActiveBuffer(service, service->verify_buffer, &active_b);
-    if ((!FirmwareStatus_IsOk(status_a) && (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
-         (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)) ||
-        (!FirmwareStatus_IsOk(status_b) && (status_b != FIRMWARE_STATUS_INVALID_STATE) &&
-         (status_b != FIRMWARE_STATUS_OUT_OF_RANGE)))
-    {
-        return !FirmwareStatus_IsOk(status_a) && (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
-                       (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)
-                   ? status_a
-                   : status_b;
-    }
-
-    valid_a = FirmwareStatus_IsOk(status_a) && (active_a.active_pair == pair);
-    valid_b = FirmwareStatus_IsOk(status_b) && (active_b.active_pair == pair);
-    if ((valid_a == 0) && (valid_b == 0))
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-    if ((valid_a != 0) && (valid_b == 0))
-    {
-        *record = active_a;
-        LOG_INFO("bootctl", "loaded pair candidate: pair=%s slot=A sequence=%lu",
-                 BootPairName(pair), (unsigned long) active_a.sequence);
-        return FIRMWARE_STATUS_OK;
-    }
-    if ((valid_a == 0) && (valid_b != 0))
-    {
-        *record = active_b;
-        LOG_INFO("bootctl", "loaded pair candidate: pair=%s slot=B sequence=%lu",
-                 BootPairName(pair), (unsigned long) active_b.sequence);
-        return FIRMWARE_STATUS_OK;
-    }
-    if (active_a.sequence == active_b.sequence)
-    {
-        if (memcmp(service->write_buffer, service->verify_buffer, ACTIVE_RECORD_SIZE) != 0)
-        {
-            return FIRMWARE_STATUS_INVALID_STATE;
-        }
-        *record = active_a;
-        LOG_INFO("bootctl", "loaded duplicate pair candidate: pair=%s sequence=%lu",
-                 BootPairName(pair), (unsigned long) active_a.sequence);
-        return FIRMWARE_STATUS_OK;
-    }
-    if ((active_a.sequence - active_b.sequence) == 0x80000000UL)
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-    *record = SequenceIsNewer(active_a.sequence, active_b.sequence) ? active_a : active_b;
-    LOG_INFO("bootctl", "loaded pair candidate: pair=%s sequence=%lu", BootPairName(pair),
-             (unsigned long) record->sequence);
-    return FIRMWARE_STATUS_OK;
+    /* Active Record V2 deliberately has no pair identity. Keep this legacy
+     * entry point until Phase 8 removes pair recovery, but never infer a
+     * candidate from a V2 record. */
+    (void) pair;
+    return FIRMWARE_STATUS_NOT_SUPPORTED;
 }
 
 firmware_status_t BootControlService_CommitActiveStart(boot_control_service_t *service,
@@ -644,15 +579,11 @@ firmware_status_t BootControlService_CommitRecoveredStart(boot_control_service_t
     }
     status_a = ValidateActiveBuffer(service, service->write_buffer, &active_a);
     status_b = ValidateActiveBuffer(service, service->verify_buffer, &active_b);
-    if ((!FirmwareStatus_IsOk(status_a) && (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
-         (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)) ||
-        (!FirmwareStatus_IsOk(status_b) && (status_b != FIRMWARE_STATUS_INVALID_STATE) &&
-         (status_b != FIRMWARE_STATUS_OUT_OF_RANGE)))
+    if ((!FirmwareStatus_IsOk(status_a) && !IsRecordUnavailable(status_a)) ||
+        (!FirmwareStatus_IsOk(status_b) && !IsRecordUnavailable(status_b)))
     {
-        return !FirmwareStatus_IsOk(status_a) && (status_a != FIRMWARE_STATUS_INVALID_STATE) &&
-                       (status_a != FIRMWARE_STATUS_OUT_OF_RANGE)
-                   ? status_a
-                   : status_b;
+        return !FirmwareStatus_IsOk(status_a) && !IsRecordUnavailable(status_a) ? status_a
+                                                                                   : status_b;
     }
 
     matches_a = FirmwareStatus_IsOk(status_a) && ActiveRecordsEqual(&active_a, record);

@@ -34,7 +34,7 @@ static uint32_t validation_count;
 static uint32_t launch_count;
 static uint32_t reset_count;
 static uint32_t update_count;
-static boot_pair_t validating_pair;
+static uint16_t validating_major;
 
 static firmware_status_t MediaPresent(void *context, int *present)
 {
@@ -96,9 +96,7 @@ firmware_status_t BootControlService_CommitRecoveredStart(
     struct boot_control_service *service, const boot_active_record_t *record)
 {
     (void)service;
-    assert((record->active_pair == BOOT_PAIR_1) ||
-           (record->active_pair == BOOT_PAIR_2));
-    validating_pair = record->active_pair;
+    validating_major = record->release_version.major;
     ++commit_count;
     commit_state = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
@@ -227,13 +225,7 @@ firmware_status_t ActiveValidationService_Start(
     const boot_active_record_t *record)
 {
     (void)service;
-#if defined(TEST_ACTIVE_VALIDATION_FAILURE)
-    assert((record->active_pair == BOOT_PAIR_1) ||
-           (record->active_pair == BOOT_PAIR_2));
-#else
-    assert(record->active_pair == BOOT_PAIR_2);
-#endif
-    validating_pair = record->active_pair;
+    validating_major = record->release_version.major;
     ++validation_count;
     validation_state = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
@@ -242,7 +234,7 @@ firmware_status_t ActiveValidationService_Start(
 void ActiveValidationService_Process(struct active_validation_service *service)
 {
     (void)service;
-    validation_state = (validating_pair == BOOT_PAIR_1)
+    validation_state = (validating_major == 1U)
                            ? SERVICE_RUN_STATE_FAILED
                            : SERVICE_RUN_STATE_SUCCEEDED;
 }
@@ -265,7 +257,7 @@ firmware_status_t LaunchService_Execute(
     struct launch_service *service, const boot_active_record_t *record)
 {
     (void)service;
-    assert(record->active_pair == BOOT_PAIR_2);
+    (void)record;
     ++launch_count;
     return FIRMWARE_STATUS_OK;
 }
@@ -289,10 +281,10 @@ int main(void)
     memset(&dependencies, 0, sizeof(dependencies));
     memset(&loaded_active_record, 0, sizeof(loaded_active_record));
     memset(&recovery_candidate, 0, sizeof(recovery_candidate));
-    loaded_active_record.active_pair = BOOT_PAIR_1;
+    loaded_active_record.release_version.major = 1U;
     loaded_active_record.app_size = 1U;
     loaded_active_record.gui_size = 1U;
-    recovery_candidate.active_pair = BOOT_PAIR_2;
+    recovery_candidate.release_version.major = 2U;
     recovery_candidate.app_size = 1U;
     recovery_candidate.gui_size = 1U;
 

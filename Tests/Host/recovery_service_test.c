@@ -16,6 +16,7 @@ static candidate_context_t candidates;
 static boot_active_record_t validation_record;
 static service_run_state_t validation_state;
 static service_result_t validation_result;
+static int validation_index;
 
 static active_validation_service_t validation_service;
 static recovery_service_t recovery_service;
@@ -47,6 +48,7 @@ firmware_status_t ActiveValidationService_Start(
 {
     (void)service;
     validation_record = *active_record;
+    validation_index = (active_record->sequence == candidates.records[1].sequence) ? 1 : 0;
     validation_state = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
 }
@@ -56,7 +58,7 @@ void ActiveValidationService_Process(struct active_validation_service *service)
     int index;
 
     (void)service;
-    index = CandidateIndex(validation_record.active_pair);
+    index = validation_index;
     validation_state = (candidates.valid[index] != 0)
                            ? SERVICE_RUN_STATE_SUCCEEDED
                            : SERVICE_RUN_STATE_FAILED;
@@ -79,13 +81,14 @@ const service_result_t *ActiveValidationService_GetResult(
     return &validation_result;
 }
 
-static boot_active_record_t MakeRecord(boot_pair_t pair, uint32_t sequence)
+static boot_active_record_t MakeRecord(uint32_t sequence)
 {
     boot_active_record_t record;
 
     memset(&record, 0, sizeof(record));
     record.sequence = sequence;
-    record.active_pair = pair;
+    record.format_version = BOOT_ACTIVE_RECORD_FORMAT_V2;
+    record.state = BOOT_ACTIVE_RECORD_STATE_VALID;
     record.app_size = 8U;
     record.gui_size = 8U;
     record.release_version.major = (uint16_t)sequence;
@@ -102,6 +105,7 @@ static void ResetFixture(void)
     memset(&validation_service, 0, sizeof(validation_service));
     memset(&recovery_service, 0, sizeof(recovery_service));
     validation_state = SERVICE_RUN_STATE_IDLE;
+    validation_index = 0;
     dependencies.load_candidate = LoadCandidate;
     dependencies.candidate_context = &candidates;
     dependencies.validation = &validation_service;
@@ -129,7 +133,7 @@ static void RunToTerminal(void)
 static void TestSingleValidPair(void)
 {
     ResetFixture();
-    candidates.records[0] = MakeRecord(BOOT_PAIR_1, 4U);
+    candidates.records[0] = MakeRecord(4U);
     candidates.present[0] = 1;
     candidates.valid[0] = 1;
     assert(
@@ -140,14 +144,14 @@ static void TestSingleValidPair(void)
         RecoveryService_GetState(&recovery_service) ==
         SERVICE_RUN_STATE_SUCCEEDED);
     assert(RecoveryService_GetCandidate(&recovery_service) != NULL);
-    assert(RecoveryService_GetCandidate(&recovery_service)->active_pair == BOOT_PAIR_1);
+    assert(RecoveryService_GetCandidate(&recovery_service)->sequence == 4U);
 }
 
 static void TestNewestValidPairWins(void)
 {
     ResetFixture();
-    candidates.records[0] = MakeRecord(BOOT_PAIR_1, 7U);
-    candidates.records[1] = MakeRecord(BOOT_PAIR_2, 8U);
+    candidates.records[0] = MakeRecord(7U);
+    candidates.records[1] = MakeRecord(8U);
     candidates.present[0] = 1;
     candidates.present[1] = 1;
     candidates.valid[0] = 1;
@@ -160,7 +164,7 @@ static void TestNewestValidPairWins(void)
         RecoveryService_GetState(&recovery_service) ==
         SERVICE_RUN_STATE_SUCCEEDED);
     assert(RecoveryService_GetCandidate(&recovery_service) != NULL);
-    assert(RecoveryService_GetCandidate(&recovery_service)->active_pair == BOOT_PAIR_2);
+    assert(RecoveryService_GetCandidate(&recovery_service)->sequence == 8U);
 }
 
 static void TestEqualSequenceConflictIsRejected(void)
@@ -168,8 +172,8 @@ static void TestEqualSequenceConflictIsRejected(void)
     const service_result_t *result;
 
     ResetFixture();
-    candidates.records[0] = MakeRecord(BOOT_PAIR_1, 9U);
-    candidates.records[1] = MakeRecord(BOOT_PAIR_2, 9U);
+    candidates.records[0] = MakeRecord(9U);
+    candidates.records[1] = MakeRecord(9U);
     candidates.present[0] = 1;
     candidates.present[1] = 1;
     candidates.valid[0] = 1;

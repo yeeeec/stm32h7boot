@@ -104,21 +104,6 @@ static const char *ApplicationStageName(application_stage_t stage)
     }
 }
 
-static const char *BootPairName(boot_pair_t pair)
-{
-    switch (pair)
-    {
-        case BOOT_PAIR_NONE:
-            return "none";
-        case BOOT_PAIR_1:
-            return "pair-1";
-        case BOOT_PAIR_2:
-            return "pair-2";
-        default:
-            return "unknown";
-    }
-}
-
 static void LogStageEntry(void)
 {
     if ((application_stage_logged == 0) || (application_logged_stage != application_stage))
@@ -209,8 +194,7 @@ firmware_status_t Application_Init(void)
     application_initialized  = 1;
     if (application_has_active_record != 0)
     {
-        LOG_INFO("app", "active record loaded: pair=%s version=%u.%u.%u build=%lu",
-                 BootPairName(application_active_record.active_pair),
+        LOG_INFO("app", "active record loaded: version=%u.%u.%u build=%lu",
                  (unsigned int) application_active_record.release_version.major,
                  (unsigned int) application_active_record.release_version.minor,
                  (unsigned int) application_active_record.release_version.patch,
@@ -259,8 +243,7 @@ firmware_status_t Application_Process(void)
                     return FIRMWARE_STATUS_INVALID_STATE;
                 }
                 application_candidate_record = *candidate;
-                LOG_INFO("app", "recovery candidate selected: pair=%s sequence=%lu",
-                         BootPairName(application_candidate_record.active_pair),
+                LOG_INFO("app", "recovery candidate selected: sequence=%lu",
                          (unsigned long) application_candidate_record.sequence);
                 application_commit_is_recovery = 1;
                 application_after_commit       = APPLICATION_STAGE_VALIDATE_START;
@@ -478,8 +461,7 @@ firmware_status_t Application_Process(void)
                     return FIRMWARE_STATUS_INVALID_STATE;
                 }
                 application_candidate_record = *candidate;
-                LOG_INFO("app", "update install completed: target=%s app=%lu gui=%lu",
-                         BootPairName(application_candidate_record.active_pair),
+                LOG_INFO("app", "update install completed: app=%lu gui=%lu",
                          (unsigned long) application_candidate_record.app_size,
                          (unsigned long) application_candidate_record.gui_size);
                 application_commit_is_recovery = 0;
@@ -514,9 +496,8 @@ firmware_status_t Application_Process(void)
                                                            &application_candidate_record);
             if (FirmwareStatus_IsOk(status))
             {
-                LOG_INFO("app", "active record commit started: recovery=%d target=%s",
-                         application_commit_is_recovery,
-                         BootPairName(application_candidate_record.active_pair));
+                LOG_INFO("app", "active record commit started: recovery=%d",
+                         application_commit_is_recovery);
                 application_stage = APPLICATION_STAGE_COMMIT_PROCESS;
             }
             else
@@ -535,8 +516,7 @@ firmware_status_t Application_Process(void)
                 application_has_active_record = 1;
                 application_reset_after_cleanup =
                     (application_after_commit == APPLICATION_STAGE_REMOVE_REQUEST) ? 1 : 0;
-                LOG_INFO("app", "active record committed: pair=%s",
-                         BootPairName(application_active_record.active_pair));
+                LOG_INFO("app", "active record committed");
                 application_stage = application_after_commit;
             }
             else if (BootControlService_GetState(application_dependencies.boot_control) ==
@@ -580,8 +560,7 @@ firmware_status_t Application_Process(void)
                 LOG_ERROR("app", "active validation start failed: status=%d", (int) status);
                 return status;
             }
-            LOG_INFO("app", "active validation started: pair=%s",
-                     BootPairName(application_active_record.active_pair));
+            LOG_INFO("app", "active validation started");
             application_stage = APPLICATION_STAGE_VALIDATE_PROCESS;
             break;
 
@@ -619,8 +598,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_LAUNCH:
-            LOG_INFO("app", "launching active pair=%s",
-                     BootPairName(application_active_record.active_pair));
+            LOG_INFO("app", "launching fixed runtime");
             return LaunchService_Execute(application_dependencies.launch,
                                          &application_active_record);
 

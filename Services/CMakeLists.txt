@@ -13,6 +13,7 @@ add_library(firmware_services STATIC
     src/capability/slot_policy.c
     src/capability/vector_validation.c
     src/capability/version_policy.c
+    src/runtime_layout.c
 )
 
 target_include_directories(firmware_services PUBLIC

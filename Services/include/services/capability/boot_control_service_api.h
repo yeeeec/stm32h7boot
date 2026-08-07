@@ -17,10 +17,9 @@ firmware_status_t BootControlService_LoadActive(
     boot_active_record_t *record);
 
 /**
- * Load the newest structurally valid retained Active Record for one pair.
+ * Legacy pair-recovery API retained temporarily for source compatibility.
  *
- * This bypasses global A/B ordering so Recovery can inspect the retained
- * records independently after the normal Active Record selection fails.
+ * Active Record V2 has no pair identity, so this returns NOT_SUPPORTED.
  */
 firmware_status_t BootControlService_LoadPairCandidate(
     struct boot_control_service *service,

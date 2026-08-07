@@ -7,7 +7,7 @@
 #include <stddef.h>
 
 #include "logging.h"
-#include "services/capability/slot_policy.h"
+#include "services/common/runtime_layout.h"
 
 typedef enum
 {
@@ -18,21 +18,6 @@ typedef enum
     LAUNCH_STAGE_INVALIDATE_CACHE,
     LAUNCH_STAGE_JUMP
 } launch_stage_t;
-
-static const char *BootPairName(boot_pair_t pair)
-{
-    switch (pair)
-    {
-        case BOOT_PAIR_NONE:
-            return "none";
-        case BOOT_PAIR_1:
-            return "pair-1";
-        case BOOT_PAIR_2:
-            return "pair-2";
-        default:
-            return "unknown";
-    }
-}
 
 static const char *LaunchStageName(launch_stage_t stage)
 {
@@ -108,7 +93,8 @@ firmware_status_t LaunchService_Init(launch_service_t *service,
 firmware_status_t LaunchService_Execute(launch_service_t *service,
                                         const boot_active_record_t *active_record)
 {
-    boot_pair_layout_t layout;
+    const boot_runtime_layout_t *layout = BootRuntimeLayout_Get();
+    boot_region_t app_region;
     vector_table_values_t vectors;
     uint8_t vector_bytes[8];
     firmware_status_t status;
@@ -122,23 +108,25 @@ firmware_status_t LaunchService_Execute(launch_service_t *service,
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    status = SlotPolicy_GetPairLayout(active_record->active_pair, &layout);
-    if (!FirmwareStatus_IsOk(status) ||
-        !FirmwareStatus_IsOk(SlotPolicy_ValidateImageSize(&layout.app, active_record->app_size)))
+    if ((active_record->app_size == 0U) || (active_record->app_size > layout->app_max_size))
     {
         return Fail(service, FIRMWARE_STATUS_OUT_OF_RANGE, BOOT_ERROR_CONTROL_RECORD,
                     LAUNCH_STAGE_READ_VECTOR);
     }
-    LOG_INFO("launch", "start: pair=%s app_size=%lu mapped=0x%08lx",
-             BootPairName(active_record->active_pair), (unsigned long) active_record->app_size,
-             (unsigned long) layout.app.mapped_address);
+    app_region = (boot_region_t) {
+        layout->app_offset,
+        layout->app_xip_base,
+        layout->app_max_size,
+    };
+    LOG_INFO("launch", "start: app_size=%lu mapped=0x%08lx",
+             (unsigned long) active_record->app_size, (unsigned long) BOOT_APP_RUNTIME_BASE);
     status = service->xip_controller->is_memory_mapped(service->xip_controller->context, &mapped);
     if (!FirmwareStatus_IsOk(status) || (mapped != 0))
     {
         return Fail(service, FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
                     BOOT_ERROR_XIP_SETUP, LAUNCH_STAGE_READ_VECTOR);
     }
-    status = service->storage->read(service->storage->context, layout.app.flash_offset,
+    status = service->storage->read(service->storage->context, BOOT_APP_FLASH_OFFSET,
                                     vector_bytes, sizeof(vector_bytes));
     if (!FirmwareStatus_IsOk(status))
     {
@@ -149,7 +137,7 @@ firmware_status_t LaunchService_Execute(launch_service_t *service,
     vectors.reset_handler = ReadU32(&vector_bytes[4]);
     LOG_INFO("launch", "vector: msp=0x%08lx reset=0x%08lx", (unsigned long) vectors.initial_msp,
              (unsigned long) vectors.reset_handler);
-    status = VectorValidation_Validate(&vectors, &layout.app, active_record->app_size,
+    status = VectorValidation_Validate(&vectors, &app_region, active_record->app_size,
                                        service->sram_regions, service->sram_region_count);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -163,16 +151,16 @@ firmware_status_t LaunchService_Execute(launch_service_t *service,
     }
     LOG_INFO("launch", "xip memory-mapped read enabled");
     status = service->xip_controller->invalidate_mapped_cache(
-        service->xip_controller->context, layout.app.mapped_address, active_record->app_size);
+        service->xip_controller->context, BOOT_APP_RUNTIME_BASE, active_record->app_size);
     if (!FirmwareStatus_IsOk(status))
     {
         return Fail(service, status, BOOT_ERROR_XIP_SETUP, LAUNCH_STAGE_INVALIDATE_CACHE);
     }
 
     LOG_WARN("launch", "jumping to application: address=0x%08lx",
-             (unsigned long) layout.app.mapped_address);
+             (unsigned long) BOOT_APP_RUNTIME_BASE);
     status = service->application_jump->execute(service->application_jump->context,
-                                                layout.app.mapped_address);
+                                                BOOT_APP_RUNTIME_BASE);
     return Fail(service, FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
                 BOOT_ERROR_INTERNAL, LAUNCH_STAGE_JUMP);
 }

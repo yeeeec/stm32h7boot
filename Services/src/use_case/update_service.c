@@ -10,6 +10,7 @@
 #include "logging.h"
 #include "services/capability/checked_arithmetic.h"
 #include "services/capability/slot_policy.h"
+#include "services/common/runtime_layout.h"
 
 static const char *BootPairName(boot_pair_t pair)
 {
@@ -449,36 +450,18 @@ static void UpdateServiceStep(update_service_t *service)
             status = (service->initial_install != 0)
                          ? SlotPolicy_GetPairLayout(service->initial_target_pair,
                                                     &service->target_layout)
-                         : SlotPolicy_SelectInactivePair(service->active_record.active_pair,
-                                                         &service->target_layout.pair);
+                         : SlotPolicy_GetPairLayout(BOOT_PAIR_1, &service->target_layout);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_INTERNAL);
             }
-            else if (service->initial_install != 0)
+            else
             {
                 LOG_INFO("update", "target selected: pair=%s app=0x%08lx gui=0x%08lx",
                          BootPairName(service->target_layout.pair),
                          (unsigned long) service->target_layout.app.flash_offset,
                          (unsigned long) service->target_layout.gui.flash_offset);
                 service->stage = UPDATE_STAGE_OPEN_APP;
-            }
-            else
-            {
-                status =
-                    SlotPolicy_GetPairLayout(service->target_layout.pair, &service->target_layout);
-                if (!FirmwareStatus_IsOk(status))
-                {
-                    BeginFailure(service, status, BOOT_ERROR_INTERNAL);
-                }
-                else
-                {
-                    LOG_INFO("update", "target selected: pair=%s app=0x%08lx gui=0x%08lx",
-                             BootPairName(service->target_layout.pair),
-                             (unsigned long) service->target_layout.app.flash_offset,
-                             (unsigned long) service->target_layout.gui.flash_offset);
-                    service->stage = UPDATE_STAGE_OPEN_APP;
-                }
             }
             break;
 
@@ -1184,18 +1167,21 @@ static void UpdateServiceStep(update_service_t *service)
             else
             {
                 memset(&service->candidate_record, 0, sizeof(service->candidate_record));
-                service->candidate_record.active_pair     = service->target_layout.pair;
+                service->candidate_record.format_version  = BOOT_ACTIVE_RECORD_FORMAT_V2;
+                service->candidate_record.state           = BOOT_ACTIVE_RECORD_STATE_VALID;
                 service->candidate_record.release_version = service->manifest.release_version;
                 service->candidate_record.build_number    = service->manifest.build_number;
                 service->candidate_record.app_size        = service->manifest.app.image_size_bytes;
-                service->candidate_record.app_crc32       = service->target_app_crc;
                 service->candidate_record.gui_size        = service->manifest.gui.file_size_bytes;
-                service->candidate_record.gui_crc32       = service->target_gui_crc;
                 memcpy(service->candidate_record.package_id_hash,
                        service->manifest.package_id_hash128,
                        sizeof(service->candidate_record.package_id_hash));
                 memcpy(service->candidate_record.manifest_sha256, service->manifest.manifest_sha256,
                        sizeof(service->candidate_record.manifest_sha256));
+                memcpy(service->candidate_record.app_sha256, service->manifest.app.sha256,
+                       sizeof(service->candidate_record.app_sha256));
+                memcpy(service->candidate_record.gui_sha256, service->manifest.gui.sha256,
+                       sizeof(service->candidate_record.gui_sha256));
                 service->state               = SERVICE_RUN_STATE_SUCCEEDED;
                 service->result.status       = FIRMWARE_STATUS_OK;
                 service->result.error        = BOOT_ERROR_NONE;
@@ -1203,10 +1189,9 @@ static void UpdateServiceStep(update_service_t *service)
                 service->result.native_error = 0;
                 service->install_completed   = 1;
                 service->stage               = UPDATE_STAGE_IDLE;
-                LOG_INFO("update", "install completed: pair=%s app_crc=0x%08lx gui_crc=0x%08lx",
-                         BootPairName(service->candidate_record.active_pair),
-                         (unsigned long) service->candidate_record.app_crc32,
-                         (unsigned long) service->candidate_record.gui_crc32);
+                LOG_INFO("update", "install completed: app=%lu gui=%lu",
+                         (unsigned long) service->candidate_record.app_size,
+                         (unsigned long) service->candidate_record.gui_size);
             }
             break;
 
@@ -1345,7 +1330,7 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service)
 firmware_status_t UpdateService_InstallStart(struct update_service *service,
                                              const boot_active_record_t *active_record)
 {
-    boot_pair_layout_t layout;
+    const boot_runtime_layout_t *layout = BootRuntimeLayout_Get();
     update_service_t *implementation = (update_service_t *) service;
 
     if ((implementation == NULL) || (active_record == NULL))
@@ -1358,9 +1343,8 @@ firmware_status_t UpdateService_InstallStart(struct update_service *service,
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    if (!FirmwareStatus_IsOk(SlotPolicy_GetPairLayout(active_record->active_pair, &layout)) ||
-        !FirmwareStatus_IsOk(SlotPolicy_ValidateImageSize(&layout.app, active_record->app_size)) ||
-        !FirmwareStatus_IsOk(SlotPolicy_ValidateImageSize(&layout.gui, active_record->gui_size)))
+    if ((active_record->app_size == 0U) || (active_record->app_size > layout->app_max_size) ||
+        (active_record->gui_size == 0U) || (active_record->gui_size > layout->gui_max_size))
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
@@ -1377,7 +1361,7 @@ firmware_status_t UpdateService_InstallStart(struct update_service *service,
     implementation->cancel_requested    = 0;
     implementation->erase_started       = 0;
     implementation->install_completed   = 0;
-    LOG_INFO("update", "install started: active=%s", BootPairName(active_record->active_pair));
+    LOG_INFO("update", "install started against fixed runtime layout");
     return FIRMWARE_STATUS_OK;
 }
 

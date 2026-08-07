@@ -45,6 +45,11 @@ static uint32_t ReadU32(const uint8_t *data)
            ((uint32_t)data[2] << 16U) | ((uint32_t)data[3] << 24U);
 }
 
+static uint16_t ReadU16(const uint8_t *data)
+{
+    return (uint16_t)data[0] | ((uint16_t)data[1] << 8U);
+}
+
 static void WriteU32(uint8_t *data, uint32_t value)
 {
     data[0] = (uint8_t)value;
@@ -163,21 +168,21 @@ static int ServiceInit(
     return 0;
 }
 
-static boot_active_record_t ActiveRecord(boot_pair_t pair, uint32_t tag)
+static boot_active_record_t ActiveRecord(uint32_t tag)
 {
     boot_active_record_t record;
     uint32_t index;
 
     memset(&record, 0, sizeof(record));
-    record.active_pair = pair;
+    record.format_version = BOOT_ACTIVE_RECORD_FORMAT_V2;
+    record.state = BOOT_ACTIVE_RECORD_STATE_VALID;
+    record.flags = (uint8_t)tag;
     record.release_version.major = 1U;
     record.release_version.minor = (uint16_t)tag;
     record.release_version.patch = 3U;
     record.build_number = 100U + tag;
     record.app_size = 0x10000U;
-    record.app_crc32 = 0x12340000UL + tag;
     record.gui_size = 0x20000U;
-    record.gui_crc32 = 0x56780000UL + tag;
     for (index = 0U; index < BOOT_CONTROL_PACKAGE_ID_HASH_SIZE; ++index)
     {
         record.package_id_hash[index] = (uint8_t)(tag + index);
@@ -185,6 +190,11 @@ static boot_active_record_t ActiveRecord(boot_pair_t pair, uint32_t tag)
     for (index = 0U; index < BOOT_CONTROL_MANIFEST_HASH_SIZE; ++index)
     {
         record.manifest_sha256[index] = (uint8_t)(tag + index + 0x40U);
+    }
+    for (index = 0U; index < BOOT_CONTROL_IMAGE_HASH_SIZE; ++index)
+    {
+        record.app_sha256[index] = (uint8_t)(tag + index + 0x60U);
+        record.gui_sha256[index] = (uint8_t)(tag + index + 0x80U);
     }
     return record;
 }
@@ -275,8 +285,8 @@ static int TestFirstCommitAndSelection(void)
     fake_store_t store;
     boot_control_service_t service;
     crc32_iso_hdlc_t crc;
-    boot_active_record_t pair_1 = ActiveRecord(BOOT_PAIR_1, 1U);
-    boot_active_record_t pair_2 = ActiveRecord(BOOT_PAIR_2, 2U);
+    boot_active_record_t pair_1 = ActiveRecord(1U);
+    boot_active_record_t pair_2 = ActiveRecord(2U);
     boot_active_record_t loaded;
 
     StoreInit(&store);
@@ -289,16 +299,27 @@ static int TestFirstCommitAndSelection(void)
     TEST_ASSERT(store.accepted_writes == ACTIVE_WRITE_COUNT);
     TEST_ASSERT(ReadU32(&store.bytes[ACTIVE_A_ADDRESS + ACTIVE_MARKER_OFFSET]) ==
                 COMMIT_MARKER);
+    TEST_ASSERT(ReadU32(&store.bytes[ACTIVE_A_ADDRESS + 0x00U]) == 0x52434248UL);
+    TEST_ASSERT(ReadU16(&store.bytes[ACTIVE_A_ADDRESS + 0x04U]) ==
+                BOOT_ACTIVE_RECORD_FORMAT_V2);
+    TEST_ASSERT(ReadU16(&store.bytes[ACTIVE_A_ADDRESS + 0x06U]) == BOOT_ACTIVE_RECORD_SIZE);
+    TEST_ASSERT(ReadU32(&store.bytes[ACTIVE_A_ADDRESS + 0x1CU]) == pair_1.app_size);
+    TEST_ASSERT(ReadU32(&store.bytes[ACTIVE_A_ADDRESS + 0x20U]) == pair_1.gui_size);
+    TEST_ASSERT(memcmp(&store.bytes[ACTIVE_A_ADDRESS + 0x54U], pair_1.app_sha256,
+                       BOOT_CONTROL_IMAGE_HASH_SIZE) == 0);
+    TEST_ASSERT(memcmp(&store.bytes[ACTIVE_A_ADDRESS + 0x74U], pair_1.gui_sha256,
+                       BOOT_CONTROL_IMAGE_HASH_SIZE) == 0);
     TEST_ASSERT(
         BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 1U) && (loaded.active_pair == BOOT_PAIR_1));
+    TEST_ASSERT((loaded.sequence == 1U) &&
+                (loaded.format_version == BOOT_ACTIVE_RECORD_FORMAT_V2) &&
+                (loaded.state == BOOT_ACTIVE_RECORD_STATE_VALID) && (loaded.flags == 1U));
     TEST_ASSERT(
         BootControlService_LoadPairCandidate(
-            &service, BOOT_PAIR_1, &loaded) == FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 1U) && (loaded.active_pair == BOOT_PAIR_1));
+            &service, BOOT_PAIR_1, &loaded) == FIRMWARE_STATUS_NOT_SUPPORTED);
     TEST_ASSERT(
         BootControlService_LoadPairCandidate(
-            &service, BOOT_PAIR_2, &loaded) == FIRMWARE_STATUS_INVALID_STATE);
+            &service, BOOT_PAIR_2, &loaded) == FIRMWARE_STATUS_NOT_SUPPORTED);
 
     StoreResetCounters(&store);
     TEST_ASSERT(CommitActive(&service, &pair_2) == 0);
@@ -307,15 +328,9 @@ static int TestFirstCommitAndSelection(void)
                 COMMIT_MARKER);
     TEST_ASSERT(
         BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 2U) && (loaded.active_pair == BOOT_PAIR_2));
-    TEST_ASSERT(
-        BootControlService_LoadPairCandidate(
-            &service, BOOT_PAIR_1, &loaded) == FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 1U) && (loaded.active_pair == BOOT_PAIR_1));
-    TEST_ASSERT(
-        BootControlService_LoadPairCandidate(
-            &service, BOOT_PAIR_2, &loaded) == FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 2U) && (loaded.active_pair == BOOT_PAIR_2));
+    TEST_ASSERT((loaded.sequence == 2U) && (loaded.flags == 2U));
+    TEST_ASSERT(memcmp(loaded.app_sha256, pair_2.app_sha256, sizeof(loaded.app_sha256)) == 0);
+    TEST_ASSERT(memcmp(loaded.gui_sha256, pair_2.gui_sha256, sizeof(loaded.gui_sha256)) == 0);
     return 0;
 }
 
@@ -324,8 +339,8 @@ static int TestSequenceWraparound(void)
     fake_store_t store;
     boot_control_service_t service;
     crc32_iso_hdlc_t crc;
-    boot_active_record_t pair_1 = ActiveRecord(BOOT_PAIR_1, 1U);
-    boot_active_record_t pair_2 = ActiveRecord(BOOT_PAIR_2, 2U);
+    boot_active_record_t pair_1 = ActiveRecord(1U);
+    boot_active_record_t pair_2 = ActiveRecord(2U);
     boot_active_record_t loaded;
 
     StoreInit(&store);
@@ -336,7 +351,7 @@ static int TestSequenceWraparound(void)
     TEST_ASSERT(CommitActive(&service, &pair_2) == 0);
     TEST_ASSERT(
         BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 0U) && (loaded.active_pair == BOOT_PAIR_2));
+    TEST_ASSERT((loaded.sequence == 0U) && (loaded.flags == 2U));
     return 0;
 }
 
@@ -345,7 +360,7 @@ static int TestEqualSequenceRecords(void)
     fake_store_t store;
     boot_control_service_t service;
     crc32_iso_hdlc_t crc;
-    boot_active_record_t record = ActiveRecord(BOOT_PAIR_1, 1U);
+    boot_active_record_t record = ActiveRecord(1U);
     boot_active_record_t loaded;
 
     StoreInit(&store);
@@ -375,7 +390,7 @@ static int TestAmbiguousSequenceRecords(void)
     fake_store_t store;
     boot_control_service_t service;
     crc32_iso_hdlc_t crc;
-    boot_active_record_t record = ActiveRecord(BOOT_PAIR_1, 1U);
+    boot_active_record_t record = ActiveRecord(1U);
     boot_active_record_t loaded;
 
     StoreInit(&store);
@@ -398,8 +413,8 @@ static int TestCorruptRecordFallback(void)
     fake_store_t store;
     boot_control_service_t service;
     crc32_iso_hdlc_t crc;
-    boot_active_record_t pair_1 = ActiveRecord(BOOT_PAIR_1, 1U);
-    boot_active_record_t pair_2 = ActiveRecord(BOOT_PAIR_2, 2U);
+    boot_active_record_t pair_1 = ActiveRecord(1U);
+    boot_active_record_t pair_2 = ActiveRecord(2U);
     boot_active_record_t loaded;
 
     StoreInit(&store);
@@ -410,7 +425,7 @@ static int TestCorruptRecordFallback(void)
     store.bytes[ACTIVE_B_ADDRESS + ACTIVE_CRC_OFFSET] ^= 1U;
     TEST_ASSERT(
         BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
-    TEST_ASSERT(loaded.active_pair == BOOT_PAIR_1);
+    TEST_ASSERT(loaded.flags == 1U);
 
     WriteU32(
         &store.bytes[ACTIVE_A_ADDRESS + ACTIVE_MARKER_OFFSET], UINT32_MAX);
@@ -425,8 +440,8 @@ static int TestRecoveryCommitPreservesCandidate(void)
     fake_store_t store;
     boot_control_service_t service;
     crc32_iso_hdlc_t crc;
-    boot_active_record_t pair_1 = ActiveRecord(BOOT_PAIR_1, 1U);
-    boot_active_record_t pair_2 = ActiveRecord(BOOT_PAIR_2, 2U);
+    boot_active_record_t pair_1 = ActiveRecord(1U);
+    boot_active_record_t pair_2 = ActiveRecord(2U);
     boot_active_record_t candidate;
     boot_active_record_t loaded;
     uint8_t preserved_record[256U];
@@ -435,10 +450,8 @@ static int TestRecoveryCommitPreservesCandidate(void)
     TEST_ASSERT(ServiceInit(&service, &crc, &store) == 0);
     TEST_ASSERT(CommitActive(&service, &pair_1) == 0);
     TEST_ASSERT(CommitActive(&service, &pair_2) == 0);
-    TEST_ASSERT(
-        BootControlService_LoadPairCandidate(
-            &service, BOOT_PAIR_1, &candidate) == FIRMWARE_STATUS_OK);
-    memcpy(preserved_record, &store.bytes[ACTIVE_A_ADDRESS],
+    TEST_ASSERT(BootControlService_LoadActive(&service, &candidate) == FIRMWARE_STATUS_OK);
+    memcpy(preserved_record, &store.bytes[ACTIVE_B_ADDRESS],
            sizeof(preserved_record));
 
     TEST_ASSERT(
@@ -447,12 +460,11 @@ static int TestRecoveryCommitPreservesCandidate(void)
     TEST_ASSERT(RunCommit(&service) == 0);
     TEST_ASSERT(
         BootControlService_GetState(&service) == SERVICE_RUN_STATE_SUCCEEDED);
-    TEST_ASSERT(memcmp(preserved_record, &store.bytes[ACTIVE_A_ADDRESS],
+    TEST_ASSERT(memcmp(preserved_record, &store.bytes[ACTIVE_B_ADDRESS],
                        sizeof(preserved_record)) == 0);
     TEST_ASSERT(
         BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 2U) &&
-                (loaded.active_pair == BOOT_PAIR_1));
+    TEST_ASSERT((loaded.sequence == 3U) && (loaded.flags == 2U));
     return 0;
 }
 
@@ -467,8 +479,8 @@ static int TestAcceptedWritePowerLoss(void)
         boot_control_service_t rebooted_service;
         crc32_iso_hdlc_t crc;
         crc32_iso_hdlc_t rebooted_crc;
-        boot_active_record_t pair_1 = ActiveRecord(BOOT_PAIR_1, 1U);
-        boot_active_record_t pair_2 = ActiveRecord(BOOT_PAIR_2, 2U);
+        boot_active_record_t pair_1 = ActiveRecord(1U);
+        boot_active_record_t pair_2 = ActiveRecord(2U);
         boot_active_record_t loaded;
         uint32_t iteration;
 
@@ -493,9 +505,7 @@ static int TestAcceptedWritePowerLoss(void)
         TEST_ASSERT(
             BootControlService_LoadActive(&rebooted_service, &loaded) ==
             FIRMWARE_STATUS_OK);
-        TEST_ASSERT(
-            loaded.active_pair ==
-            ((cutoff == ACTIVE_WRITE_COUNT) ? BOOT_PAIR_2 : BOOT_PAIR_1));
+        TEST_ASSERT(loaded.flags == ((cutoff == ACTIVE_WRITE_COUNT) ? 2U : 1U));
     }
     return 0;
 }
@@ -511,8 +521,8 @@ static int TestWriteFailureInjection(void)
         boot_control_service_t rebooted_service;
         crc32_iso_hdlc_t crc;
         crc32_iso_hdlc_t rebooted_crc;
-        boot_active_record_t pair_1 = ActiveRecord(BOOT_PAIR_1, 1U);
-        boot_active_record_t pair_2 = ActiveRecord(BOOT_PAIR_2, 2U);
+        boot_active_record_t pair_1 = ActiveRecord(1U);
+        boot_active_record_t pair_2 = ActiveRecord(2U);
         boot_active_record_t loaded;
 
         StoreInit(&store);
@@ -532,7 +542,7 @@ static int TestWriteFailureInjection(void)
         TEST_ASSERT(
             BootControlService_LoadActive(&rebooted_service, &loaded) ==
             FIRMWARE_STATUS_OK);
-        TEST_ASSERT(loaded.active_pair == BOOT_PAIR_1);
+        TEST_ASSERT(loaded.flags == 1U);
     }
     return 0;
 }
@@ -569,7 +579,7 @@ static int TestChecksumFailurePropagation(void)
     boot_control_service_t service;
     boot_control_service_t failing_service;
     crc32_iso_hdlc_t crc;
-    boot_active_record_t record = ActiveRecord(BOOT_PAIR_1, 1U);
+    boot_active_record_t record = ActiveRecord(1U);
     boot_active_record_t loaded;
     boot_control_service_dependencies_t dependencies;
     checksum_t failing_checksum;
@@ -595,6 +605,23 @@ static int TestChecksumFailurePropagation(void)
     return 0;
 }
 
+static int TestV1Unsupported(void)
+{
+    fake_store_t store;
+    boot_control_service_t service;
+    crc32_iso_hdlc_t crc;
+    boot_active_record_t loaded;
+
+    StoreInit(&store);
+    WriteU32(&store.bytes[ACTIVE_A_ADDRESS + 0x00U], 0x52434248UL);
+    store.bytes[ACTIVE_A_ADDRESS + 0x04U] = 1U;
+    store.bytes[ACTIVE_A_ADDRESS + 0x05U] = 0U;
+    TEST_ASSERT(ServiceInit(&service, &crc, &store) == 0);
+    TEST_ASSERT(BootControlService_LoadActive(&service, &loaded) ==
+                FIRMWARE_STATUS_NOT_SUPPORTED);
+    return 0;
+}
+
 int main(void)
 {
     TEST_ASSERT(TestCrc32() == 0);
@@ -607,6 +634,7 @@ int main(void)
     TEST_ASSERT(TestAcceptedWritePowerLoss() == 0);
     TEST_ASSERT(TestWriteFailureInjection() == 0);
     TEST_ASSERT(TestChecksumFailurePropagation() == 0);
+    TEST_ASSERT(TestV1Unsupported() == 0);
     printf("checksum_boot_control_test: PASS\n");
     return 0;
 }

@@ -170,11 +170,7 @@ firmware_status_t BootControlService_CommitActiveStart(
     struct boot_control_service *service, const boot_active_record_t *record)
 {
     (void)service;
-#if defined(TEST_INITIAL_INSTALL)
-    assert(record->active_pair == BOOT_PAIR_1);
-#else
-    assert(record->active_pair == BOOT_PAIR_2);
-#endif
+    (void)record;
     ++commit_count;
     commit_state = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
@@ -220,7 +216,7 @@ firmware_status_t UpdateService_InstallStart(
     struct update_service *service, const boot_active_record_t *record)
 {
     (void)service;
-    assert(record->active_pair == BOOT_PAIR_1);
+    (void)record;
     ++install_count;
     update_state = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
@@ -349,17 +345,13 @@ int main(void)
 #if defined(TEST_INITIAL_INSTALL)
     memset(&recovery_result, 0, sizeof(recovery_result));
 #endif
-#if defined(TEST_INITIAL_INSTALL)
-    candidate_record.active_pair = BOOT_PAIR_1;
-#else
-    active_record.active_pair = BOOT_PAIR_1;
+#if !defined(TEST_INITIAL_INSTALL)
     active_record.app_size = 1U;
     active_record.gui_size = 1U;
     /* Keep the package distinct from the active record for the install path. */
     active_record.package_id_hash[0] = 1U;
     active_record.release_version.major = 1U;
     candidate_record = active_record;
-    candidate_record.active_pair = BOOT_PAIR_2;
 #endif
     candidate_record.release_version.major = 2U;
     manifest.release_version.major = 2U;
@@ -411,7 +403,6 @@ int main(void)
     assert(recovery_count == 1U);
     assert(initial_install_count == 1U);
     assert(install_count == 0U);
-    assert(candidate_record.active_pair == BOOT_PAIR_1);
 #else
     assert(install_count == 1U);
 #endif

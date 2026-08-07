@@ -7,6 +7,7 @@
 #include "services/capability/slot_policy.h"
 #include "services/capability/vector_validation.h"
 #include "services/capability/version_policy.h"
+#include "services/common/runtime_layout.h"
 
 static void TestCheckedArithmetic(void)
 {
@@ -46,6 +47,19 @@ static void TestSlotPolicy(void)
     assert(SlotPolicy_ValidateStorageGeometry(
                SLOT_POLICY_FLASH_CAPACITY_BYTES, SLOT_POLICY_ERASE_SIZE_BYTES) ==
            FIRMWARE_STATUS_OK);
+}
+
+static void TestRuntimeLayout(void)
+{
+    const boot_runtime_layout_t *layout = BootRuntimeLayout_Get();
+
+    assert(layout != NULL);
+    assert(layout->app_offset == 0x000000UL);
+    assert(layout->app_xip_base == 0x90000000UL);
+    assert(layout->app_max_size == 0x00100000UL);
+    assert(layout->gui_offset == 0x00200000UL);
+    assert(layout->gui_mmap_base == 0x90200000UL);
+    assert(layout->gui_max_size == 0x00800000UL);
 }
 
 static void TestVersionPolicy(void)
@@ -94,6 +108,7 @@ int main(void)
 {
     TestCheckedArithmetic();
     TestSlotPolicy();
+    TestRuntimeLayout();
     TestVersionPolicy();
     TestVectorValidation();
     return 0;

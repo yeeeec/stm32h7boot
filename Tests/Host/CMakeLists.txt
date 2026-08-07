@@ -97,6 +97,7 @@ add_executable(services_test
     ../../Services/src/capability/slot_policy.c
     ../../Services/src/capability/vector_validation.c
     ../../Services/src/capability/version_policy.c
+    ../../Services/src/runtime_layout.c
 )
 
 target_include_directories(services_test PRIVATE
@@ -115,7 +116,7 @@ add_executable(checksum_boot_control_test
     ../../Utilities/Checksum/src/crc32_iso_hdlc.c
     ../../Services/src/capability/boot_control_service.c
     ../../Services/src/capability/checked_arithmetic.c
-    ../../Services/src/capability/slot_policy.c
+    ../../Services/src/runtime_layout.c
 )
 
 target_include_directories(checksum_boot_control_test PRIVATE
@@ -219,6 +220,7 @@ add_executable(update_service_lifecycle_test
     ../../Services/src/capability/relocation_service.c
     ../../Services/src/capability/slot_policy.c
     ../../Services/src/capability/version_policy.c
+    ../../Services/src/runtime_layout.c
 )
 
 target_include_directories(update_service_lifecycle_test PRIVATE

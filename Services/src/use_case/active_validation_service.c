@@ -1,47 +1,31 @@
 /**
  * @file active_validation_service.c
- * @brief Incremental active APP/GUI CRC and vector validation implementation.
+ * @brief Incremental fixed-runtime APP/GUI SHA-256 and vector validation.
  */
 #include "services/use_case/active_validation_service.h"
 
 #include <stddef.h>
+#include <string.h>
 
 #include "logging.h"
-#include "services/capability/slot_policy.h"
-
-static const char *BootPairName(boot_pair_t pair)
-{
-    switch (pair)
-    {
-        case BOOT_PAIR_NONE:
-            return "none";
-        case BOOT_PAIR_1:
-            return "pair-1";
-        case BOOT_PAIR_2:
-            return "pair-2";
-        default:
-            return "unknown";
-    }
-}
-
 static const char *ActiveValidationStageName(active_validation_stage_t stage)
 {
     switch (stage)
     {
         case ACTIVE_VALIDATION_STAGE_IDLE:
             return "idle";
-        case ACTIVE_VALIDATION_STAGE_RESET_APP_CRC:
-            return "reset-app-crc";
+        case ACTIVE_VALIDATION_STAGE_RESET_APP_HASH:
+            return "reset-app-hash";
         case ACTIVE_VALIDATION_STAGE_READ_APP:
             return "read-app";
-        case ACTIVE_VALIDATION_STAGE_FINISH_APP_CRC:
-            return "finish-app-crc";
-        case ACTIVE_VALIDATION_STAGE_RESET_GUI_CRC:
-            return "reset-gui-crc";
+        case ACTIVE_VALIDATION_STAGE_FINISH_APP_HASH:
+            return "finish-app-hash";
+        case ACTIVE_VALIDATION_STAGE_RESET_GUI_HASH:
+            return "reset-gui-hash";
         case ACTIVE_VALIDATION_STAGE_READ_GUI:
             return "read-gui";
-        case ACTIVE_VALIDATION_STAGE_FINISH_GUI_CRC:
-            return "finish-gui-crc";
+        case ACTIVE_VALIDATION_STAGE_FINISH_GUI_HASH:
+            return "finish-gui-hash";
         default:
             return "unknown";
     }
@@ -55,8 +39,7 @@ static uint32_t ReadU32(const uint8_t *data)
 
 static void Fail(active_validation_service_t *service, firmware_status_t status, boot_error_t error)
 {
-    LOG_ERROR("active", "failed: pair=%s status=%d error=%d stage=%s",
-              BootPairName(service->active_record.active_pair), (int) status, (int) error,
+    LOG_ERROR("active", "failed: status=%d error=%d stage=%s", (int) status, (int) error,
               ActiveValidationStageName(service->stage));
     service->state               = SERVICE_RUN_STATE_FAILED;
     service->result.status       = status;
@@ -70,9 +53,9 @@ ActiveValidationService_Init(active_validation_service_t *service,
                              const active_validation_service_dependencies_t *dependencies)
 {
     if ((service == NULL) || (dependencies == NULL) || (dependencies->storage == NULL) ||
-        (dependencies->storage->read == NULL) || (dependencies->checksum == NULL) ||
-        (dependencies->checksum->reset == NULL) || (dependencies->checksum->update == NULL) ||
-        (dependencies->checksum->get_value == NULL) || (dependencies->buffer == NULL) ||
+        (dependencies->storage->read == NULL) || (dependencies->hash == NULL) ||
+        (dependencies->hash->reset == NULL) || (dependencies->hash->update == NULL) ||
+        (dependencies->hash->finish == NULL) || (dependencies->buffer == NULL) ||
         (dependencies->buffer_size < 8U) || (dependencies->sram_regions == NULL) ||
         (dependencies->sram_region_count == 0U))
     {
@@ -84,7 +67,7 @@ ActiveValidationService_Init(active_validation_service_t *service,
     }
 
     service->storage             = dependencies->storage;
-    service->checksum            = dependencies->checksum;
+    service->hash                = dependencies->hash;
     service->buffer              = dependencies->buffer;
     service->buffer_size         = dependencies->buffer_size;
     service->sram_regions        = dependencies->sram_regions;
@@ -102,7 +85,7 @@ ActiveValidationService_Init(active_validation_service_t *service,
 firmware_status_t ActiveValidationService_Start(active_validation_service_t *service,
                                                 const boot_active_record_t *active_record)
 {
-    firmware_status_t status;
+    const boot_runtime_layout_t *layout = BootRuntimeLayout_Get();
 
     if ((service == NULL) || (active_record == NULL))
     {
@@ -113,26 +96,23 @@ firmware_status_t ActiveValidationService_Start(active_validation_service_t *ser
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    status = SlotPolicy_GetPairLayout(active_record->active_pair, &service->layout);
-    if (!FirmwareStatus_IsOk(status) ||
-        !FirmwareStatus_IsOk(
-            SlotPolicy_ValidateImageSize(&service->layout.app, active_record->app_size)) ||
-        !FirmwareStatus_IsOk(
-            SlotPolicy_ValidateImageSize(&service->layout.gui, active_record->gui_size)))
+    if ((active_record->app_size == 0U) || (active_record->app_size > layout->app_max_size) ||
+        (active_record->gui_size == 0U) || (active_record->gui_size > layout->gui_max_size))
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
 
     service->active_record       = *active_record;
+    service->layout              = layout;
     service->offset              = 0U;
-    service->stage               = ACTIVE_VALIDATION_STAGE_RESET_APP_CRC;
+    service->stage               = ACTIVE_VALIDATION_STAGE_RESET_APP_HASH;
     service->state               = SERVICE_RUN_STATE_RUNNING;
     service->result.status       = FIRMWARE_STATUS_OK;
     service->result.error        = BOOT_ERROR_NONE;
     service->result.stage        = ACTIVE_VALIDATION_STAGE_IDLE;
     service->result.native_error = 0;
-    LOG_INFO("active", "started: pair=%s app=%lu gui=%lu", BootPairName(active_record->active_pair),
-             (unsigned long) active_record->app_size, (unsigned long) active_record->gui_size);
+    LOG_INFO("active", "started: app=%lu gui=%lu", (unsigned long) active_record->app_size,
+             (unsigned long) active_record->gui_size);
     return FIRMWARE_STATUS_OK;
 }
 
@@ -156,8 +136,7 @@ static void ReadComponent(active_validation_service_t *service, const boot_regio
 
         vectors.initial_msp   = ReadU32(&service->buffer[0]);
         vectors.reset_handler = ReadU32(&service->buffer[4]);
-        LOG_DEBUG("active", "vector read: pair=%s msp=0x%08lx reset=0x%08lx",
-                  BootPairName(service->active_record.active_pair),
+        LOG_DEBUG("active", "vector read: msp=0x%08lx reset=0x%08lx",
                   (unsigned long) vectors.initial_msp, (unsigned long) vectors.reset_handler);
         status = VectorValidation_Validate(&vectors, region, image_size, service->sram_regions,
                                            service->sram_region_count);
@@ -167,7 +146,7 @@ static void ReadComponent(active_validation_service_t *service, const boot_regio
             return;
         }
     }
-    status = service->checksum->update(service->checksum->context, service->buffer, read_size);
+    status = service->hash->update(service->hash->context, service->buffer, read_size);
     if (!FirmwareStatus_IsOk(status))
     {
         Fail(service, status, BOOT_ERROR_INTERNAL);
@@ -180,7 +159,9 @@ static void ReadComponent(active_validation_service_t *service, const boot_regio
 void ActiveValidationService_Process(active_validation_service_t *service)
 {
     firmware_status_t status;
-    uint32_t crc;
+    boot_region_t app_region;
+    boot_region_t gui_region;
+    uint8_t digest[FIRMWARE_SHA256_DIGEST_SIZE];
 
     if ((service == NULL) || (service->state != SERVICE_RUN_STATE_RUNNING))
     {
@@ -189,8 +170,8 @@ void ActiveValidationService_Process(active_validation_service_t *service)
 
     switch (service->stage)
     {
-        case ACTIVE_VALIDATION_STAGE_RESET_APP_CRC:
-            status = service->checksum->reset(service->checksum->context);
+        case ACTIVE_VALIDATION_STAGE_RESET_APP_HASH:
+            status = service->hash->reset(service->hash->context);
             if (!FirmwareStatus_IsOk(status))
             {
                 Fail(service, status, BOOT_ERROR_INTERNAL);
@@ -198,34 +179,40 @@ void ActiveValidationService_Process(active_validation_service_t *service)
             }
             service->offset = 0U;
             service->stage  = ACTIVE_VALIDATION_STAGE_READ_APP;
-            LOG_INFO("active", "app crc scan started: size=%lu",
+            LOG_INFO("active", "app hash scan started: size=%lu",
                      (unsigned long) service->active_record.app_size);
             break;
 
         case ACTIVE_VALIDATION_STAGE_READ_APP:
-            ReadComponent(service, &service->layout.app, service->active_record.app_size, 1,
+            app_region = (boot_region_t) {
+                service->layout->app_offset,
+                service->layout->app_xip_base,
+                service->layout->app_max_size,
+            };
+            ReadComponent(service, &app_region, service->active_record.app_size, 1,
                           BOOT_ERROR_APP_TARGET_CRC);
             if ((service->state == SERVICE_RUN_STATE_RUNNING) &&
                 (service->offset == service->active_record.app_size))
             {
-                service->stage = ACTIVE_VALIDATION_STAGE_FINISH_APP_CRC;
+                service->stage = ACTIVE_VALIDATION_STAGE_FINISH_APP_HASH;
             }
             break;
 
-        case ACTIVE_VALIDATION_STAGE_FINISH_APP_CRC:
-            status = service->checksum->get_value(service->checksum->context, &crc);
-            if (!FirmwareStatus_IsOk(status) || (crc != service->active_record.app_crc32))
+        case ACTIVE_VALIDATION_STAGE_FINISH_APP_HASH:
+            status = service->hash->finish(service->hash->context, digest);
+            if (!FirmwareStatus_IsOk(status) ||
+                (memcmp(digest, service->active_record.app_sha256, sizeof(digest)) != 0))
             {
                 Fail(service, FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
                      BOOT_ERROR_APP_TARGET_CRC);
                 break;
             }
-            LOG_INFO("active", "app crc ok: value=0x%08lx", (unsigned long) crc);
-            service->stage = ACTIVE_VALIDATION_STAGE_RESET_GUI_CRC;
+            LOG_INFO("active", "app hash verified");
+            service->stage = ACTIVE_VALIDATION_STAGE_RESET_GUI_HASH;
             break;
 
-        case ACTIVE_VALIDATION_STAGE_RESET_GUI_CRC:
-            status = service->checksum->reset(service->checksum->context);
+        case ACTIVE_VALIDATION_STAGE_RESET_GUI_HASH:
+            status = service->hash->reset(service->hash->context);
             if (!FirmwareStatus_IsOk(status))
             {
                 Fail(service, status, BOOT_ERROR_INTERNAL);
@@ -233,29 +220,35 @@ void ActiveValidationService_Process(active_validation_service_t *service)
             }
             service->offset = 0U;
             service->stage  = ACTIVE_VALIDATION_STAGE_READ_GUI;
-            LOG_INFO("active", "gui crc scan started: size=%lu",
+            LOG_INFO("active", "gui hash scan started: size=%lu",
                      (unsigned long) service->active_record.gui_size);
             break;
 
         case ACTIVE_VALIDATION_STAGE_READ_GUI:
-            ReadComponent(service, &service->layout.gui, service->active_record.gui_size, 0,
+            gui_region = (boot_region_t) {
+                service->layout->gui_offset,
+                service->layout->gui_mmap_base,
+                service->layout->gui_max_size,
+            };
+            ReadComponent(service, &gui_region, service->active_record.gui_size, 0,
                           BOOT_ERROR_GUI_TARGET_CRC);
             if ((service->state == SERVICE_RUN_STATE_RUNNING) &&
                 (service->offset == service->active_record.gui_size))
             {
-                service->stage = ACTIVE_VALIDATION_STAGE_FINISH_GUI_CRC;
+                service->stage = ACTIVE_VALIDATION_STAGE_FINISH_GUI_HASH;
             }
             break;
 
-        case ACTIVE_VALIDATION_STAGE_FINISH_GUI_CRC:
-            status = service->checksum->get_value(service->checksum->context, &crc);
-            if (!FirmwareStatus_IsOk(status) || (crc != service->active_record.gui_crc32))
+        case ACTIVE_VALIDATION_STAGE_FINISH_GUI_HASH:
+            status = service->hash->finish(service->hash->context, digest);
+            if (!FirmwareStatus_IsOk(status) ||
+                (memcmp(digest, service->active_record.gui_sha256, sizeof(digest)) != 0))
             {
                 Fail(service, FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
                      BOOT_ERROR_GUI_TARGET_CRC);
                 break;
             }
-            LOG_INFO("active", "gui crc ok: value=0x%08lx", (unsigned long) crc);
+            LOG_INFO("active", "gui hash verified");
             service->state               = SERVICE_RUN_STATE_SUCCEEDED;
             service->result.status       = FIRMWARE_STATUS_OK;
             service->result.error        = BOOT_ERROR_NONE;

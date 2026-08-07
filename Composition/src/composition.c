@@ -43,6 +43,7 @@ static spi_nor_block_adapter_t external_flash_adapter;
 static at24_boot_control_adapter_t eeprom_adapter;
 static boot_control_service_t boot_control_service;
 static sha256_context_t manifest_hash_context;
+static sha256_context_t active_validation_hash_context;
 static manifest_service_t manifest_service;
 static fatfs_package_source_adapter_t package_source_adapter;
 static stm32_qspi_xip_adapter_t xip_adapter;
@@ -86,6 +87,13 @@ static firmware_status_t ManifestHashFinish(void *context,
 
 static hash_provider_t manifest_hash_interface = {
     &manifest_hash_context,
+    ManifestHashReset,
+    ManifestHashUpdate,
+    ManifestHashFinish,
+};
+
+static hash_provider_t active_validation_hash_interface = {
+    &active_validation_hash_context,
     ManifestHashReset,
     ManifestHashUpdate,
     ManifestHashFinish,
@@ -214,7 +222,7 @@ firmware_status_t Composition_Init(void)
     }
 
     validation_dependencies.storage      = external_flash;
-    validation_dependencies.checksum     = Crc32IsoHdlc_Interface(&crc32_provider);
+    validation_dependencies.hash         = &active_validation_hash_interface;
     validation_dependencies.buffer       = service_io_buffer;
     validation_dependencies.buffer_size  = sizeof(service_io_buffer);
     validation_dependencies.sram_regions = application_sram_regions;
