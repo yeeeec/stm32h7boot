@@ -41,6 +41,7 @@ static firmware_status_t Execute(void *context, uint32_t vector_table_address)
     __DSB();
     __ISB();
     __set_MSP(initial_msp);
+    __enable_irq();
     entry();
 
     return FIRMWARE_STATUS_INVALID_STATE;
