@@ -12,5 +12,5 @@ target_include_directories(firmware_application PRIVATE
 
 target_link_libraries(firmware_application
     PUBLIC firmware_types
-    PRIVATE firmware_services firmware_interfaces
+    PRIVATE firmware_services firmware_interfaces firmware_logger
 )

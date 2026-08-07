@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "services/capability/slot_policy.h"
+#include "logging.h"
 
 #define ACTIVE_RECORD_A_ADDRESS  0x0000U
 #define ACTIVE_RECORD_B_ADDRESS  0x0100U
@@ -22,6 +23,65 @@
 #define ACTIVE_VALID_STATE   1U
 #define RECORD_SLOT_NONE     (-1)
 #define RECORD_SLOT_CONFLICT (-2)
+
+static const char *BootPairName(boot_pair_t pair)
+{
+    switch (pair)
+    {
+        case BOOT_PAIR_NONE:
+            return "none";
+        case BOOT_PAIR_1:
+            return "pair-1";
+        case BOOT_PAIR_2:
+            return "pair-2";
+        default:
+            return "unknown";
+    }
+}
+
+static const char *BootControlStageName(boot_control_stage_t stage)
+{
+    switch (stage)
+    {
+        case BOOT_CONTROL_STAGE_IDLE:
+            return "idle";
+        case BOOT_CONTROL_STAGE_INVALIDATE_MARKER:
+            return "invalidate-marker";
+        case BOOT_CONTROL_STAGE_WAIT_INVALIDATE:
+            return "wait-invalidate";
+        case BOOT_CONTROL_STAGE_WRITE_BODY:
+            return "write-body";
+        case BOOT_CONTROL_STAGE_WAIT_BODY:
+            return "wait-body";
+        case BOOT_CONTROL_STAGE_READ_BODY:
+            return "read-body";
+        case BOOT_CONTROL_STAGE_WRITE_MARKER:
+            return "write-marker";
+        case BOOT_CONTROL_STAGE_WAIT_MARKER:
+            return "wait-marker";
+        case BOOT_CONTROL_STAGE_VERIFY_FINAL:
+            return "verify-final";
+        default:
+            return "unknown";
+    }
+}
+
+static const char *RecordSlotName(int slot)
+{
+    switch (slot)
+    {
+        case 0:
+            return "A";
+        case 1:
+            return "B";
+        case RECORD_SLOT_NONE:
+            return "none";
+        case RECORD_SLOT_CONFLICT:
+            return "conflict";
+        default:
+            return "unknown";
+    }
+}
 
 static uint16_t ReadU16(const uint8_t *data)
 {
@@ -218,18 +278,23 @@ static firmware_status_t ReadAndSelect(
     if ((valid_a == 0) && (valid_b == 0))
     {
         *selected_slot = RECORD_SLOT_NONE;
+        LOG_WARN("bootctl", "no valid active record found");
         return FIRMWARE_STATUS_INVALID_STATE;
     }
     if ((valid_a != 0) && (valid_b == 0))
     {
         *selected_slot = 0;
         *sequence = sequence_a;
+        LOG_INFO("bootctl", "selected active record: slot=A sequence=%lu pair=%s",
+                 (unsigned long)sequence_a, BootPairName(active_a.active_pair));
         return FIRMWARE_STATUS_OK;
     }
     if ((valid_a == 0) && (valid_b != 0))
     {
         *selected_slot = 1;
         *sequence = sequence_b;
+        LOG_INFO("bootctl", "selected active record: slot=B sequence=%lu pair=%s",
+                 (unsigned long)sequence_b, BootPairName(active_b.active_pair));
         return FIRMWARE_STATUS_OK;
     }
     if (sequence_a == sequence_b)
@@ -238,16 +303,20 @@ static firmware_status_t ReadAndSelect(
                    ACTIVE_RECORD_SIZE) != 0)
         {
             *selected_slot = RECORD_SLOT_CONFLICT;
+            LOG_ERROR("bootctl", "active record conflict: matching sequences differ");
             return FIRMWARE_STATUS_INVALID_STATE;
         }
         *selected_slot = 0;
         *sequence = sequence_a;
+        LOG_INFO("bootctl", "selected duplicate active record: sequence=%lu pair=%s",
+                 (unsigned long)sequence_a, BootPairName(active_a.active_pair));
         return FIRMWARE_STATUS_OK;
     }
     /* RFC 1982 serial arithmetic cannot order values exactly half a cycle apart. */
     if ((sequence_a - sequence_b) == 0x80000000UL)
     {
         *selected_slot = RECORD_SLOT_CONFLICT;
+        LOG_ERROR("bootctl", "active record conflict: sequence half-cycle apart");
         return FIRMWARE_STATUS_INVALID_STATE;
     }
     if (SequenceIsNewer(sequence_a, sequence_b))
@@ -260,6 +329,10 @@ static firmware_status_t ReadAndSelect(
         *selected_slot = 1;
         *sequence = sequence_b;
     }
+    LOG_INFO("bootctl", "selected active record: slot=%s sequence=%lu pair=%s",
+             RecordSlotName(*selected_slot), (unsigned long)*sequence,
+             BootPairName((*selected_slot == 0) ? active_a.active_pair
+                                                : active_b.active_pair));
     return FIRMWARE_STATUS_OK;
 }
 
@@ -320,6 +393,9 @@ static firmware_status_t EncodeActive(
 
 static void Fail(boot_control_service_t *service, firmware_status_t status)
 {
+    LOG_ERROR("bootctl", "commit failed: status=%d stage=%s address=0x%08lx",
+              (int)status, BootControlStageName(service->stage),
+              (unsigned long)service->target_address);
     service->state = SERVICE_RUN_STATE_FAILED;
     service->result.status = status;
     service->result.error = BOOT_ERROR_EEPROM_COMMIT;
@@ -352,6 +428,9 @@ static firmware_status_t BeginCommit(
     service->result.error = BOOT_ERROR_NONE;
     service->result.stage = BOOT_CONTROL_STAGE_IDLE;
     service->result.native_error = 0;
+    LOG_INFO("bootctl", "commit begin: target=0x%08lx sequence=%lu pair=%s",
+             (unsigned long)target_address, (unsigned long)next_sequence,
+             BootPairName(record->active_pair));
     return FIRMWARE_STATUS_OK;
 }
 
@@ -401,6 +480,9 @@ static firmware_status_t StartCommit(
         return select_status;
     }
 
+    LOG_INFO("bootctl", "commit target selected: current=%s next=%s",
+             RecordSlotName(current_slot),
+             (current_slot == 0) ? "B" : "A");
     return BeginCommit(
         service, record,
         (current_slot == 0) ? ACTIVE_RECORD_B_ADDRESS
@@ -489,10 +571,17 @@ firmware_status_t BootControlService_LoadActive(
         return status;
     }
     (void)sequence;
-    return ValidateActiveBuffer(
+    status = ValidateActiveBuffer(
         service,
         (selected_slot == 0) ? service->write_buffer : service->verify_buffer,
         record);
+    if (FirmwareStatus_IsOk(status))
+    {
+        LOG_INFO("bootctl", "loaded active record: slot=%s pair=%s sequence=%lu",
+                 RecordSlotName(selected_slot), BootPairName(record->active_pair),
+                 (unsigned long)record->sequence);
+    }
+    return status;
 }
 
 firmware_status_t BootControlService_LoadPairCandidate(
@@ -562,11 +651,15 @@ firmware_status_t BootControlService_LoadPairCandidate(
     if ((valid_a != 0) && (valid_b == 0))
     {
         *record = active_a;
+        LOG_INFO("bootctl", "loaded pair candidate: pair=%s slot=A sequence=%lu",
+                 BootPairName(pair), (unsigned long)active_a.sequence);
         return FIRMWARE_STATUS_OK;
     }
     if ((valid_a == 0) && (valid_b != 0))
     {
         *record = active_b;
+        LOG_INFO("bootctl", "loaded pair candidate: pair=%s slot=B sequence=%lu",
+                 BootPairName(pair), (unsigned long)active_b.sequence);
         return FIRMWARE_STATUS_OK;
     }
     if (active_a.sequence == active_b.sequence)
@@ -577,6 +670,8 @@ firmware_status_t BootControlService_LoadPairCandidate(
             return FIRMWARE_STATUS_INVALID_STATE;
         }
         *record = active_a;
+        LOG_INFO("bootctl", "loaded duplicate pair candidate: pair=%s sequence=%lu",
+                 BootPairName(pair), (unsigned long)active_a.sequence);
         return FIRMWARE_STATUS_OK;
     }
     if ((active_a.sequence - active_b.sequence) == 0x80000000UL)
@@ -586,6 +681,8 @@ firmware_status_t BootControlService_LoadPairCandidate(
     *record = SequenceIsNewer(active_a.sequence, active_b.sequence)
                   ? active_a
                   : active_b;
+    LOG_INFO("bootctl", "loaded pair candidate: pair=%s sequence=%lu",
+             BootPairName(pair), (unsigned long)record->sequence);
     return FIRMWARE_STATUS_OK;
 }
 
@@ -654,11 +751,15 @@ firmware_status_t BootControlService_CommitRecoveredStart(
                 ActiveRecordsEqual(&active_b, record);
     if ((matches_a == 0) && (matches_b == 0))
     {
+        LOG_ERROR("bootctl", "recovered commit source record not found");
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
     /* Preserve one exact, already-validated source record throughout the
      * recovery commit. If both copies match, preserve A. */
+    LOG_INFO("bootctl", "recovered commit target selected: source=%s next=%s",
+             (matches_a != 0) ? "A" : "B",
+             (matches_a != 0) ? "B" : "A");
     return BeginCommit(
         service, record,
         (matches_a != 0) ? ACTIVE_RECORD_B_ADDRESS
@@ -682,6 +783,8 @@ void BootControlService_Process(boot_control_service_t *service)
     switch (service->stage)
     {
         case BOOT_CONTROL_STAGE_INVALIDATE_MARKER:
+            LOG_DEBUG("bootctl", "invalidate marker: address=0x%08lx",
+                      (unsigned long)(service->target_address + service->marker_offset));
             status = service->store->write_page(
                 service->store->context,
                 service->target_address + service->marker_offset,
@@ -711,11 +814,15 @@ void BootControlService_Process(boot_control_service_t *service)
             }
             if (service->stage == BOOT_CONTROL_STAGE_WAIT_INVALIDATE)
             {
+                LOG_DEBUG("bootctl", "marker invalidated");
                 service->stage = BOOT_CONTROL_STAGE_WRITE_BODY;
             }
             else if (service->stage == BOOT_CONTROL_STAGE_WAIT_BODY)
             {
                 service->write_offset += service->last_write_size;
+                LOG_DEBUG("bootctl", "body write complete: offset=%lu/%lu",
+                          (unsigned long)service->write_offset,
+                          (unsigned long)service->marker_offset);
                 service->stage =
                     (service->write_offset < service->marker_offset)
                         ? BOOT_CONTROL_STAGE_WRITE_BODY
@@ -723,6 +830,7 @@ void BootControlService_Process(boot_control_service_t *service)
             }
             else
             {
+                LOG_DEBUG("bootctl", "commit marker written");
                 service->stage = BOOT_CONTROL_STAGE_VERIFY_FINAL;
             }
             break;
@@ -734,6 +842,9 @@ void BootControlService_Process(boot_control_service_t *service)
             remaining = service->marker_offset - service->write_offset;
             service->last_write_size =
                 (remaining < page_remaining) ? remaining : page_remaining;
+            LOG_DEBUG("bootctl", "write body: address=0x%08lx size=%lu",
+                      (unsigned long)(service->target_address + service->write_offset),
+                      (unsigned long)service->last_write_size);
             status = service->store->write_page(
                 service->store->context,
                 service->target_address + service->write_offset,
@@ -748,6 +859,7 @@ void BootControlService_Process(boot_control_service_t *service)
             break;
 
         case BOOT_CONTROL_STAGE_READ_BODY:
+            LOG_DEBUG("bootctl", "verify body before marker");
             status = service->store->read(
                 service->store->context,
                 service->target_address,
@@ -771,6 +883,8 @@ void BootControlService_Process(boot_control_service_t *service)
         case BOOT_CONTROL_STAGE_WRITE_MARKER:
             WriteU32(
                 &service->write_buffer[service->marker_offset], COMMIT_MARKER);
+            LOG_DEBUG("bootctl", "write commit marker: address=0x%08lx",
+                      (unsigned long)(service->target_address + service->marker_offset));
             status = service->store->write_page(
                 service->store->context,
                 service->target_address + service->marker_offset,
@@ -785,6 +899,7 @@ void BootControlService_Process(boot_control_service_t *service)
             break;
 
         case BOOT_CONTROL_STAGE_VERIFY_FINAL:
+            LOG_DEBUG("bootctl", "verify final record");
             status = service->store->read(
                 service->store->context,
                 service->target_address,
@@ -819,6 +934,8 @@ void BootControlService_Process(boot_control_service_t *service)
             service->result.stage = (uint32_t)service->stage;
             service->result.native_error = 0;
             service->stage = BOOT_CONTROL_STAGE_IDLE;
+            LOG_INFO("bootctl", "commit succeeded: address=0x%08lx",
+                     (unsigned long)service->target_address);
             break;
 
         default:

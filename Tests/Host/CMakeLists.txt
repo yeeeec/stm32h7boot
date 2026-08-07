@@ -82,6 +82,15 @@ endif()
 
 add_test(NAME logger_test COMMAND logger_test)
 
+function(disable_firmware_logging target)
+    target_include_directories(${target} PRIVATE
+        ../../Utilities/Logger/include
+    )
+    target_compile_definitions(${target} PRIVATE
+        FIRMWARE_LOG_ENABLE=0
+    )
+endfunction()
+
 add_executable(services_test
     services_test.c
     ../../Services/src/capability/checked_arithmetic.c
@@ -116,6 +125,7 @@ target_include_directories(checksum_boot_control_test PRIVATE
     ../../Interfaces/include
     ../../Shared/include
 )
+disable_firmware_logging(checksum_boot_control_test)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(checksum_boot_control_test PRIVATE
@@ -218,6 +228,7 @@ target_include_directories(update_service_lifecycle_test PRIVATE
     ../../Interfaces/include
     ../../Shared/include
 )
+disable_firmware_logging(update_service_lifecycle_test)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(update_service_lifecycle_test PRIVATE
@@ -240,6 +251,7 @@ target_include_directories(recovery_service_test PRIVATE
     ../../Interfaces/include
     ../../Shared/include
 )
+disable_firmware_logging(recovery_service_test)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(recovery_service_test PRIVATE
@@ -262,6 +274,7 @@ target_include_directories(application_orchestration_test PRIVATE
     ../../Interfaces/include
     ../../Shared/include
 )
+disable_firmware_logging(application_orchestration_test)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(application_orchestration_test PRIVATE
@@ -284,6 +297,7 @@ target_include_directories(application_initial_install_test PRIVATE
     ../../Interfaces/include
     ../../Shared/include
 )
+disable_firmware_logging(application_initial_install_test)
 
 target_compile_definitions(application_initial_install_test PRIVATE
     TEST_INITIAL_INSTALL=1
@@ -313,6 +327,7 @@ target_include_directories(application_recovery_orchestration_test PRIVATE
     ../../Interfaces/include
     ../../Shared/include
 )
+disable_firmware_logging(application_recovery_orchestration_test)
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(application_recovery_orchestration_test PRIVATE
@@ -338,6 +353,7 @@ target_include_directories(application_active_fallback_test PRIVATE
     ../../Interfaces/include
     ../../Shared/include
 )
+disable_firmware_logging(application_active_fallback_test)
 
 target_compile_definitions(application_active_fallback_test PRIVATE
     TEST_ACTIVE_VALIDATION_FAILURE=1

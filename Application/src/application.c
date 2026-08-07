@@ -14,6 +14,7 @@
 #include "services/use_case/launch_service_api.h"
 #include "services/use_case/recovery_service_api.h"
 #include "services/use_case/update_service_api.h"
+#include "logging.h"
 
 typedef enum
 {
@@ -52,6 +53,81 @@ static int application_has_active_record;
 static int application_reset_after_cleanup;
 static int application_recovery_attempted;
 static int application_commit_is_recovery;
+static int application_stage_logged;
+static application_stage_t application_logged_stage;
+
+static const char *ApplicationStageName(application_stage_t stage)
+{
+    switch (stage)
+    {
+        case APPLICATION_STAGE_IDLE:
+            return "idle";
+        case APPLICATION_STAGE_RECOVERY_START:
+            return "recovery-start";
+        case APPLICATION_STAGE_RECOVERY_PROCESS:
+            return "recovery-process";
+        case APPLICATION_STAGE_WAIT_MEDIA:
+            return "wait-media";
+        case APPLICATION_STAGE_MOUNT_MEDIA:
+            return "mount-media";
+        case APPLICATION_STAGE_CHECK_REQUEST:
+            return "check-request";
+        case APPLICATION_STAGE_PREPARE_START:
+            return "prepare-start";
+        case APPLICATION_STAGE_PREPARE_PROCESS:
+            return "prepare-process";
+        case APPLICATION_STAGE_DECIDE_PACKAGE:
+            return "decide-package";
+        case APPLICATION_STAGE_INSTALL_PROCESS:
+            return "install-process";
+        case APPLICATION_STAGE_COMMIT_START:
+            return "commit-start";
+        case APPLICATION_STAGE_COMMIT_PROCESS:
+            return "commit-process";
+        case APPLICATION_STAGE_REMOVE_REQUEST:
+            return "remove-request";
+        case APPLICATION_STAGE_UNMOUNT_MEDIA:
+            return "unmount-media";
+        case APPLICATION_STAGE_VALIDATE_START:
+            return "validate-start";
+        case APPLICATION_STAGE_VALIDATE_PROCESS:
+            return "validate-process";
+        case APPLICATION_STAGE_LAUNCH:
+            return "launch";
+        case APPLICATION_STAGE_RESET:
+            return "reset";
+        case APPLICATION_STAGE_FAILED:
+            return "failed";
+        default:
+            return "unknown";
+    }
+}
+
+static const char *BootPairName(boot_pair_t pair)
+{
+    switch (pair)
+    {
+        case BOOT_PAIR_NONE:
+            return "none";
+        case BOOT_PAIR_1:
+            return "pair-1";
+        case BOOT_PAIR_2:
+            return "pair-2";
+        default:
+            return "unknown";
+    }
+}
+
+static void LogStageEntry(void)
+{
+    if ((application_stage_logged == 0) ||
+        (application_logged_stage != application_stage))
+    {
+        LOG_INFO("app", "stage=%s", ApplicationStageName(application_stage));
+        application_logged_stage = application_stage;
+        application_stage_logged = 1;
+    }
+}
 
 static void BeginUnmount(application_stage_t next)
 {
@@ -104,6 +180,7 @@ firmware_status_t Application_Configure(
     }
     application_dependencies = *dependencies;
     application_configured = 1;
+    LOG_INFO("app", "configured: request=%s", application_dependencies.request_path);
     return FIRMWARE_STATUS_OK;
 }
 
@@ -131,7 +208,22 @@ firmware_status_t Application_Init(void)
     application_stage = FirmwareStatus_IsOk(status)
                             ? APPLICATION_STAGE_WAIT_MEDIA
                             : APPLICATION_STAGE_RECOVERY_START;
+    application_stage_logged = 0;
     application_initialized = 1;
+    if (application_has_active_record != 0)
+    {
+        LOG_INFO("app", "active record loaded: pair=%s version=%u.%u.%u build=%lu",
+                 BootPairName(application_active_record.active_pair),
+                 (unsigned int)application_active_record.release_version.major,
+                 (unsigned int)application_active_record.release_version.minor,
+                 (unsigned int)application_active_record.release_version.patch,
+                 (unsigned long)application_active_record.build_number);
+    }
+    else
+    {
+        LOG_WARN("app", "no active record: status=%d, entering recovery",
+                 (int)status);
+    }
     return FIRMWARE_STATUS_OK;
 }
 
@@ -143,6 +235,7 @@ firmware_status_t Application_Process(void)
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+    LogStageEntry();
 
     switch (application_stage)
     {
@@ -151,6 +244,7 @@ firmware_status_t Application_Process(void)
                 application_dependencies.recovery, BOOT_PAIR_NONE);
             if (!FirmwareStatus_IsOk(status))
             {
+                LOG_ERROR("app", "recovery start failed: status=%d", (int)status);
                 return status;
             }
             application_recovery_attempted = 1;
@@ -170,6 +264,9 @@ firmware_status_t Application_Process(void)
                     return FIRMWARE_STATUS_INVALID_STATE;
                 }
                 application_candidate_record = *candidate;
+                LOG_INFO("app", "recovery candidate selected: pair=%s sequence=%lu",
+                         BootPairName(application_candidate_record.active_pair),
+                         (unsigned long)application_candidate_record.sequence);
                 application_commit_is_recovery = 1;
                 application_after_commit = APPLICATION_STAGE_VALIDATE_START;
                 application_commit_failure = APPLICATION_STAGE_FAILED;
@@ -185,10 +282,17 @@ firmware_status_t Application_Process(void)
                     (result->error == BOOT_ERROR_NO_VALID_PAIR))
                 {
                     /* An unprovisioned device may wait for its first package. */
+                    LOG_WARN("app", "recovery found no valid pair; waiting for package");
                     application_stage = APPLICATION_STAGE_WAIT_MEDIA;
                 }
                 else
                 {
+                    LOG_ERROR("app", "recovery failed: status=%d error=%d stage=%lu",
+                              (result == NULL) ? (int)FIRMWARE_STATUS_INVALID_STATE
+                                               : (int)result->status,
+                              (result == NULL) ? (int)BOOT_ERROR_INTERNAL
+                                               : (int)result->error,
+                              (result == NULL) ? 0UL : (unsigned long)result->stage);
                     return (result == NULL) ? FIRMWARE_STATUS_INVALID_STATE
                                             : result->status;
                 }
@@ -203,6 +307,7 @@ firmware_status_t Application_Process(void)
                 application_dependencies.package_source->context, &present);
             if (FirmwareStatus_IsOk(status) && (present != 0))
             {
+                LOG_INFO("app", "update media detected");
                 application_stage = APPLICATION_STAGE_MOUNT_MEDIA;
             }
             else if (application_has_active_record == 0)
@@ -212,6 +317,10 @@ firmware_status_t Application_Process(void)
             }
             else
             {
+                if (!FirmwareStatus_IsOk(status))
+                {
+                    LOG_WARN("app", "media probe failed: status=%d", (int)status);
+                }
                 application_stage = APPLICATION_STAGE_VALIDATE_START;
             }
             break;
@@ -223,10 +332,12 @@ firmware_status_t Application_Process(void)
             if (FirmwareStatus_IsOk(status))
             {
                 application_media_mounted = 1;
+                LOG_INFO("app", "update media mounted");
                 application_stage = APPLICATION_STAGE_CHECK_REQUEST;
             }
             else
             {
+                LOG_WARN("app", "media mount failed: status=%d", (int)status);
                 application_stage = (application_has_active_record != 0)
                                         ? APPLICATION_STAGE_VALIDATE_START
                                         : APPLICATION_STAGE_WAIT_MEDIA;
@@ -242,10 +353,20 @@ firmware_status_t Application_Process(void)
                 application_dependencies.request_path, &present);
             if (FirmwareStatus_IsOk(status) && (present != 0))
             {
+                LOG_INFO("app", "update request found: %s",
+                         application_dependencies.request_path);
                 application_stage = APPLICATION_STAGE_PREPARE_START;
             }
             else
             {
+                if (FirmwareStatus_IsOk(status))
+                {
+                    LOG_INFO("app", "no update request found");
+                }
+                else
+                {
+                    LOG_WARN("app", "request probe failed: status=%d", (int)status);
+                }
                 BeginUnmount((application_has_active_record != 0)
                                  ? APPLICATION_STAGE_VALIDATE_START
                                  : APPLICATION_STAGE_WAIT_MEDIA);
@@ -257,10 +378,12 @@ firmware_status_t Application_Process(void)
             status = UpdateService_PrepareStart(application_dependencies.update);
             if (FirmwareStatus_IsOk(status))
             {
+                LOG_INFO("app", "update prepare started");
                 application_stage = APPLICATION_STAGE_PREPARE_PROCESS;
             }
             else
             {
+                LOG_WARN("app", "update prepare start failed: status=%d", (int)status);
                 BeginUnmount((application_has_active_record != 0)
                                  ? APPLICATION_STAGE_VALIDATE_START
                                  : APPLICATION_STAGE_WAIT_MEDIA);
@@ -272,11 +395,21 @@ firmware_status_t Application_Process(void)
             if (UpdateService_GetState(application_dependencies.update) ==
                 SERVICE_RUN_STATE_SUCCEEDED)
             {
+                LOG_INFO("app", "update manifest prepared");
                 application_stage = APPLICATION_STAGE_DECIDE_PACKAGE;
             }
             else if (UpdateService_GetState(application_dependencies.update) ==
                      SERVICE_RUN_STATE_FAILED)
             {
+                const service_result_t *result =
+                    UpdateService_GetResult(application_dependencies.update);
+
+                LOG_WARN("app", "update prepare failed: status=%d error=%d stage=%lu",
+                         (result == NULL) ? (int)FIRMWARE_STATUS_INVALID_STATE
+                                          : (int)result->status,
+                         (result == NULL) ? (int)BOOT_ERROR_INTERNAL
+                                          : (int)result->error,
+                         (result == NULL) ? 0UL : (unsigned long)result->stage);
                 BeginUnmount((application_has_active_record != 0)
                                  ? APPLICATION_STAGE_VALIDATE_START
                                  : APPLICATION_STAGE_WAIT_MEDIA);
@@ -294,6 +427,11 @@ firmware_status_t Application_Process(void)
             }
             if ((application_has_active_record != 0) && IsAlreadyActive(manifest))
             {
+                LOG_INFO("app", "package already active: version=%u.%u.%u build=%lu",
+                         (unsigned int)manifest->release_version.major,
+                         (unsigned int)manifest->release_version.minor,
+                         (unsigned int)manifest->release_version.patch,
+                         (unsigned long)manifest->build_number);
                 application_reset_after_cleanup = 0;
                 application_stage = APPLICATION_STAGE_REMOVE_REQUEST;
                 break;
@@ -306,6 +444,11 @@ firmware_status_t Application_Process(void)
                      &application_active_record.release_version,
                      &manifest->release_version)))
             {
+                LOG_WARN("app", "package rejected by version policy: version=%u.%u.%u build=%lu",
+                         (unsigned int)manifest->release_version.major,
+                         (unsigned int)manifest->release_version.minor,
+                         (unsigned int)manifest->release_version.patch,
+                         (unsigned long)manifest->build_number);
                 BeginUnmount((application_has_active_record != 0)
                                  ? APPLICATION_STAGE_VALIDATE_START
                                  : APPLICATION_STAGE_WAIT_MEDIA);
@@ -319,10 +462,12 @@ firmware_status_t Application_Process(void)
                                application_dependencies.update, BOOT_PAIR_1);
             if (FirmwareStatus_IsOk(status))
             {
+                LOG_INFO("app", "update install started");
                 application_stage = APPLICATION_STAGE_INSTALL_PROCESS;
             }
             else
             {
+                LOG_WARN("app", "update install start failed: status=%d", (int)status);
                 BeginUnmount((application_has_active_record != 0)
                                  ? APPLICATION_STAGE_VALIDATE_START
                                  : APPLICATION_STAGE_WAIT_MEDIA);
@@ -343,6 +488,10 @@ firmware_status_t Application_Process(void)
                     return FIRMWARE_STATUS_INVALID_STATE;
                 }
                 application_candidate_record = *candidate;
+                LOG_INFO("app", "update install completed: target=%s app=%lu gui=%lu",
+                         BootPairName(application_candidate_record.active_pair),
+                         (unsigned long)application_candidate_record.app_size,
+                         (unsigned long)application_candidate_record.gui_size);
                 application_commit_is_recovery = 0;
                 application_after_commit = APPLICATION_STAGE_REMOVE_REQUEST;
                 application_commit_failure = (application_has_active_record != 0)
@@ -353,6 +502,15 @@ firmware_status_t Application_Process(void)
             else if (UpdateService_GetState(application_dependencies.update) ==
                      SERVICE_RUN_STATE_FAILED)
             {
+                const service_result_t *result =
+                    UpdateService_GetResult(application_dependencies.update);
+
+                LOG_WARN("app", "update install failed: status=%d error=%d stage=%lu",
+                         (result == NULL) ? (int)FIRMWARE_STATUS_INVALID_STATE
+                                          : (int)result->status,
+                         (result == NULL) ? (int)BOOT_ERROR_INTERNAL
+                                          : (int)result->error,
+                         (result == NULL) ? 0UL : (unsigned long)result->stage);
                 BeginUnmount((application_has_active_record != 0)
                                  ? APPLICATION_STAGE_VALIDATE_START
                                  : APPLICATION_STAGE_FAILED);
@@ -369,10 +527,15 @@ firmware_status_t Application_Process(void)
                                &application_candidate_record);
             if (FirmwareStatus_IsOk(status))
             {
+                LOG_INFO("app", "active record commit started: recovery=%d target=%s",
+                         application_commit_is_recovery,
+                         BootPairName(application_candidate_record.active_pair));
                 application_stage = APPLICATION_STAGE_COMMIT_PROCESS;
             }
             else
             {
+                LOG_ERROR("app", "active record commit start failed: status=%d",
+                          (int)status);
                 BeginUnmount(application_commit_failure);
             }
             break;
@@ -388,11 +551,22 @@ firmware_status_t Application_Process(void)
                     (application_after_commit == APPLICATION_STAGE_REMOVE_REQUEST)
                         ? 1
                         : 0;
+                LOG_INFO("app", "active record committed: pair=%s",
+                         BootPairName(application_active_record.active_pair));
                 application_stage = application_after_commit;
             }
             else if (BootControlService_GetState(application_dependencies.boot_control) ==
                      SERVICE_RUN_STATE_FAILED)
             {
+                const service_result_t *result =
+                    BootControlService_GetResult(application_dependencies.boot_control);
+
+                LOG_ERROR("app", "active record commit failed: status=%d error=%d stage=%lu",
+                          (result == NULL) ? (int)FIRMWARE_STATUS_INVALID_STATE
+                                           : (int)result->status,
+                          (result == NULL) ? (int)BOOT_ERROR_INTERNAL
+                                           : (int)result->error,
+                          (result == NULL) ? 0UL : (unsigned long)result->stage);
                 BeginUnmount(application_commit_failure);
             }
             break;
@@ -402,6 +576,7 @@ firmware_status_t Application_Process(void)
             (void)application_dependencies.package_source->remove(
                 application_dependencies.package_source->context,
                 application_dependencies.request_path);
+            LOG_INFO("app", "update request cleanup requested");
             BeginUnmount(application_reset_after_cleanup != 0
                              ? APPLICATION_STAGE_RESET
                              : APPLICATION_STAGE_VALIDATE_START);
@@ -411,6 +586,7 @@ firmware_status_t Application_Process(void)
             (void)application_dependencies.package_source->unmount(
                 application_dependencies.package_source->context);
             application_media_mounted = 0;
+            LOG_INFO("app", "update media unmounted");
             application_stage = application_after_unmount;
             break;
 
@@ -419,8 +595,12 @@ firmware_status_t Application_Process(void)
                 application_dependencies.validation, &application_active_record);
             if (!FirmwareStatus_IsOk(status))
             {
+                LOG_ERROR("app", "active validation start failed: status=%d",
+                          (int)status);
                 return status;
             }
+            LOG_INFO("app", "active validation started: pair=%s",
+                     BootPairName(application_active_record.active_pair));
             application_stage = APPLICATION_STAGE_VALIDATE_PROCESS;
             break;
 
@@ -429,6 +609,7 @@ firmware_status_t Application_Process(void)
             if (ActiveValidationService_GetState(application_dependencies.validation) ==
                 SERVICE_RUN_STATE_SUCCEEDED)
             {
+                LOG_INFO("app", "active validation succeeded");
                 application_stage = APPLICATION_STAGE_LAUNCH;
             }
             else if (ActiveValidationService_GetState(application_dependencies.validation) ==
@@ -436,20 +617,33 @@ firmware_status_t Application_Process(void)
             {
                 if (application_recovery_attempted == 0)
                 {
+                    const service_result_t *result =
+                        ActiveValidationService_GetResult(application_dependencies.validation);
+
+                    LOG_WARN("app", "active validation failed, trying recovery: status=%d error=%d stage=%lu",
+                             (result == NULL) ? (int)FIRMWARE_STATUS_INVALID_STATE
+                                              : (int)result->status,
+                             (result == NULL) ? (int)BOOT_ERROR_INTERNAL
+                                              : (int)result->error,
+                             (result == NULL) ? 0UL : (unsigned long)result->stage);
                     application_stage = APPLICATION_STAGE_RECOVERY_START;
                 }
                 else
                 {
+                    LOG_ERROR("app", "active validation failed after recovery");
                     return FIRMWARE_STATUS_INVALID_STATE;
                 }
             }
             break;
 
         case APPLICATION_STAGE_LAUNCH:
+            LOG_INFO("app", "launching active pair=%s",
+                     BootPairName(application_active_record.active_pair));
             return LaunchService_Execute(
                 application_dependencies.launch, &application_active_record);
 
         case APPLICATION_STAGE_RESET:
+            LOG_WARN("app", "requesting reset after update cleanup");
             application_dependencies.system_reset->request(
                 application_dependencies.system_reset->context);
             break;
