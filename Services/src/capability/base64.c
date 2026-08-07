@@ -31,12 +31,8 @@ static int DecodeCharacter(char value)
     return -1;
 }
 
-firmware_status_t Base64_DecodeStrict(
-    const char *encoded,
-    size_t encoded_size,
-    uint8_t *decoded,
-    size_t decoded_capacity,
-    size_t *decoded_size)
+firmware_status_t Base64_DecodeStrict(const char *encoded, size_t encoded_size, uint8_t *decoded,
+                                      size_t decoded_capacity, size_t *decoded_size)
 {
     size_t output_size;
     size_t padding = 0U;
@@ -92,8 +88,7 @@ firmware_status_t Base64_DecodeStrict(
                 }
             }
         }
-        if ((encoded[input_offset + 2U] == '=') &&
-            (encoded[input_offset + 3U] != '='))
+        if ((encoded[input_offset + 2U] == '=') && (encoded[input_offset + 3U] != '='))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
@@ -101,26 +96,23 @@ firmware_status_t Base64_DecodeStrict(
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
-        if ((encoded[input_offset + 3U] == '=') &&
-            (encoded[input_offset + 2U] != '=') && ((values[2] & 0x03) != 0))
+        if ((encoded[input_offset + 3U] == '=') && (encoded[input_offset + 2U] != '=') &&
+            ((values[2] & 0x03) != 0))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
 
         if (output_offset < output_size)
         {
-            decoded[output_offset++] =
-                (uint8_t)((values[0] << 2) | (values[1] >> 4));
+            decoded[output_offset++] = (uint8_t) ((values[0] << 2) | (values[1] >> 4));
         }
         if (output_offset < output_size)
         {
-            decoded[output_offset++] =
-                (uint8_t)((values[1] << 4) | (values[2] >> 2));
+            decoded[output_offset++] = (uint8_t) ((values[1] << 4) | (values[2] >> 2));
         }
         if (output_offset < output_size)
         {
-            decoded[output_offset++] =
-                (uint8_t)((values[2] << 6) | values[3]);
+            decoded[output_offset++] = (uint8_t) ((values[2] << 6) | values[3]);
         }
     }
     *decoded_size = output_size;

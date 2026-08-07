@@ -197,11 +197,11 @@ firmware_status_t Application_Init(void)
     {
         return status;
     }
-    application_media_mounted       = 0;
-    application_has_active_record   = FirmwareStatus_IsOk(status) ? 1 : 0;
-    application_reset_after_cleanup = 0;
-    application_recovery_attempted  = 0;
-    application_commit_is_recovery  = 0;
+    application_media_mounted          = 0;
+    application_has_active_record      = FirmwareStatus_IsOk(status) ? 1 : 0;
+    application_reset_after_cleanup    = 0;
+    application_recovery_attempted     = 0;
+    application_commit_is_recovery     = 0;
     application_wait_for_media_removal = 0;
     application_stage        = FirmwareStatus_IsOk(status) ? APPLICATION_STAGE_WAIT_MEDIA
                                                            : APPLICATION_STAGE_RECOVERY_START;
@@ -329,7 +329,7 @@ firmware_status_t Application_Process(void)
                 application_dependencies.package_source->context);
             if (FirmwareStatus_IsOk(status))
             {
-                application_media_mounted = 1;
+                application_media_mounted          = 1;
                 application_wait_for_media_removal = 0;
                 LOG_INFO("app", "update media mounted");
                 application_stage = APPLICATION_STAGE_CHECK_REQUEST;

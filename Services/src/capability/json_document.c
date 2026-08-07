@@ -22,8 +22,7 @@ static void SkipWhitespace(json_parser_t *parser)
     {
         uint8_t value = parser->document->data[parser->position];
 
-        if ((value != ' ') && (value != '\t') &&
-            (value != '\r') && (value != '\n'))
+        if ((value != ' ') && (value != '\t') && (value != '\r') && (value != '\n'))
         {
             break;
         }
@@ -31,12 +30,8 @@ static void SkipWhitespace(json_parser_t *parser)
     }
 }
 
-static firmware_status_t AllocateToken(
-    json_parser_t *parser,
-    json_token_type_t type,
-    int32_t parent,
-    uint32_t start,
-    uint32_t *token_index)
+static firmware_status_t AllocateToken(json_parser_t *parser, json_token_type_t type,
+                                       int32_t parent, uint32_t start, uint32_t *token_index)
 {
     json_token_t *token;
 
@@ -44,38 +39,31 @@ static firmware_status_t AllocateToken(
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
-    *token_index = parser->document->token_count++;
-    token = &parser->document->tokens[*token_index];
-    token->type = type;
-    token->start = start;
-    token->end = start;
-    token->parent = parent;
+    *token_index       = parser->document->token_count++;
+    token              = &parser->document->tokens[*token_index];
+    token->type        = type;
+    token->start       = start;
+    token->end         = start;
+    token->parent      = parent;
     token->child_count = 0U;
-    token->is_key = 0U;
+    token->is_key      = 0U;
     return FIRMWARE_STATUS_OK;
 }
 
-static firmware_status_t ParseValue(
-    json_parser_t *parser,
-    int32_t parent,
-    uint32_t *token_index);
+static firmware_status_t ParseValue(json_parser_t *parser, int32_t parent, uint32_t *token_index);
 
-static firmware_status_t ParseString(
-    json_parser_t *parser,
-    int32_t parent,
-    int is_key,
-    uint32_t *token_index)
+static firmware_status_t ParseString(json_parser_t *parser, int32_t parent, int is_key,
+                                     uint32_t *token_index)
 {
     firmware_status_t status;
 
     ++parser->position;
-    status = AllocateToken(
-        parser, JSON_TOKEN_STRING, parent, parser->position, token_index);
+    status = AllocateToken(parser, JSON_TOKEN_STRING, parent, parser->position, token_index);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
-    parser->document->tokens[*token_index].is_key = (uint8_t)is_key;
+    parser->document->tokens[*token_index].is_key = (uint8_t) is_key;
     while (parser->position < parser->document->size)
     {
         uint8_t value = parser->document->data[parser->position];
@@ -96,10 +84,7 @@ static firmware_status_t ParseString(
     return FIRMWARE_STATUS_INVALID_STATE;
 }
 
-static firmware_status_t ParseNumber(
-    json_parser_t *parser,
-    int32_t parent,
-    uint32_t *token_index)
+static firmware_status_t ParseNumber(json_parser_t *parser, int32_t parent, uint32_t *token_index)
 {
     uint32_t start = parser->position;
     firmware_status_t status;
@@ -131,20 +116,14 @@ static firmware_status_t ParseNumber(
     return status;
 }
 
-static int MatchLiteral(
-    const json_parser_t *parser,
-    const char *literal,
-    uint32_t length)
+static int MatchLiteral(const json_parser_t *parser, const char *literal, uint32_t length)
 {
     return (parser->position <= parser->document->size) &&
            (length <= (parser->document->size - parser->position)) &&
            (memcmp(&parser->document->data[parser->position], literal, length) == 0);
 }
 
-static firmware_status_t ParseLiteral(
-    json_parser_t *parser,
-    int32_t parent,
-    uint32_t *token_index)
+static firmware_status_t ParseLiteral(json_parser_t *parser, int32_t parent, uint32_t *token_index)
 {
     json_token_type_t type;
     uint32_t length;
@@ -152,25 +131,24 @@ static firmware_status_t ParseLiteral(
 
     if (MatchLiteral(parser, "true", 4U))
     {
-        type = JSON_TOKEN_TRUE;
+        type   = JSON_TOKEN_TRUE;
         length = 4U;
     }
     else if (MatchLiteral(parser, "false", 5U))
     {
-        type = JSON_TOKEN_FALSE;
+        type   = JSON_TOKEN_FALSE;
         length = 5U;
     }
     else if (MatchLiteral(parser, "null", 4U))
     {
-        type = JSON_TOKEN_NULL;
+        type   = JSON_TOKEN_NULL;
         length = 4U;
     }
     else
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    status = AllocateToken(
-        parser, type, parent, parser->position, token_index);
+    status = AllocateToken(parser, type, parent, parser->position, token_index);
     if (FirmwareStatus_IsOk(status))
     {
         parser->position += length;
@@ -179,10 +157,7 @@ static firmware_status_t ParseLiteral(
     return status;
 }
 
-static firmware_status_t ParseObject(
-    json_parser_t *parser,
-    int32_t parent,
-    uint32_t *token_index)
+static firmware_status_t ParseObject(json_parser_t *parser, int32_t parent, uint32_t *token_index)
 {
     uint32_t object_index;
     firmware_status_t status;
@@ -191,8 +166,7 @@ static firmware_status_t ParseObject(
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
-    status = AllocateToken(
-        parser, JSON_TOKEN_OBJECT, parent, parser->position, &object_index);
+    status = AllocateToken(parser, JSON_TOKEN_OBJECT, parent, parser->position, &object_index);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -218,7 +192,7 @@ static firmware_status_t ParseObject(
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
-        status = ParseString(parser, (int32_t)object_index, 1, &key_index);
+        status = ParseString(parser, (int32_t) object_index, 1, &key_index);
         if (!FirmwareStatus_IsOk(status))
         {
             return status;
@@ -230,13 +204,13 @@ static firmware_status_t ParseObject(
             return FIRMWARE_STATUS_INVALID_STATE;
         }
         SkipWhitespace(parser);
-        status = ParseValue(parser, (int32_t)object_index, &value_index);
+        status = ParseValue(parser, (int32_t) object_index, &value_index);
         if (!FirmwareStatus_IsOk(status))
         {
             return status;
         }
-        (void)key_index;
-        (void)value_index;
+        (void) key_index;
+        (void) value_index;
         ++parser->document->tokens[object_index].child_count;
         SkipWhitespace(parser);
         if (parser->position >= parser->document->size)
@@ -258,10 +232,7 @@ static firmware_status_t ParseObject(
     }
 }
 
-static firmware_status_t ParseArray(
-    json_parser_t *parser,
-    int32_t parent,
-    uint32_t *token_index)
+static firmware_status_t ParseArray(json_parser_t *parser, int32_t parent, uint32_t *token_index)
 {
     uint32_t array_index;
     firmware_status_t status;
@@ -270,8 +241,7 @@ static firmware_status_t ParseArray(
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
-    status = AllocateToken(
-        parser, JSON_TOKEN_ARRAY, parent, parser->position, &array_index);
+    status = AllocateToken(parser, JSON_TOKEN_ARRAY, parent, parser->position, &array_index);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -291,12 +261,12 @@ static firmware_status_t ParseArray(
     {
         uint32_t value_index;
 
-        status = ParseValue(parser, (int32_t)array_index, &value_index);
+        status = ParseValue(parser, (int32_t) array_index, &value_index);
         if (!FirmwareStatus_IsOk(status))
         {
             return status;
         }
-        (void)value_index;
+        (void) value_index;
         ++parser->document->tokens[array_index].child_count;
         SkipWhitespace(parser);
         if (parser->position >= parser->document->size)
@@ -318,10 +288,7 @@ static firmware_status_t ParseArray(
     }
 }
 
-static firmware_status_t ParseValue(
-    json_parser_t *parser,
-    int32_t parent,
-    uint32_t *token_index)
+static firmware_status_t ParseValue(json_parser_t *parser, int32_t parent, uint32_t *token_index)
 {
     SkipWhitespace(parser);
     if (parser->position >= parser->document->size)
@@ -350,30 +317,25 @@ static firmware_status_t ParseValue(
     }
 }
 
-static int TokenStringEquals(
-    const json_document_t *document,
-    const json_token_t *token,
-    const char *value)
+static int TokenStringEquals(const json_document_t *document, const json_token_t *token,
+                             const char *value)
 {
     size_t length = strlen(value);
 
-    return (token->type == JSON_TOKEN_STRING) &&
-           (length == (size_t)(token->end - token->start)) &&
+    return (token->type == JSON_TOKEN_STRING) && (length == (size_t) (token->end - token->start)) &&
            (memcmp(&document->data[token->start], value, length) == 0);
 }
 
-static int CompareTokenStrings(
-    const json_document_t *document,
-    uint32_t lhs_index,
-    uint32_t rhs_index)
+static int CompareTokenStrings(const json_document_t *document, uint32_t lhs_index,
+                               uint32_t rhs_index)
 {
     const json_token_t *lhs = &document->tokens[lhs_index];
     const json_token_t *rhs = &document->tokens[rhs_index];
-    uint32_t lhs_length = lhs->end - lhs->start;
-    uint32_t rhs_length = rhs->end - rhs->start;
-    uint32_t common_length = (lhs_length < rhs_length) ? lhs_length : rhs_length;
-    int comparison = memcmp(
-        &document->data[lhs->start], &document->data[rhs->start], common_length);
+    uint32_t lhs_length     = lhs->end - lhs->start;
+    uint32_t rhs_length     = rhs->end - rhs->start;
+    uint32_t common_length  = (lhs_length < rhs_length) ? lhs_length : rhs_length;
+    int comparison =
+        memcmp(&document->data[lhs->start], &document->data[rhs->start], common_length);
 
     if (comparison != 0)
     {
@@ -398,14 +360,14 @@ static firmware_status_t RejectDuplicateKeys(const json_document_t *document)
         {
             uint32_t rhs;
 
-            if ((document->tokens[lhs].parent != (int32_t)object_index) ||
+            if ((document->tokens[lhs].parent != (int32_t) object_index) ||
                 (document->tokens[lhs].is_key == 0U))
             {
                 continue;
             }
             for (rhs = lhs + 1U; rhs < document->token_count; ++rhs)
             {
-                if ((document->tokens[rhs].parent == (int32_t)object_index) &&
+                if ((document->tokens[rhs].parent == (int32_t) object_index) &&
                     (document->tokens[rhs].is_key != 0U) &&
                     (CompareTokenStrings(document, lhs, rhs) == 0))
                 {
@@ -417,49 +379,41 @@ static firmware_status_t RejectDuplicateKeys(const json_document_t *document)
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t JsonDocument_Parse(
-    json_document_t *document,
-    const uint8_t *data,
-    uint32_t size,
-    json_token_t *tokens,
-    uint32_t token_capacity)
+firmware_status_t JsonDocument_Parse(json_document_t *document, const uint8_t *data, uint32_t size,
+                                     json_token_t *tokens, uint32_t token_capacity)
 {
     json_parser_t parser;
     uint32_t root_index;
     firmware_status_t status;
 
-    if ((document == NULL) || (data == NULL) || (size == 0U) ||
-        (tokens == NULL) || (token_capacity == 0U))
+    if ((document == NULL) || (data == NULL) || (size == 0U) || (tokens == NULL) ||
+        (token_capacity == 0U))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    document->data = data;
-    document->size = size;
-    document->tokens = tokens;
+    document->data           = data;
+    document->size           = size;
+    document->tokens         = tokens;
     document->token_capacity = token_capacity;
-    document->token_count = 0U;
-    parser.document = document;
-    parser.position = 0U;
-    parser.depth = 0U;
-    status = ParseValue(&parser, -1, &root_index);
+    document->token_count    = 0U;
+    parser.document          = document;
+    parser.position          = 0U;
+    parser.depth             = 0U;
+    status                   = ParseValue(&parser, -1, &root_index);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
     SkipWhitespace(&parser);
-    if ((root_index != 0U) || (parser.position != size) ||
-        (tokens[0].type != JSON_TOKEN_OBJECT))
+    if ((root_index != 0U) || (parser.position != size) || (tokens[0].type != JSON_TOKEN_OBJECT))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
     return RejectDuplicateKeys(document);
 }
 
-firmware_status_t JsonDocument_FindMember(
-    const json_document_t *document,
-    uint32_t object_index,
-    const char *key,
-    uint32_t *value_index)
+firmware_status_t JsonDocument_FindMember(const json_document_t *document, uint32_t object_index,
+                                          const char *key, uint32_t *value_index)
 {
     uint32_t index;
 
@@ -473,8 +427,8 @@ firmware_status_t JsonDocument_FindMember(
     {
         const json_token_t *token = &document->tokens[index];
 
-        if ((token->parent == (int32_t)object_index) &&
-            (token->is_key != 0U) && TokenStringEquals(document, token, key))
+        if ((token->parent == (int32_t) object_index) && (token->is_key != 0U) &&
+            TokenStringEquals(document, token, key))
         {
             if ((index + 1U) >= document->token_count)
             {
@@ -487,24 +441,20 @@ firmware_status_t JsonDocument_FindMember(
     return FIRMWARE_STATUS_INVALID_STATE;
 }
 
-firmware_status_t JsonDocument_ArrayGet(
-    const json_document_t *document,
-    uint32_t array_index,
-    uint32_t element_index,
-    uint32_t *value_index)
+firmware_status_t JsonDocument_ArrayGet(const json_document_t *document, uint32_t array_index,
+                                        uint32_t element_index, uint32_t *value_index)
 {
     uint32_t index;
     uint32_t current = 0U;
 
-    if ((document == NULL) || (value_index == NULL) ||
-        (array_index >= document->token_count) ||
+    if ((document == NULL) || (value_index == NULL) || (array_index >= document->token_count) ||
         (document->tokens[array_index].type != JSON_TOKEN_ARRAY))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     for (index = array_index + 1U; index < document->token_count; ++index)
     {
-        if (document->tokens[index].parent == (int32_t)array_index)
+        if (document->tokens[index].parent == (int32_t) array_index)
         {
             if (current++ == element_index)
             {
@@ -516,24 +466,20 @@ firmware_status_t JsonDocument_ArrayGet(
     return FIRMWARE_STATUS_OUT_OF_RANGE;
 }
 
-firmware_status_t JsonDocument_CopyString(
-    const json_document_t *document,
-    uint32_t token_index,
-    char *destination,
-    uint32_t destination_size)
+firmware_status_t JsonDocument_CopyString(const json_document_t *document, uint32_t token_index,
+                                          char *destination, uint32_t destination_size)
 {
     const json_token_t *token;
     uint32_t length;
 
-    if ((document == NULL) || (destination == NULL) ||
-        (token_index >= document->token_count))
+    if ((document == NULL) || (destination == NULL) || (token_index >= document->token_count))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    token = &document->tokens[token_index];
+    token  = &document->tokens[token_index];
     length = token->end - token->start;
-    if ((token->type != JSON_TOKEN_STRING) ||
-        (destination_size == 0U) || (length >= destination_size))
+    if ((token->type != JSON_TOKEN_STRING) || (destination_size == 0U) ||
+        (length >= destination_size))
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
@@ -542,17 +488,14 @@ firmware_status_t JsonDocument_CopyString(
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t JsonDocument_GetU32(
-    const json_document_t *document,
-    uint32_t token_index,
-    uint32_t *value)
+firmware_status_t JsonDocument_GetU32(const json_document_t *document, uint32_t token_index,
+                                      uint32_t *value)
 {
     const json_token_t *token;
     uint32_t result = 0U;
     uint32_t index;
 
-    if ((document == NULL) || (value == NULL) ||
-        (token_index >= document->token_count))
+    if ((document == NULL) || (value == NULL) || (token_index >= document->token_count))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -563,7 +506,7 @@ firmware_status_t JsonDocument_GetU32(
     }
     for (index = token->start; index < token->end; ++index)
     {
-        uint32_t digit = (uint32_t)(document->data[index] - '0');
+        uint32_t digit = (uint32_t) (document->data[index] - '0');
 
         if (result > ((UINT32_MAX - digit) / 10U))
         {
@@ -575,13 +518,10 @@ firmware_status_t JsonDocument_GetU32(
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t JsonDocument_GetBoolean(
-    const json_document_t *document,
-    uint32_t token_index,
-    int *value)
+firmware_status_t JsonDocument_GetBoolean(const json_document_t *document, uint32_t token_index,
+                                          int *value)
 {
-    if ((document == NULL) || (value == NULL) ||
-        (token_index >= document->token_count))
+    if ((document == NULL) || (value == NULL) || (token_index >= document->token_count))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -598,43 +538,31 @@ firmware_status_t JsonDocument_GetBoolean(
     return FIRMWARE_STATUS_INVALID_STATE;
 }
 
-int JsonDocument_StringEquals(
-    const json_document_t *document,
-    uint32_t token_index,
-    const char *value)
+int JsonDocument_StringEquals(const json_document_t *document, uint32_t token_index,
+                              const char *value)
 {
-    return (document != NULL) && (value != NULL) &&
-           (token_index < document->token_count) &&
+    return (document != NULL) && (value != NULL) && (token_index < document->token_count) &&
            TokenStringEquals(document, &document->tokens[token_index], value);
 }
 
-static firmware_status_t Emit(
-    json_canonical_sink_fn sink,
-    void *context,
-    const void *data,
-    size_t size)
+static firmware_status_t Emit(json_canonical_sink_fn sink, void *context, const void *data,
+                              size_t size)
 {
     return sink(context, data, size);
 }
 
-static firmware_status_t CanonicalizeToken(
-    const json_document_t *document,
-    uint32_t token_index,
-    uint32_t excluded_object_index,
-    const char *excluded_member,
-    json_canonical_sink_fn sink,
-    void *sink_context);
+static firmware_status_t CanonicalizeToken(const json_document_t *document, uint32_t token_index,
+                                           uint32_t excluded_object_index,
+                                           const char *excluded_member, json_canonical_sink_fn sink,
+                                           void *sink_context);
 
-static firmware_status_t CanonicalizeObject(
-    const json_document_t *document,
-    uint32_t object_index,
-    uint32_t excluded_object_index,
-    const char *excluded_member,
-    json_canonical_sink_fn sink,
-    void *sink_context)
+static firmware_status_t CanonicalizeObject(const json_document_t *document, uint32_t object_index,
+                                            uint32_t excluded_object_index,
+                                            const char *excluded_member,
+                                            json_canonical_sink_fn sink, void *sink_context)
 {
-    uint32_t emitted = 0U;
-    uint32_t previous_key = JSON_DOCUMENT_NO_TOKEN;
+    uint32_t emitted         = 0U;
+    uint32_t previous_key    = JSON_DOCUMENT_NO_TOKEN;
     firmware_status_t status = Emit(sink, sink_context, "{", 1U);
 
     while (FirmwareStatus_IsOk(status))
@@ -646,8 +574,7 @@ static firmware_status_t CanonicalizeObject(
         {
             const json_token_t *token = &document->tokens[index];
 
-            if ((token->parent != (int32_t)object_index) ||
-                (token->is_key == 0U) ||
+            if ((token->parent != (int32_t) object_index) || (token->is_key == 0U) ||
                 ((object_index == excluded_object_index) &&
                  TokenStringEquals(document, token, excluded_member)) ||
                 ((previous_key != JSON_DOCUMENT_NO_TOKEN) &&
@@ -677,11 +604,7 @@ static firmware_status_t CanonicalizeObject(
         {
             const json_token_t *key = &document->tokens[selected_key];
 
-            status = Emit(
-                sink,
-                sink_context,
-                &document->data[key->start],
-                key->end - key->start);
+            status = Emit(sink, sink_context, &document->data[key->start], key->end - key->start);
         }
         if (FirmwareStatus_IsOk(status))
         {
@@ -689,38 +612,27 @@ static firmware_status_t CanonicalizeObject(
         }
         if (FirmwareStatus_IsOk(status))
         {
-            status = CanonicalizeToken(
-                document,
-                selected_key + 1U,
-                excluded_object_index,
-                excluded_member,
-                sink,
-                sink_context);
+            status = CanonicalizeToken(document, selected_key + 1U, excluded_object_index,
+                                       excluded_member, sink, sink_context);
         }
         previous_key = selected_key;
     }
-    return FirmwareStatus_IsOk(status)
-               ? Emit(sink, sink_context, "}", 1U)
-               : status;
+    return FirmwareStatus_IsOk(status) ? Emit(sink, sink_context, "}", 1U) : status;
 }
 
-static firmware_status_t CanonicalizeArray(
-    const json_document_t *document,
-    uint32_t array_index,
-    uint32_t excluded_object_index,
-    const char *excluded_member,
-    json_canonical_sink_fn sink,
-    void *sink_context)
+static firmware_status_t CanonicalizeArray(const json_document_t *document, uint32_t array_index,
+                                           uint32_t excluded_object_index,
+                                           const char *excluded_member, json_canonical_sink_fn sink,
+                                           void *sink_context)
 {
     uint32_t index;
-    uint32_t emitted = 0U;
+    uint32_t emitted         = 0U;
     firmware_status_t status = Emit(sink, sink_context, "[", 1U);
 
-    for (index = array_index + 1U;
-         FirmwareStatus_IsOk(status) && (index < document->token_count);
+    for (index = array_index + 1U; FirmwareStatus_IsOk(status) && (index < document->token_count);
          ++index)
     {
-        if (document->tokens[index].parent != (int32_t)array_index)
+        if (document->tokens[index].parent != (int32_t) array_index)
         {
             continue;
         }
@@ -730,33 +642,22 @@ static firmware_status_t CanonicalizeArray(
         }
         if (FirmwareStatus_IsOk(status))
         {
-            status = CanonicalizeToken(
-                document,
-                index,
-                excluded_object_index,
-                excluded_member,
-                sink,
-                sink_context);
+            status = CanonicalizeToken(document, index, excluded_object_index, excluded_member,
+                                       sink, sink_context);
         }
     }
-    return FirmwareStatus_IsOk(status)
-               ? Emit(sink, sink_context, "]", 1U)
-               : status;
+    return FirmwareStatus_IsOk(status) ? Emit(sink, sink_context, "]", 1U) : status;
 }
 
-static firmware_status_t CanonicalizeToken(
-    const json_document_t *document,
-    uint32_t token_index,
-    uint32_t excluded_object_index,
-    const char *excluded_member,
-    json_canonical_sink_fn sink,
-    void *sink_context)
+static firmware_status_t CanonicalizeToken(const json_document_t *document, uint32_t token_index,
+                                           uint32_t excluded_object_index,
+                                           const char *excluded_member, json_canonical_sink_fn sink,
+                                           void *sink_context)
 {
     const json_token_t *token;
     firmware_status_t status;
 
-    if ((document == NULL) || (token_index >= document->token_count) ||
-        (sink == NULL))
+    if ((document == NULL) || (token_index >= document->token_count) || (sink == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -764,53 +665,39 @@ static firmware_status_t CanonicalizeToken(
 
     if (token->type == JSON_TOKEN_OBJECT)
     {
-        return CanonicalizeObject(
-            document, token_index, excluded_object_index, excluded_member,
-            sink, sink_context);
+        return CanonicalizeObject(document, token_index, excluded_object_index, excluded_member,
+                                  sink, sink_context);
     }
     if (token->type == JSON_TOKEN_ARRAY)
     {
-        return CanonicalizeArray(
-            document, token_index, excluded_object_index, excluded_member,
-            sink, sink_context);
+        return CanonicalizeArray(document, token_index, excluded_object_index, excluded_member,
+                                 sink, sink_context);
     }
     if (token->type == JSON_TOKEN_STRING)
     {
         status = Emit(sink, sink_context, "\"", 1U);
         if (FirmwareStatus_IsOk(status))
         {
-            status = Emit(
-                sink,
-                sink_context,
-                &document->data[token->start],
-                token->end - token->start);
+            status =
+                Emit(sink, sink_context, &document->data[token->start], token->end - token->start);
         }
-        return FirmwareStatus_IsOk(status)
-                   ? Emit(sink, sink_context, "\"", 1U)
-                   : status;
+        return FirmwareStatus_IsOk(status) ? Emit(sink, sink_context, "\"", 1U) : status;
     }
-    return Emit(
-        sink,
-        sink_context,
-        &document->data[token->start],
-        token->end - token->start);
+    return Emit(sink, sink_context, &document->data[token->start], token->end - token->start);
 }
 
-firmware_status_t JsonDocument_Canonicalize(
-    const json_document_t *document,
-    uint32_t excluded_object_index,
-    const char *excluded_member,
-    json_canonical_sink_fn sink,
-    void *sink_context)
+firmware_status_t JsonDocument_Canonicalize(const json_document_t *document,
+                                            uint32_t excluded_object_index,
+                                            const char *excluded_member,
+                                            json_canonical_sink_fn sink, void *sink_context)
 {
     if ((document == NULL) || (sink == NULL) ||
         ((excluded_object_index != JSON_DOCUMENT_NO_TOKEN) &&
-         ((excluded_member == NULL) ||
-          (excluded_object_index >= document->token_count) ||
+         ((excluded_member == NULL) || (excluded_object_index >= document->token_count) ||
           (document->tokens[excluded_object_index].type != JSON_TOKEN_OBJECT))))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    return CanonicalizeToken(
-        document, 0U, excluded_object_index, excluded_member, sink, sink_context);
+    return CanonicalizeToken(document, 0U, excluded_object_index, excluded_member, sink,
+                             sink_context);
 }

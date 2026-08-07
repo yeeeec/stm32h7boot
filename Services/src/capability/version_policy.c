@@ -19,9 +19,7 @@ static int ComparePart(uint16_t lhs, uint16_t rhs)
     return 0;
 }
 
-int VersionPolicy_Compare(
-    const release_version_t *lhs,
-    const release_version_t *rhs)
+int VersionPolicy_Compare(const release_version_t *lhs, const release_version_t *rhs)
 {
     int result;
 
@@ -42,9 +40,7 @@ int VersionPolicy_Compare(
     return result;
 }
 
-int VersionPolicy_IsUpgrade(
-    const release_version_t *current,
-    const release_version_t *candidate)
+int VersionPolicy_IsUpgrade(const release_version_t *current, const release_version_t *candidate)
 {
     if ((current == NULL) || (candidate == NULL))
     {

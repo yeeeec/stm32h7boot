@@ -7,9 +7,9 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "logging.h"
 #include "services/capability/checked_arithmetic.h"
 #include "services/capability/slot_policy.h"
-#include "logging.h"
 
 static const char *BootPairName(boot_pair_t pair)
 {
@@ -154,9 +154,8 @@ static void BeginFailure(update_service_t *service, firmware_status_t status, bo
     {
         return;
     }
-    LOG_ERROR("update", "failure: status=%d error=%d stage=%s cleanup=%d",
-              (int)status, (int)error, UpdateStageName(service->stage),
-              service->file_open);
+    LOG_ERROR("update", "failure: status=%d error=%d stage=%s cleanup=%d", (int) status,
+              (int) error, UpdateStageName(service->stage), service->file_open);
     service->failure_status  = status;
     service->failure_error   = error;
     service->failure_stage   = (uint32_t) service->stage;
@@ -316,15 +315,14 @@ static void StartErase(update_service_t *service, const boot_region_t *region,
 
     if (service->erase_offset >= region->capacity_bytes)
     {
-        LOG_INFO("update", "erase complete: next=%s",
-                 UpdateStageName(next_after_complete));
+        LOG_INFO("update", "erase complete: next=%s", UpdateStageName(next_after_complete));
         service->erase_offset = 0U;
         service->stage        = next_after_complete;
         return;
     }
     LOG_DEBUG("update", "erase start: address=0x%08lx size=%lu",
-              (unsigned long)(region->flash_offset + service->erase_offset),
-              (unsigned long)service->storage_info.erase_size);
+              (unsigned long) (region->flash_offset + service->erase_offset),
+              (unsigned long) service->storage_info.erase_size);
     status = service->storage->erase_start(service->storage->context,
                                            region->flash_offset + service->erase_offset,
                                            service->storage_info.erase_size);
@@ -388,7 +386,7 @@ static void UpdateServiceStep(update_service_t *service)
                 {
                     service->manifest_size_known = 1;
                     LOG_INFO("update", "manifest size: %lu bytes",
-                             (unsigned long)service->manifest_size);
+                             (unsigned long) service->manifest_size);
                 }
                 break;
             }
@@ -421,29 +419,29 @@ static void UpdateServiceStep(update_service_t *service)
             break;
 
         case UPDATE_STAGE_VERIFY_MANIFEST:
-            status =
-                ManifestService_ParseAndValidate(service->manifest_service, service->manifest_buffer,
-                                                 service->manifest_size, &service->manifest);
+            status = ManifestService_ParseAndValidate(service->manifest_service,
+                                                      service->manifest_buffer,
+                                                      service->manifest_size, &service->manifest);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_MANIFEST_FORMAT);
             }
             else
             {
-                service->manifest_prepared      = 1;
-                service->state                  = SERVICE_RUN_STATE_SUCCEEDED;
-                service->result.status          = FIRMWARE_STATUS_OK;
-                service->result.error           = BOOT_ERROR_NONE;
-                service->result.stage           = (uint32_t)service->stage;
-                service->result.native_error    = 0;
-                service->stage                  = UPDATE_STAGE_IDLE;
+                service->manifest_prepared   = 1;
+                service->state               = SERVICE_RUN_STATE_SUCCEEDED;
+                service->result.status       = FIRMWARE_STATUS_OK;
+                service->result.error        = BOOT_ERROR_NONE;
+                service->result.stage        = (uint32_t) service->stage;
+                service->result.native_error = 0;
+                service->stage               = UPDATE_STAGE_IDLE;
                 LOG_INFO("update", "manifest verified: version=%u.%u.%u build=%lu app=%lu gui=%lu",
-                         (unsigned int)service->manifest.release_version.major,
-                         (unsigned int)service->manifest.release_version.minor,
-                         (unsigned int)service->manifest.release_version.patch,
-                         (unsigned long)service->manifest.build_number,
-                         (unsigned long)service->manifest.app.image_size_bytes,
-                         (unsigned long)service->manifest.gui.file_size_bytes);
+                         (unsigned int) service->manifest.release_version.major,
+                         (unsigned int) service->manifest.release_version.minor,
+                         (unsigned int) service->manifest.release_version.patch,
+                         (unsigned long) service->manifest.build_number,
+                         (unsigned long) service->manifest.app.image_size_bytes,
+                         (unsigned long) service->manifest.gui.file_size_bytes);
             }
             break;
 
@@ -461,8 +459,8 @@ static void UpdateServiceStep(update_service_t *service)
             {
                 LOG_INFO("update", "target selected: pair=%s app=0x%08lx gui=0x%08lx",
                          BootPairName(service->target_layout.pair),
-                         (unsigned long)service->target_layout.app.flash_offset,
-                         (unsigned long)service->target_layout.gui.flash_offset);
+                         (unsigned long) service->target_layout.app.flash_offset,
+                         (unsigned long) service->target_layout.gui.flash_offset);
                 service->stage = UPDATE_STAGE_OPEN_APP;
             }
             else
@@ -477,8 +475,8 @@ static void UpdateServiceStep(update_service_t *service)
                 {
                     LOG_INFO("update", "target selected: pair=%s app=0x%08lx gui=0x%08lx",
                              BootPairName(service->target_layout.pair),
-                             (unsigned long)service->target_layout.app.flash_offset,
-                             (unsigned long)service->target_layout.gui.flash_offset);
+                             (unsigned long) service->target_layout.app.flash_offset,
+                             (unsigned long) service->target_layout.gui.flash_offset);
                     service->stage = UPDATE_STAGE_OPEN_APP;
                 }
             }
@@ -531,9 +529,8 @@ static void UpdateServiceStep(update_service_t *service)
                     break;
                 }
                 service->file_offset = 0U;
-                status = HashReset(service);
-                if (!FirmwareStatus_IsOk(status) ||
-                    !FirmwareStatus_IsOk(ChecksumReset(service)))
+                status               = HashReset(service);
+                if (!FirmwareStatus_IsOk(status) || !FirmwareStatus_IsOk(ChecksumReset(service)))
                 {
                     BeginFailure(service,
                                  FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_IO_ERROR : status,
@@ -542,8 +539,8 @@ static void UpdateServiceStep(update_service_t *service)
                 else
                 {
                     LOG_INFO("update", "app package size: %lu bytes entry=0x%08lx",
-                             (unsigned long)service->file_size,
-                             (unsigned long)service->manifest.app.entry_offset);
+                             (unsigned long) service->file_size,
+                             (unsigned long) service->manifest.app.entry_offset);
                     service->stage = UPDATE_STAGE_HASH_APP;
                 }
             }
@@ -568,8 +565,8 @@ static void UpdateServiceStep(update_service_t *service)
                 else
                 {
                     LOG_INFO("update", "app source verified: size=%lu crc=0x%08lx",
-                             (unsigned long)service->file_size,
-                             (unsigned long)service->app_source_crc);
+                             (unsigned long) service->file_size,
+                             (unsigned long) service->app_source_crc);
                     service->stage = UPDATE_STAGE_CLOSE_APP;
                 }
                 break;
@@ -599,7 +596,7 @@ static void UpdateServiceStep(update_service_t *service)
         case UPDATE_STAGE_OPEN_APP_RELOCATIONS:
             LOG_INFO("update", "opening relocation table: %s", service->relocation_path);
             status = service->package_source->open(service->package_source->context,
-                                                    service->relocation_path);
+                                                   service->relocation_path);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_RELOCATION_FORMAT);
@@ -607,7 +604,7 @@ static void UpdateServiceStep(update_service_t *service)
             else
             {
                 service->file_open = 1;
-                service->stage = UPDATE_STAGE_PREPARE_APP_RELOCATIONS;
+                service->stage     = UPDATE_STAGE_PREPARE_APP_RELOCATIONS;
             }
             break;
 
@@ -617,7 +614,8 @@ static void UpdateServiceStep(update_service_t *service)
             if (!FirmwareStatus_IsOk(status) ||
                 (service->manifest.app.relocation_count > service->relocation_entry_capacity) ||
                 (service->manifest.app.relocation_count > 0U &&
-                 service->file_size != service->manifest.app.relocation_count * HMI_RELOCATION_ENTRY_SIZE) ||
+                 service->file_size !=
+                     service->manifest.app.relocation_count * HMI_RELOCATION_ENTRY_SIZE) ||
                 (service->manifest.app.relocation_count == 0U && service->file_size != 0U))
             {
                 BeginFailure(service,
@@ -627,8 +625,8 @@ static void UpdateServiceStep(update_service_t *service)
             else
             {
                 service->relocation_bytes = service->file_size;
-                service->file_offset = 0U;
-                status = ChecksumReset(service);
+                service->file_offset      = 0U;
+                status                    = ChecksumReset(service);
                 if (!FirmwareStatus_IsOk(status))
                 {
                     BeginFailure(service, status, BOOT_ERROR_RELOCATION_FORMAT);
@@ -648,23 +646,23 @@ static void UpdateServiceStep(update_service_t *service)
                     (service->app_relocation_crc != service->manifest.app.relocation_crc32))
                 {
                     BeginFailure(service,
-                                 FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
+                                 FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE
+                                                             : status,
                                  BOOT_ERROR_RELOCATION_FORMAT);
                 }
                 else
                 {
                     service->relocation_index = 0U;
-                    service->stage = UPDATE_STAGE_CLOSE_APP_RELOCATIONS;
+                    service->stage            = UPDATE_STAGE_CLOSE_APP_RELOCATIONS;
                 }
                 break;
             }
-            status = ReadExactPackage(service, service->file_offset,
-                                      service->relocation_buffer, service->relocation_bytes,
-                                      BOOT_ERROR_RELOCATION_FORMAT);
+            status = ReadExactPackage(service, service->file_offset, service->relocation_buffer,
+                                      service->relocation_bytes, BOOT_ERROR_RELOCATION_FORMAT);
             if (FirmwareStatus_IsOk(status))
             {
-                status = ChecksumUpdate(service, service->relocation_buffer,
-                                        service->relocation_bytes);
+                status =
+                    ChecksumUpdate(service, service->relocation_buffer, service->relocation_bytes);
                 if (!FirmwareStatus_IsOk(status))
                 {
                     BeginFailure(service, status, BOOT_ERROR_RELOCATION_FORMAT);
@@ -677,24 +675,23 @@ static void UpdateServiceStep(update_service_t *service)
             break;
 
         case UPDATE_STAGE_CLOSE_APP_RELOCATIONS:
-            CloseOrFail(service,
-                        (service->manifest.app.relocation_count == 0U)
-                            ? UPDATE_STAGE_OPEN_GUI
-                            : UPDATE_STAGE_OPEN_APP_RELOCATION_WORDS);
+            CloseOrFail(service, (service->manifest.app.relocation_count == 0U)
+                                     ? UPDATE_STAGE_OPEN_GUI
+                                     : UPDATE_STAGE_OPEN_APP_RELOCATION_WORDS);
             break;
 
         case UPDATE_STAGE_OPEN_APP_RELOCATION_WORDS:
-            status = service->package_source->open(service->package_source->context,
-                                                   service->app_path);
+            status =
+                service->package_source->open(service->package_source->context, service->app_path);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_RELOCATION_RANGE);
             }
             else
             {
-                service->file_open = 1;
+                service->file_open        = 1;
                 service->relocation_index = 0U;
-                service->stage = UPDATE_STAGE_VALIDATE_APP_RELOCATION;
+                service->stage            = UPDATE_STAGE_VALIDATE_APP_RELOCATION;
             }
             break;
 
@@ -702,7 +699,7 @@ static void UpdateServiceStep(update_service_t *service)
             if (service->relocation_index >= service->manifest.app.relocation_count)
             {
                 LOG_INFO("update", "app relocations verified: count=%lu",
-                         (unsigned long)service->manifest.app.relocation_count);
+                         (unsigned long) service->manifest.app.relocation_count);
                 service->stage = UPDATE_STAGE_CLOSE_APP_RELOCATION_WORDS;
                 break;
             }
@@ -736,9 +733,9 @@ static void UpdateServiceStep(update_service_t *service)
             break;
 
         case UPDATE_STAGE_READ_APP_RELOCATION_WORD:
-            status = ReadExactPackage(
-                service, service->pending_relocation.target_offset,
-                service->io_buffer, sizeof(uint32_t), BOOT_ERROR_RELOCATION_RANGE);
+            status =
+                ReadExactPackage(service, service->pending_relocation.target_offset,
+                                 service->io_buffer, sizeof(uint32_t), BOOT_ERROR_RELOCATION_RANGE);
             if (FirmwareStatus_IsOk(status))
             {
                 service->stage = UPDATE_STAGE_CHECK_APP_RELOCATION_WORD;
@@ -752,10 +749,8 @@ static void UpdateServiceStep(update_service_t *service)
             uint32_t xip_end;
 
             if (!CheckedArithmetic_AddU32(service->manifest.app.link_address,
-                                          SLOT_POLICY_FLASH_CAPACITY_BYTES,
-                                          &xip_end) ||
-                (raw_word < service->manifest.app.link_address) ||
-                (raw_word >= xip_end) ||
+                                          SLOT_POLICY_FLASH_CAPACITY_BYTES, &xip_end) ||
+                (raw_word < service->manifest.app.link_address) || (raw_word >= xip_end) ||
                 ((canonical_word = raw_word - service->manifest.app.link_address),
                  !CheckedArithmetic_AddU32(canonical_word,
                                            service->target_layout.app.mapped_address,
@@ -817,7 +812,7 @@ static void UpdateServiceStep(update_service_t *service)
                 else
                 {
                     LOG_INFO("update", "gui package size: %lu bytes",
-                             (unsigned long)service->file_size);
+                             (unsigned long) service->file_size);
                     service->stage = UPDATE_STAGE_HASH_GUI;
                 }
             }
@@ -842,7 +837,7 @@ static void UpdateServiceStep(update_service_t *service)
                 else
                 {
                     LOG_INFO("update", "gui source verified: crc=0x%08lx",
-                             (unsigned long)service->gui_source_crc);
+                             (unsigned long) service->gui_source_crc);
                     service->stage = UPDATE_STAGE_CLOSE_GUI_SOURCE;
                 }
                 break;
@@ -888,8 +883,8 @@ static void UpdateServiceStep(update_service_t *service)
         case UPDATE_STAGE_OPEN_APP_PROGRAM:
             LOG_INFO("update", "programming app: pair=%s target=0x%08lx size=%lu",
                      BootPairName(service->target_layout.pair),
-                     (unsigned long)service->target_layout.app.flash_offset,
-                     (unsigned long)service->manifest.app.image_size_bytes);
+                     (unsigned long) service->target_layout.app.flash_offset,
+                     (unsigned long) service->manifest.app.image_size_bytes);
             status =
                 service->package_source->open(service->package_source->context, service->app_path);
             if (!FirmwareStatus_IsOk(status))
@@ -900,10 +895,9 @@ static void UpdateServiceStep(update_service_t *service)
             service->file_open              = 1;
             service->app_block_offset       = 0U;
             service->relocation_apply_index = 0U;
-            status = RelocationService_InitEx(
+            status                          = RelocationService_InitEx(
                 &service->relocation, service->manifest.app.image_size_bytes,
-                service->manifest.app.link_address,
-                service->target_layout.app.mapped_address);
+                service->manifest.app.link_address, service->target_layout.app.mapped_address);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_RELOCATION_FORMAT);
@@ -932,9 +926,8 @@ static void UpdateServiceStep(update_service_t *service)
             service->app_block_size =
                 MinimumU32(IoChunkCapacity(service),
                            service->manifest.app.image_size_bytes - service->app_block_offset);
-            status = ReadExactPackage(service, service->app_block_offset,
-                                      service->io_buffer, service->app_block_size,
-                                      BOOT_ERROR_APP_SOURCE_HASH);
+            status = ReadExactPackage(service, service->app_block_offset, service->io_buffer,
+                                      service->app_block_size, BOOT_ERROR_APP_SOURCE_HASH);
             if (FirmwareStatus_IsOk(status))
             {
                 service->stage = UPDATE_STAGE_APPLY_APP_PROGRAM_BLOCK;
@@ -1057,7 +1050,7 @@ static void UpdateServiceStep(update_service_t *service)
             else
             {
                 LOG_INFO("update", "app target verified: crc=0x%08lx",
-                         (unsigned long)service->target_app_crc);
+                         (unsigned long) service->target_app_crc);
                 service->erase_offset = 0U;
                 service->stage        = UPDATE_STAGE_ERASE_GUI_START;
             }
@@ -1077,8 +1070,8 @@ static void UpdateServiceStep(update_service_t *service)
         case UPDATE_STAGE_OPEN_GUI_PROGRAM:
             LOG_INFO("update", "programming gui: pair=%s target=0x%08lx size=%lu",
                      BootPairName(service->target_layout.pair),
-                     (unsigned long)service->target_layout.gui.flash_offset,
-                     (unsigned long)service->manifest.gui.file_size_bytes);
+                     (unsigned long) service->target_layout.gui.flash_offset,
+                     (unsigned long) service->manifest.gui.file_size_bytes);
             status =
                 service->package_source->open(service->package_source->context, service->gui_path);
             if (!FirmwareStatus_IsOk(status))
@@ -1190,8 +1183,7 @@ static void UpdateServiceStep(update_service_t *service)
             }
             else
             {
-                memset(&service->candidate_record, 0,
-                       sizeof(service->candidate_record));
+                memset(&service->candidate_record, 0, sizeof(service->candidate_record));
                 service->candidate_record.active_pair     = service->target_layout.pair;
                 service->candidate_record.release_version = service->manifest.release_version;
                 service->candidate_record.build_number    = service->manifest.build_number;
@@ -1202,20 +1194,19 @@ static void UpdateServiceStep(update_service_t *service)
                 memcpy(service->candidate_record.package_id_hash,
                        service->manifest.package_id_hash128,
                        sizeof(service->candidate_record.package_id_hash));
-                memcpy(service->candidate_record.manifest_sha256,
-                       service->manifest.manifest_sha256,
+                memcpy(service->candidate_record.manifest_sha256, service->manifest.manifest_sha256,
                        sizeof(service->candidate_record.manifest_sha256));
                 service->state               = SERVICE_RUN_STATE_SUCCEEDED;
                 service->result.status       = FIRMWARE_STATUS_OK;
                 service->result.error        = BOOT_ERROR_NONE;
-                service->result.stage        = (uint32_t)service->stage;
+                service->result.stage        = (uint32_t) service->stage;
                 service->result.native_error = 0;
                 service->install_completed   = 1;
                 service->stage               = UPDATE_STAGE_IDLE;
                 LOG_INFO("update", "install completed: pair=%s app_crc=0x%08lx gui_crc=0x%08lx",
                          BootPairName(service->candidate_record.active_pair),
-                         (unsigned long)service->candidate_record.app_crc32,
-                         (unsigned long)service->candidate_record.gui_crc32);
+                         (unsigned long) service->candidate_record.app_crc32,
+                         (unsigned long) service->candidate_record.gui_crc32);
             }
             break;
 
@@ -1257,9 +1248,8 @@ firmware_status_t UpdateService_Init(update_service_t *service,
         (dependencies->checksum->get_value == NULL) || (dependencies->hash == NULL) ||
         (dependencies->hash->reset == NULL) || (dependencies->hash->update == NULL) ||
         (dependencies->hash->finish == NULL) || (dependencies->manifest_service == NULL) ||
-        (dependencies->manifest_path == NULL) ||
-        (dependencies->app_path == NULL) || (dependencies->relocation_path == NULL) ||
-        (dependencies->gui_path == NULL) ||
+        (dependencies->manifest_path == NULL) || (dependencies->app_path == NULL) ||
+        (dependencies->relocation_path == NULL) || (dependencies->gui_path == NULL) ||
         (dependencies->manifest_buffer == NULL) ||
         (dependencies->manifest_buffer_size < UPDATE_SERVICE_MANIFEST_MAX_SIZE) ||
         (dependencies->io_buffer == NULL) ||
@@ -1314,9 +1304,8 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     service->result.native_error       = 0;
     service->initialized               = 1;
     LOG_INFO("update", "initialized: storage=%lu erase=%lu program=%lu",
-             (unsigned long)info.capacity_bytes,
-             (unsigned long)info.erase_size,
-             (unsigned long)info.program_size);
+             (unsigned long) info.capacity_bytes, (unsigned long) info.erase_size,
+             (unsigned long) info.program_size);
     return FIRMWARE_STATUS_OK;
 }
 
@@ -1346,19 +1335,18 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service)
     implementation->manifest_prepared      = 0;
     implementation->install_completed      = 0;
     implementation->initial_install        = 0;
-    implementation->initial_target_pair   = BOOT_PAIR_NONE;
+    implementation->initial_target_pair    = BOOT_PAIR_NONE;
     implementation->target_read_offset     = 0U;
     implementation->gui_target_read_offset = 0U;
     LOG_INFO("update", "prepare started");
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t UpdateService_InstallStart(
-    struct update_service *service,
-    const boot_active_record_t *active_record)
+firmware_status_t UpdateService_InstallStart(struct update_service *service,
+                                             const boot_active_record_t *active_record)
 {
     boot_pair_layout_t layout;
-    update_service_t *implementation = (update_service_t *)service;
+    update_service_t *implementation = (update_service_t *) service;
 
     if ((implementation == NULL) || (active_record == NULL))
     {
@@ -1376,29 +1364,27 @@ firmware_status_t UpdateService_InstallStart(
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
-    implementation->active_record = *active_record;
-    implementation->initial_install = 0;
+    implementation->active_record       = *active_record;
+    implementation->initial_install     = 0;
     implementation->initial_target_pair = BOOT_PAIR_NONE;
-    implementation->state = SERVICE_RUN_STATE_RUNNING;
-    implementation->stage = UPDATE_STAGE_SELECT_TARGET;
-    implementation->result.status = FIRMWARE_STATUS_OK;
-    implementation->result.error = BOOT_ERROR_NONE;
-    implementation->result.stage = UPDATE_STAGE_SELECT_TARGET;
+    implementation->state               = SERVICE_RUN_STATE_RUNNING;
+    implementation->stage               = UPDATE_STAGE_SELECT_TARGET;
+    implementation->result.status       = FIRMWARE_STATUS_OK;
+    implementation->result.error        = BOOT_ERROR_NONE;
+    implementation->result.stage        = UPDATE_STAGE_SELECT_TARGET;
     implementation->result.native_error = 0;
-    implementation->failure_pending = 0;
-    implementation->cancel_requested = 0;
-    implementation->erase_started = 0;
-    implementation->install_completed = 0;
-    LOG_INFO("update", "install started: active=%s",
-             BootPairName(active_record->active_pair));
+    implementation->failure_pending     = 0;
+    implementation->cancel_requested    = 0;
+    implementation->erase_started       = 0;
+    implementation->install_completed   = 0;
+    LOG_INFO("update", "install started: active=%s", BootPairName(active_record->active_pair));
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t UpdateService_InitialInstallStart(
-    struct update_service *service,
-    boot_pair_t target_pair)
+firmware_status_t UpdateService_InitialInstallStart(struct update_service *service,
+                                                    boot_pair_t target_pair)
 {
-    update_service_t *implementation = (update_service_t *)service;
+    update_service_t *implementation = (update_service_t *) service;
 
     if (implementation == NULL)
     {
@@ -1416,20 +1402,19 @@ firmware_status_t UpdateService_InitialInstallStart(
     }
 
     memset(&implementation->active_record, 0, sizeof(implementation->active_record));
-    implementation->initial_install = 1;
+    implementation->initial_install     = 1;
     implementation->initial_target_pair = target_pair;
-    implementation->state = SERVICE_RUN_STATE_RUNNING;
-    implementation->stage = UPDATE_STAGE_SELECT_TARGET;
-    implementation->result.status = FIRMWARE_STATUS_OK;
-    implementation->result.error = BOOT_ERROR_NONE;
-    implementation->result.stage = UPDATE_STAGE_SELECT_TARGET;
+    implementation->state               = SERVICE_RUN_STATE_RUNNING;
+    implementation->stage               = UPDATE_STAGE_SELECT_TARGET;
+    implementation->result.status       = FIRMWARE_STATUS_OK;
+    implementation->result.error        = BOOT_ERROR_NONE;
+    implementation->result.stage        = UPDATE_STAGE_SELECT_TARGET;
     implementation->result.native_error = 0;
-    implementation->failure_pending = 0;
-    implementation->cancel_requested = 0;
-    implementation->erase_started = 0;
-    implementation->install_completed = 0;
-    LOG_INFO("update", "initial install started: target=%s",
-             BootPairName(target_pair));
+    implementation->failure_pending     = 0;
+    implementation->cancel_requested    = 0;
+    implementation->erase_started       = 0;
+    implementation->install_completed   = 0;
+    LOG_INFO("update", "initial install started: target=%s", BootPairName(target_pair));
     return FIRMWARE_STATUS_OK;
 }
 
@@ -1479,23 +1464,20 @@ const service_result_t *UpdateService_GetResult(const struct update_service *ser
     return (service == NULL) ? NULL : &((const update_service_t *) service)->result;
 }
 
-const validated_manifest_t *UpdateService_GetManifest(
-    const struct update_service *service)
+const validated_manifest_t *UpdateService_GetManifest(const struct update_service *service)
 {
-    const update_service_t *implementation = (const update_service_t *)service;
+    const update_service_t *implementation = (const update_service_t *) service;
 
     return ((implementation == NULL) || (implementation->manifest_prepared == 0))
                ? NULL
                : &implementation->manifest;
 }
 
-const boot_active_record_t *UpdateService_GetCandidate(
-    const struct update_service *service)
+const boot_active_record_t *UpdateService_GetCandidate(const struct update_service *service)
 {
-    const update_service_t *implementation = (const update_service_t *)service;
+    const update_service_t *implementation = (const update_service_t *) service;
 
-    return ((implementation == NULL) ||
-            (implementation->state != SERVICE_RUN_STATE_SUCCEEDED) ||
+    return ((implementation == NULL) || (implementation->state != SERVICE_RUN_STATE_SUCCEEDED) ||
             (implementation->install_completed == 0))
                ? NULL
                : &implementation->candidate_record;

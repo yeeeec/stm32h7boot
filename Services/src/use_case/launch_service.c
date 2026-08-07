@@ -6,8 +6,8 @@
 
 #include <stddef.h>
 
-#include "services/capability/slot_policy.h"
 #include "logging.h"
+#include "services/capability/slot_policy.h"
 
 typedef enum
 {
@@ -64,8 +64,8 @@ static uint32_t ReadU32(const uint8_t *data)
 static firmware_status_t Fail(launch_service_t *service, firmware_status_t status,
                               boot_error_t error, launch_stage_t stage)
 {
-    LOG_ERROR("launch", "failed: status=%d error=%d stage=%s",
-              (int)status, (int)error, LaunchStageName(stage));
+    LOG_ERROR("launch", "failed: status=%d error=%d stage=%s", (int) status, (int) error,
+              LaunchStageName(stage));
     service->result.status       = status;
     service->result.error        = error;
     service->result.stage        = (uint32_t) stage;
@@ -130,9 +130,8 @@ firmware_status_t LaunchService_Execute(launch_service_t *service,
                     LAUNCH_STAGE_READ_VECTOR);
     }
     LOG_INFO("launch", "start: pair=%s app_size=%lu mapped=0x%08lx",
-             BootPairName(active_record->active_pair),
-             (unsigned long)active_record->app_size,
-             (unsigned long)layout.app.mapped_address);
+             BootPairName(active_record->active_pair), (unsigned long) active_record->app_size,
+             (unsigned long) layout.app.mapped_address);
     status = service->xip_controller->is_memory_mapped(service->xip_controller->context, &mapped);
     if (!FirmwareStatus_IsOk(status) || (mapped != 0))
     {
@@ -148,9 +147,8 @@ firmware_status_t LaunchService_Execute(launch_service_t *service,
 
     vectors.initial_msp   = ReadU32(&vector_bytes[0]);
     vectors.reset_handler = ReadU32(&vector_bytes[4]);
-    LOG_INFO("launch", "vector: msp=0x%08lx reset=0x%08lx",
-             (unsigned long)vectors.initial_msp,
-             (unsigned long)vectors.reset_handler);
+    LOG_INFO("launch", "vector: msp=0x%08lx reset=0x%08lx", (unsigned long) vectors.initial_msp,
+             (unsigned long) vectors.reset_handler);
     status = VectorValidation_Validate(&vectors, &layout.app, active_record->app_size,
                                        service->sram_regions, service->sram_region_count);
     if (!FirmwareStatus_IsOk(status))
@@ -172,7 +170,7 @@ firmware_status_t LaunchService_Execute(launch_service_t *service,
     }
 
     LOG_WARN("launch", "jumping to application: address=0x%08lx",
-             (unsigned long)layout.app.mapped_address);
+             (unsigned long) layout.app.mapped_address);
     status = service->application_jump->execute(service->application_jump->context,
                                                 layout.app.mapped_address);
     return Fail(service, FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,

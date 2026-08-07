@@ -6,8 +6,8 @@
 
 #include <stddef.h>
 
-#include "services/capability/slot_policy.h"
 #include "logging.h"
+#include "services/capability/slot_policy.h"
 
 static const char *BootPairName(boot_pair_t pair)
 {
@@ -56,8 +56,8 @@ static uint32_t ReadU32(const uint8_t *data)
 static void Fail(active_validation_service_t *service, firmware_status_t status, boot_error_t error)
 {
     LOG_ERROR("active", "failed: pair=%s status=%d error=%d stage=%s",
-              BootPairName(service->active_record.active_pair), (int)status,
-              (int)error, ActiveValidationStageName(service->stage));
+              BootPairName(service->active_record.active_pair), (int) status, (int) error,
+              ActiveValidationStageName(service->stage));
     service->state               = SERVICE_RUN_STATE_FAILED;
     service->result.status       = status;
     service->result.error        = error;
@@ -131,10 +131,8 @@ firmware_status_t ActiveValidationService_Start(active_validation_service_t *ser
     service->result.error        = BOOT_ERROR_NONE;
     service->result.stage        = ACTIVE_VALIDATION_STAGE_IDLE;
     service->result.native_error = 0;
-    LOG_INFO("active", "started: pair=%s app=%lu gui=%lu",
-             BootPairName(active_record->active_pair),
-             (unsigned long)active_record->app_size,
-             (unsigned long)active_record->gui_size);
+    LOG_INFO("active", "started: pair=%s app=%lu gui=%lu", BootPairName(active_record->active_pair),
+             (unsigned long) active_record->app_size, (unsigned long) active_record->gui_size);
     return FIRMWARE_STATUS_OK;
 }
 
@@ -160,8 +158,7 @@ static void ReadComponent(active_validation_service_t *service, const boot_regio
         vectors.reset_handler = ReadU32(&service->buffer[4]);
         LOG_DEBUG("active", "vector read: pair=%s msp=0x%08lx reset=0x%08lx",
                   BootPairName(service->active_record.active_pair),
-                  (unsigned long)vectors.initial_msp,
-                  (unsigned long)vectors.reset_handler);
+                  (unsigned long) vectors.initial_msp, (unsigned long) vectors.reset_handler);
         status = VectorValidation_Validate(&vectors, region, image_size, service->sram_regions,
                                            service->sram_region_count);
         if (!FirmwareStatus_IsOk(status))
@@ -202,7 +199,7 @@ void ActiveValidationService_Process(active_validation_service_t *service)
             service->offset = 0U;
             service->stage  = ACTIVE_VALIDATION_STAGE_READ_APP;
             LOG_INFO("active", "app crc scan started: size=%lu",
-                     (unsigned long)service->active_record.app_size);
+                     (unsigned long) service->active_record.app_size);
             break;
 
         case ACTIVE_VALIDATION_STAGE_READ_APP:
@@ -223,7 +220,7 @@ void ActiveValidationService_Process(active_validation_service_t *service)
                      BOOT_ERROR_APP_TARGET_CRC);
                 break;
             }
-            LOG_INFO("active", "app crc ok: value=0x%08lx", (unsigned long)crc);
+            LOG_INFO("active", "app crc ok: value=0x%08lx", (unsigned long) crc);
             service->stage = ACTIVE_VALIDATION_STAGE_RESET_GUI_CRC;
             break;
 
@@ -237,7 +234,7 @@ void ActiveValidationService_Process(active_validation_service_t *service)
             service->offset = 0U;
             service->stage  = ACTIVE_VALIDATION_STAGE_READ_GUI;
             LOG_INFO("active", "gui crc scan started: size=%lu",
-                     (unsigned long)service->active_record.gui_size);
+                     (unsigned long) service->active_record.gui_size);
             break;
 
         case ACTIVE_VALIDATION_STAGE_READ_GUI:
@@ -258,7 +255,7 @@ void ActiveValidationService_Process(active_validation_service_t *service)
                      BOOT_ERROR_GUI_TARGET_CRC);
                 break;
             }
-            LOG_INFO("active", "gui crc ok: value=0x%08lx", (unsigned long)crc);
+            LOG_INFO("active", "gui crc ok: value=0x%08lx", (unsigned long) crc);
             service->state               = SERVICE_RUN_STATE_SUCCEEDED;
             service->result.status       = FIRMWARE_STATUS_OK;
             service->result.error        = BOOT_ERROR_NONE;

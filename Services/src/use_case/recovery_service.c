@@ -7,8 +7,8 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "services/capability/slot_policy.h"
 #include "logging.h"
+#include "services/capability/slot_policy.h"
 
 static const char *BootPairName(boot_pair_t pair)
 {
@@ -59,8 +59,8 @@ static int SequenceIsNewer(uint32_t candidate, uint32_t reference)
 
 static void Fail(recovery_service_t *service, firmware_status_t status, boot_error_t error)
 {
-    LOG_ERROR("recovery", "failed: status=%d error=%d stage=%s",
-              (int)status, (int)error, RecoveryStageName(service->stage));
+    LOG_ERROR("recovery", "failed: status=%d error=%d stage=%s", (int) status, (int) error,
+              RecoveryStageName(service->stage));
     service->state               = SERVICE_RUN_STATE_FAILED;
     service->result.status       = status;
     service->result.error        = error;
@@ -92,18 +92,17 @@ static void LoadCandidate(recovery_service_t *service, boot_pair_t pair)
         {
             service->candidate_present[index] = 1U;
             LOG_INFO("recovery", "candidate loaded: pair=%s sequence=%lu version=%u.%u.%u",
-                     BootPairName(pair),
-                     (unsigned long)service->candidates[index].sequence,
-                     (unsigned int)service->candidates[index].release_version.major,
-                     (unsigned int)service->candidates[index].release_version.minor,
-                     (unsigned int)service->candidates[index].release_version.patch);
+                     BootPairName(pair), (unsigned long) service->candidates[index].sequence,
+                     (unsigned int) service->candidates[index].release_version.major,
+                     (unsigned int) service->candidates[index].release_version.minor,
+                     (unsigned int) service->candidates[index].release_version.patch);
         }
     }
     else if ((status == FIRMWARE_STATUS_INVALID_STATE) || (status == FIRMWARE_STATUS_OUT_OF_RANGE))
     {
         service->candidate_present[index] = 0U;
-        LOG_WARN("recovery", "candidate missing: pair=%s status=%d",
-                 BootPairName(pair), (int)status);
+        LOG_WARN("recovery", "candidate missing: pair=%s status=%d", BootPairName(pair),
+                 (int) status);
     }
     else
     {
@@ -122,8 +121,7 @@ static void StartValidation(recovery_service_t *service, boot_pair_t pair,
 
     if (service->candidate_present[index] == 0U)
     {
-        LOG_DEBUG("recovery", "skip validation: pair=%s has no candidate",
-                  BootPairName(pair));
+        LOG_DEBUG("recovery", "skip validation: pair=%s has no candidate", BootPairName(pair));
         service->stage = next_stage;
         return;
     }
@@ -132,8 +130,8 @@ static void StartValidation(recovery_service_t *service, boot_pair_t pair,
     {
         service->candidate_valid[index] = 0U;
         service->stage                  = next_stage;
-        LOG_WARN("recovery", "validation start failed: pair=%s status=%d",
-                 BootPairName(pair), (int)status);
+        LOG_WARN("recovery", "validation start failed: pair=%s status=%d", BootPairName(pair),
+                 (int) status);
         return;
     }
     LOG_INFO("recovery", "validation started: pair=%s", BootPairName(pair));
@@ -163,10 +161,9 @@ static void ProcessValidation(recovery_service_t *service, boot_pair_t pair,
         service->stage                  = next_stage;
         LOG_WARN("recovery", "validation failed: pair=%s status=%d error=%d stage=%lu",
                  BootPairName(pair),
-                 (result == NULL) ? (int)FIRMWARE_STATUS_INVALID_STATE
-                                  : (int)result->status,
-                 (result == NULL) ? (int)BOOT_ERROR_INTERNAL : (int)result->error,
-                 (result == NULL) ? 0UL : (unsigned long)result->stage);
+                 (result == NULL) ? (int) FIRMWARE_STATUS_INVALID_STATE : (int) result->status,
+                 (result == NULL) ? (int) BOOT_ERROR_INTERNAL : (int) result->error,
+                 (result == NULL) ? 0UL : (unsigned long) result->stage);
     }
 }
 
@@ -215,11 +212,11 @@ static void SelectCandidate(recovery_service_t *service)
     service->selected_record = service->candidates[selected];
     LOG_INFO("recovery", "selected candidate: pair=%s sequence=%lu",
              BootPairName(service->selected_record.active_pair),
-             (unsigned long)service->selected_record.sequence);
+             (unsigned long) service->selected_record.sequence);
     service->state               = SERVICE_RUN_STATE_SUCCEEDED;
     service->result.status       = FIRMWARE_STATUS_OK;
     service->result.error        = BOOT_ERROR_NONE;
-    service->result.stage        = (uint32_t)service->stage;
+    service->result.stage        = (uint32_t) service->stage;
     service->result.native_error = 0;
     service->stage               = RECOVERY_STAGE_IDLE;
 }
@@ -327,14 +324,11 @@ const service_result_t *RecoveryService_GetResult(const struct recovery_service 
     return (service == NULL) ? NULL : &((const recovery_service_t *) service)->result;
 }
 
-const boot_active_record_t *RecoveryService_GetCandidate(
-    const struct recovery_service *service)
+const boot_active_record_t *RecoveryService_GetCandidate(const struct recovery_service *service)
 {
-    const recovery_service_t *implementation =
-        (const recovery_service_t *)service;
+    const recovery_service_t *implementation = (const recovery_service_t *) service;
 
-    return ((implementation == NULL) ||
-            (implementation->state != SERVICE_RUN_STATE_SUCCEEDED))
+    return ((implementation == NULL) || (implementation->state != SERVICE_RUN_STATE_SUCCEEDED))
                ? NULL
                : &implementation->selected_record;
 }
