@@ -17,30 +17,12 @@ firmware_status_t BootControlService_LoadActive(
     boot_active_record_t *record);
 
 /**
- * Legacy pair-recovery API retained temporarily for source compatibility.
- *
- * Active Record V2 has no pair identity, so this returns NOT_SUPPORTED.
- */
-firmware_status_t BootControlService_LoadPairCandidate(
-    struct boot_control_service *service,
-    boot_pair_t pair,
-    boot_active_record_t *record);
-
-/**
  * Start an atomic Active Record commit.
  *
  * The service assigns the next sequence number. The caller must invoke
  * BootControlService_Process until the operation reaches a terminal state.
  */
 firmware_status_t BootControlService_CommitActiveStart(
-    struct boot_control_service *service,
-    const boot_active_record_t *record);
-
-/**
- * Start a recovery commit while preserving the retained record that exactly
- * matches record. The other A/B location is overwritten atomically.
- */
-firmware_status_t BootControlService_CommitRecoveredStart(
     struct boot_control_service *service,
     const boot_active_record_t *record);
 

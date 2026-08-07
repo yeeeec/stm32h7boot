@@ -190,7 +190,7 @@ void ActiveValidationService_Process(active_validation_service_t *service)
                 service->layout->app_max_size,
             };
             ReadComponent(service, &app_region, service->active_record.app_size, 1,
-                          BOOT_ERROR_APP_TARGET_CRC);
+                          BOOT_ERROR_APP_TARGET_HASH);
             if ((service->state == SERVICE_RUN_STATE_RUNNING) &&
                 (service->offset == service->active_record.app_size))
             {
@@ -204,7 +204,7 @@ void ActiveValidationService_Process(active_validation_service_t *service)
                 (memcmp(digest, service->active_record.app_sha256, sizeof(digest)) != 0))
             {
                 Fail(service, FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
-                     BOOT_ERROR_APP_TARGET_CRC);
+                     BOOT_ERROR_APP_TARGET_HASH);
                 break;
             }
             LOG_INFO("active", "app hash verified");
@@ -231,7 +231,7 @@ void ActiveValidationService_Process(active_validation_service_t *service)
                 service->layout->gui_max_size,
             };
             ReadComponent(service, &gui_region, service->active_record.gui_size, 0,
-                          BOOT_ERROR_GUI_TARGET_CRC);
+                          BOOT_ERROR_GUI_TARGET_HASH);
             if ((service->state == SERVICE_RUN_STATE_RUNNING) &&
                 (service->offset == service->active_record.gui_size))
             {
@@ -245,7 +245,7 @@ void ActiveValidationService_Process(active_validation_service_t *service)
                 (memcmp(digest, service->active_record.gui_sha256, sizeof(digest)) != 0))
             {
                 Fail(service, FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
-                     BOOT_ERROR_GUI_TARGET_CRC);
+                     BOOT_ERROR_GUI_TARGET_HASH);
                 break;
             }
             LOG_INFO("active", "gui hash verified");

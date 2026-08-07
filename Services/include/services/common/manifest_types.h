@@ -17,26 +17,11 @@
 typedef struct
 {
     char file[MANIFEST_FILE_NAME_MAX_SIZE + 1U];
-    uint32_t file_size_bytes;
-    uint32_t image_size_bytes;
-    uint32_t source_crc32;
-    uint32_t target_crc32_app1;
-    uint32_t target_crc32_app2;
+    uint32_t size_bytes;
     uint8_t sha256[MANIFEST_SHA256_SIZE];
-    uint32_t link_address;
-    uint32_t entry_offset;
-    char relocation_file[MANIFEST_FILE_NAME_MAX_SIZE + 1U];
-    uint32_t relocation_count;
-    uint32_t relocation_crc32;
 } manifest_app_component_t;
 
-typedef struct
-{
-    char file[MANIFEST_FILE_NAME_MAX_SIZE + 1U];
-    uint32_t file_size_bytes;
-    uint32_t crc32;
-    uint8_t sha256[MANIFEST_SHA256_SIZE];
-} manifest_gui_component_t;
+typedef manifest_app_component_t manifest_gui_component_t;
 
 typedef struct
 {

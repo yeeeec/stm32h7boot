@@ -5,30 +5,19 @@
 #ifndef SERVICES_UPDATE_SERVICE_API_H
 #define SERVICES_UPDATE_SERVICE_API_H
 
-#include "services/common/boot_control_types.h"
 #include "services/common/manifest_types.h"
 #include "services/common/service_result.h"
+#include "services/common/update_request_types.h"
 
 struct update_service;
 
-/** Read and validate the fixed Manifest from an already-mounted package source. */
-firmware_status_t UpdateService_PrepareStart(struct update_service *service);
-
-/** Install the prepared package into the pair inactive in active_record. */
-firmware_status_t UpdateService_InstallStart(
+/** Read, parse, and bind the fixed Manifest from an already-mounted source. */
+firmware_status_t UpdateService_PrepareStart(
     struct update_service *service,
-    const boot_active_record_t *active_record);
+    const update_request_t *request);
 
-/**
- * Start the first installation when no valid Active Record exists.
- *
- * The package is installed into the explicitly selected pair and produces a
- * complete candidate Active Record. The caller must still commit that
- * candidate through Boot Control before it can be launched.
- */
-firmware_status_t UpdateService_InitialInstallStart(
-    struct update_service *service,
-    boot_pair_t target_pair);
+/** Install the prepared package into the fixed APP and GUI runtime regions. */
+firmware_status_t UpdateService_InstallStart(struct update_service *service);
 
 /** Advance at most one bounded update operation or state transition. */
 void UpdateService_Process(struct update_service *service);
@@ -50,6 +39,14 @@ const validated_manifest_t *UpdateService_GetManifest(
 
 /** Return the uncommitted candidate Active Record after Install succeeds. */
 const boot_active_record_t *UpdateService_GetCandidate(
+    const struct update_service *service);
+
+/**
+ * Return whether this install attempt may already have modified Runtime.
+ * The value becomes true when the first APP erase starts and remains sticky
+ * until the service is re-prepared.
+ */
+int UpdateService_RuntimeMayBeModified(
     const struct update_service *service);
 
 #endif

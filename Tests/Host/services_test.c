@@ -4,7 +4,6 @@
 
 #include "firmware/status.h"
 #include "services/capability/checked_arithmetic.h"
-#include "services/capability/slot_policy.h"
 #include "services/capability/vector_validation.h"
 #include "services/capability/version_policy.h"
 #include "services/common/runtime_layout.h"
@@ -20,33 +19,6 @@ static void TestCheckedArithmetic(void)
     assert(result == 1048576U);
     assert(CheckedArithmetic_MultiplyU32(UINT32_MAX, 2U, &result) == 0);
     assert(CheckedArithmetic_RangeEndU32(0x1000U, 0U, &result) == 0);
-}
-
-static void TestSlotPolicy(void)
-{
-    boot_pair_layout_t layout;
-    boot_pair_t inactive_pair;
-
-    assert(SlotPolicy_GetPairLayout(BOOT_PAIR_1, &layout) == FIRMWARE_STATUS_OK);
-    assert(layout.app.flash_offset == 0x00000000UL);
-    assert(layout.app.mapped_address == 0x90000000UL);
-    assert(layout.app.capacity_bytes == 0x00100000UL);
-    assert(layout.gui.flash_offset == 0x00200000UL);
-    assert(layout.gui.capacity_bytes == 0x00800000UL);
-    assert(SlotPolicy_SelectInactivePair(BOOT_PAIR_1, &inactive_pair) ==
-           FIRMWARE_STATUS_OK);
-    assert(inactive_pair == BOOT_PAIR_2);
-    assert(SlotPolicy_ValidateImageSize(&layout.app, layout.app.capacity_bytes) ==
-           FIRMWARE_STATUS_OK);
-    assert(SlotPolicy_ValidateImageSize(&layout.app, 0U) ==
-           FIRMWARE_STATUS_OUT_OF_RANGE);
-    assert(SlotPolicy_ContainsRange(
-               &layout.gui, layout.gui.flash_offset, layout.gui.capacity_bytes) != 0);
-    assert(SlotPolicy_ContainsRange(
-               &layout.gui, layout.gui.flash_offset - 1U, 1U) == 0);
-    assert(SlotPolicy_ValidateStorageGeometry(
-               SLOT_POLICY_FLASH_CAPACITY_BYTES, SLOT_POLICY_ERASE_SIZE_BYTES) ==
-           FIRMWARE_STATUS_OK);
 }
 
 static void TestRuntimeLayout(void)
@@ -75,7 +47,9 @@ static void TestVersionPolicy(void)
 
 static void TestVectorValidation(void)
 {
-    boot_pair_layout_t layout;
+    const boot_runtime_layout_t *layout = BootRuntimeLayout_Get();
+    const boot_region_t app_region = {
+        layout->app_offset, layout->app_xip_base, layout->app_max_size};
     const memory_region_t sram[] = {
         {0x20000000UL, 0x00020000UL},
         {0x24000000UL, 0x00080000UL},
@@ -85,21 +59,20 @@ static void TestVectorValidation(void)
         .reset_handler = 0x90000101UL,
     };
 
-    assert(SlotPolicy_GetPairLayout(BOOT_PAIR_1, &layout) == FIRMWARE_STATUS_OK);
     assert(VectorValidation_Validate(
-               &vectors, &layout.app, 0x1000U, sram,
+               &vectors, &app_region, 0x1000U, sram,
                (uint32_t)(sizeof(sram) / sizeof(sram[0]))) == FIRMWARE_STATUS_OK);
 
     vectors.reset_handler &= ~0x1UL;
     assert(VectorValidation_Validate(
-               &vectors, &layout.app, 0x1000U, sram,
+               &vectors, &app_region, 0x1000U, sram,
                (uint32_t)(sizeof(sram) / sizeof(sram[0]))) ==
            FIRMWARE_STATUS_OUT_OF_RANGE);
 
     vectors.reset_handler = 0x90000101UL;
     vectors.initial_msp = 0x10000000UL;
     assert(VectorValidation_Validate(
-               &vectors, &layout.app, 0x1000U, sram,
+               &vectors, &app_region, 0x1000U, sram,
                (uint32_t)(sizeof(sram) / sizeof(sram[0]))) ==
            FIRMWARE_STATUS_OUT_OF_RANGE);
 }
@@ -107,7 +80,6 @@ static void TestVectorValidation(void)
 int main(void)
 {
     TestCheckedArithmetic();
-    TestSlotPolicy();
     TestRuntimeLayout();
     TestVersionPolicy();
     TestVectorValidation();

@@ -10,9 +10,9 @@
 /**
  * @brief Bind concrete platform and BSP implementations to application services.
  *
- * This function configures the logger, validates the external-flash geometry,
- * constructs storage, hash, package, update, recovery, validation, XIP, reset,
- * and jump objects, then configures Application. It is the single ownership
+ * This function configures the logger, constructs storage, hash, package,
+ * update, validation, XIP, reset, and jump objects, then configures
+ * Application. It is the single ownership
  * point for static instances.
  *
  * @return FIRMWARE_STATUS_OK on success.

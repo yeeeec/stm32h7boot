@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
 #include "services/capability/manifest_service.h"
@@ -13,61 +14,31 @@
         }                                                                        \
     } while (0)
 
-static const char valid_manifest[] =
+/* This is the byte sequence whose digest is bound by the request test. */
+const char valid_manifest[] =
     "{"
-    "\"format_version\":2,"
-    "\"package_id\":\"hmi-app-gui-1.0.0+1\","
-    "\"product_id\":\"HMI\","
-    "\"hardware_id\":\"STM32H743-W25Q256\","
-    "\"build_number\":1,"
-    "\"created_utc\":\"2026-08-05T00:00:00Z\","
-    "\"minimum_bootloader_version\":\"1.0.0\","
-    "\"release_groups\":[{"
-        "\"id\":\"app-gui\",\"version\":\"1.2.3\",\"atomic\":true,"
-        "\"components\":[\"app\",\"gui\"]}],"
-    "\"transaction\":{"
-        "\"release_group_id\":\"app-gui\",\"strategy\":\"inactive-pair\","
-        "\"commit_store\":\"eeprom\","
-        "\"commit_condition\":\"all-components-crc-valid\"},"
-    "\"crc32_parameters\":{"
-        "\"name\":\"CRC-32/ISO-HDLC\",\"polynomial\":\"0x04C11DB7\","
-        "\"initial_value\":\"0xFFFFFFFF\",\"reflect_input\":true,"
-        "\"reflect_output\":true,\"xor_output\":\"0xFFFFFFFF\"},"
-    "\"components\":[{"
-        "\"id\":\"app\",\"file\":\"hmi.app.bin\","
-        "\"format\":\"raw-xip-reloc-v2\",\"target\":\"inactive-app-slot\","
-        "\"maximum_image_size_bytes\":1048576,\"file_size_bytes\":65,"
-        "\"image_size_bytes\":65,\"source_crc32\":\"0123ABCD\","
-        "\"target_crc32\":{\"app1\":\"12345678\",\"app2\":\"90ABCDEF\"},"
-        "\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\","
-        "\"vector_offset\":0,\"entry_offset\":4,\"link_address\":2415919104,"
-        "\"relocation\":{\"file\":\"hmi.app.reloc.bin\",\"count\":1,"
-        "\"crc32\":\"00000000\",\"format\":\"hmi-reloc-v1\"}"
-    "},{"
-        "\"id\":\"gui\",\"file\":\"hmi.gui.bin\",\"format\":\"raw\","
-        "\"target\":\"inactive-gui-slot\","
-        "\"maximum_image_size_bytes\":8388608,\"file_size_bytes\":1,"
-        "\"crc32\":\"89ABCDEF\","
-        "\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\""
-    "}],"
-    "\"signature\":{"
-        "\"algorithm\":\"ECDSA-P256-SHA256\",\"key_id\":\"test-key\","
-        "\"canonicalization\":\"RFC8785\","
-        "\"scope\":\"all-fields-except-signature.value\","
-        "\"encoding\":\"base64\","
-        "\"value\":\"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==\""
-    "}}";
+    "\"format_version\":1,"
+    "\"package_id\":\"hmi-app-gui-1.2.3+42\","
+    "\"release\":{\"major\":1,\"minor\":2,\"patch\":3,\"build\":42},"
+    "\"target\":{\"product\":\"HMI\",\"hardware\":\"STM32H743-W25Q256\","
+    "\"minimum_bootloader_version\":\"1.0.0\"},"
+    "\"components\":{"
+        "\"app\":{\"file\":\"hmi.app.bin\",\"format\":\"raw-bin-v1\","
+        "\"size\":64,\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\"},"
+        "\"gui\":{\"file\":\"hmi.gui.bin\",\"format\":\"raw-bin-v1\","
+        "\"size\":128,\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"}"
+    "}"
+    "}";
 
 typedef struct
 {
     hash_provider_t interface;
     uint32_t hash;
-    uint32_t verify_count;
-} fake_authenticator_t;
+} fake_hash_t;
 
 static firmware_status_t HashReset(void *context)
 {
-    fake_authenticator_t *fake = (fake_authenticator_t *)context;
+    fake_hash_t *fake = (fake_hash_t *)context;
 
     fake->hash = 2166136261UL;
     return FIRMWARE_STATUS_OK;
@@ -75,7 +46,7 @@ static firmware_status_t HashReset(void *context)
 
 static firmware_status_t HashUpdate(void *context, const void *data, size_t size)
 {
-    fake_authenticator_t *fake = (fake_authenticator_t *)context;
+    fake_hash_t *fake = (fake_hash_t *)context;
     const uint8_t *bytes = (const uint8_t *)data;
 
     while (size-- != 0U)
@@ -87,7 +58,7 @@ static firmware_status_t HashUpdate(void *context, const void *data, size_t size
 
 static firmware_status_t HashFinish(void *context, uint8_t digest[32])
 {
-    fake_authenticator_t *fake = (fake_authenticator_t *)context;
+    const fake_hash_t *fake = (const fake_hash_t *)context;
     uint32_t index;
 
     for (index = 0U; index < 32U; ++index)
@@ -97,7 +68,7 @@ static firmware_status_t HashFinish(void *context, uint8_t digest[32])
     return FIRMWARE_STATUS_OK;
 }
 
-static void FakeAuthenticator_Init(fake_authenticator_t *fake)
+static void FakeHash_Init(fake_hash_t *fake)
 {
     memset(fake, 0, sizeof(*fake));
     fake->interface.context = fake;
@@ -106,42 +77,79 @@ static void FakeAuthenticator_Init(fake_authenticator_t *fake)
     fake->interface.finish = HashFinish;
 }
 
+static int TestValidManifest(fake_hash_t *fake, manifest_service_t *service,
+                             validated_manifest_t *manifest)
+{
+    manifest_service_dependencies_t dependencies = {.hash = &fake->interface};
+
+    ASSERT_TRUE(ManifestService_Init(service, &dependencies) == FIRMWARE_STATUS_OK);
+    ASSERT_TRUE(ManifestService_ParseAndValidate(
+                    service, (const uint8_t *)valid_manifest,
+                    (uint32_t)strlen(valid_manifest), manifest) == FIRMWARE_STATUS_OK);
+    ASSERT_TRUE(strcmp(manifest->package_id, "hmi-app-gui-1.2.3+42") == 0);
+    ASSERT_TRUE((manifest->release_version.major == 1U) &&
+                (manifest->release_version.minor == 2U) &&
+                (manifest->release_version.patch == 3U) &&
+                (manifest->build_number == 42U));
+    ASSERT_TRUE((manifest->app.size_bytes == 64U) && (manifest->gui.size_bytes == 128U));
+    ASSERT_TRUE((manifest->app.sha256[0] == 0U) && (manifest->gui.sha256[0] == 0x11U));
+    ASSERT_TRUE(strcmp(manifest->app.file, "hmi.app.bin") == 0);
+    ASSERT_TRUE(strcmp(manifest->gui.file, "hmi.gui.bin") == 0);
+    return 0;
+}
+
 int main(void)
 {
-    fake_authenticator_t fake;
+    fake_hash_t fake;
     manifest_service_t service = {0};
-    manifest_service_dependencies_t dependencies;
     validated_manifest_t manifest;
     validated_manifest_t unchanged;
     char invalid_manifest[sizeof(valid_manifest)];
     char *field;
 
-    FakeAuthenticator_Init(&fake);
-    dependencies.hash = &fake.interface;
-    ASSERT_TRUE(ManifestService_Init(&service, &dependencies) == FIRMWARE_STATUS_OK);
-    ASSERT_TRUE(ManifestService_ParseAndValidate(
-                    &service, (const uint8_t *)valid_manifest,
-                    (uint32_t)strlen(valid_manifest), &manifest) == FIRMWARE_STATUS_OK);
-    ASSERT_TRUE(strcmp(manifest.package_id, "hmi-app-gui-1.0.0+1") == 0);
-    ASSERT_TRUE((manifest.release_version.major == 1U) &&
-                (manifest.release_version.minor == 2U) &&
-                (manifest.release_version.patch == 3U));
-    ASSERT_TRUE(manifest.app.source_crc32 == 0x0123ABCDUL);
-    ASSERT_TRUE(manifest.app.target_crc32_app2 == 0x90ABCDEFUL);
-    ASSERT_TRUE(manifest.gui.crc32 == 0x89ABCDEFUL);
-    ASSERT_TRUE(fake.verify_count == 0U);
+    FakeHash_Init(&fake);
+    ASSERT_TRUE(TestValidManifest(&fake, &service, &manifest) == 0);
 
+    /* V1 is a distinct contract: old V2 and relocation fields are rejected. */
     memcpy(invalid_manifest, valid_manifest, sizeof(valid_manifest));
-    field = strstr(invalid_manifest, "\"product_id\":\"HMI\"");
+    field = strstr(invalid_manifest, "\"format_version\":1");
     ASSERT_TRUE(field != NULL);
-    memcpy(strstr(field, "HMI"), "BAD", 3U);
-    memset(&unchanged, 0xA5, sizeof(unchanged));
-    manifest = unchanged;
+    field[strlen("\"format_version\":")] = '2';
+    unchanged = manifest;
     ASSERT_TRUE(ManifestService_ParseAndValidate(
                     &service, (const uint8_t *)invalid_manifest,
                     (uint32_t)strlen(invalid_manifest), &manifest) != FIRMWARE_STATUS_OK);
     ASSERT_TRUE(memcmp(&manifest, &unchanged, sizeof(manifest)) == 0);
-    ASSERT_TRUE(fake.verify_count == 0U);
+
+    memcpy(invalid_manifest, valid_manifest, sizeof(valid_manifest));
+    field = strstr(invalid_manifest, "\"format\":\"raw-bin-v1\"");
+    ASSERT_TRUE(field != NULL);
+    field[strlen("\"format\":\"raw-bin-v")] = '2';
+    unchanged = manifest;
+    ASSERT_TRUE(ManifestService_ParseAndValidate(
+                    &service, (const uint8_t *)invalid_manifest,
+                    (uint32_t)strlen(invalid_manifest), &manifest) != FIRMWARE_STATUS_OK);
+    ASSERT_TRUE(memcmp(&manifest, &unchanged, sizeof(manifest)) == 0);
+
+    memcpy(invalid_manifest, valid_manifest, sizeof(valid_manifest));
+    field = strstr(invalid_manifest, "\"size\":64");
+    ASSERT_TRUE(field != NULL);
+    field[1] = 'x';
+    unchanged = manifest;
+    ASSERT_TRUE(ManifestService_ParseAndValidate(
+                    &service, (const uint8_t *)invalid_manifest,
+                    (uint32_t)strlen(invalid_manifest), &manifest) != FIRMWARE_STATUS_OK);
+    ASSERT_TRUE(memcmp(&manifest, &unchanged, sizeof(manifest)) == 0);
+
+    memcpy(invalid_manifest, valid_manifest, sizeof(valid_manifest));
+    field = strstr(invalid_manifest, "\"sha256\":\"000");
+    ASSERT_TRUE(field != NULL);
+    field[strlen("\"sha256\":\"")] = 'A';
+    unchanged = manifest;
+    ASSERT_TRUE(ManifestService_ParseAndValidate(
+                    &service, (const uint8_t *)invalid_manifest,
+                    (uint32_t)strlen(invalid_manifest), &manifest) != FIRMWARE_STATUS_OK);
+    ASSERT_TRUE(memcmp(&manifest, &unchanged, sizeof(manifest)) == 0);
 
     puts("manifest_service_test: PASS");
     return 0;

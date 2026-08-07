@@ -1,83 +1,29 @@
 {
-  "format_version": 2,
+  "format_version": 1,
   "package_id": "hmi-app-gui-1.0.0+1",
-  "product_id": "HMI",
-  "hardware_id": "STM32H743-W25Q256",
-  "build_number": 1,
-  "created_utc": "2026-08-05T00:00:00Z",
-  "minimum_bootloader_version": "1.0.0",
-
-  "release_groups": [
-    {
-      "id": "app-gui",
-      "version": "1.0.0",
-      "atomic": true,
-      "components": [
-        "app",
-        "gui"
-      ]
-    }
-  ],
-
-  "transaction": {
-    "release_group_id": "app-gui",
-    "strategy": "inactive-pair",
-    "commit_store": "eeprom",
-    "commit_condition": "all-components-crc-valid"
+  "release": {
+    "major": 1,
+    "minor": 0,
+    "patch": 0,
+    "build": 1
   },
-
-  "crc32_parameters": {
-    "name": "CRC-32/ISO-HDLC",
-    "polynomial": "0x04C11DB7",
-    "initial_value": "0xFFFFFFFF",
-    "reflect_input": true,
-    "reflect_output": true,
-    "xor_output": "0xFFFFFFFF"
+  "target": {
+    "product": "HMI",
+    "hardware": "STM32H743-W25Q256",
+    "minimum_bootloader_version": "1.0.0"
   },
-
-  "components": [
-    {
-      "id": "app",
+  "components": {
+    "app": {
       "file": "hmi.app.bin",
-      "format": "raw-xip-reloc-v2",
-      "target": "inactive-app-slot",
-      "maximum_image_size_bytes": 1048576,
-      "file_size_bytes": null,
-      "image_size_bytes": null,
-      "source_crc32": null,
-      "target_crc32": {
-        "app1": null,
-        "app2": null
-      },
-      "sha256": null,
-      "vector_offset": 0,
-      "entry_offset": null,
-      "link_address": 2415919104,
-      "relocation": {
-        "file": "hmi.app.reloc.bin",
-        "count": null,
-        "crc32": null,
-        "format": "hmi-reloc-v1"
-      }
+      "format": "raw-bin-v1",
+      "size": 524288,
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
     },
-    {
-      "id": "gui",
+    "gui": {
       "file": "hmi.gui.bin",
-      "format": "raw",
-      "target": "inactive-gui-slot",
-      "maximum_image_size_bytes": 8388608,
-      "file_size_bytes": null,
-      "crc32": null,
-      "sha256": null
+      "format": "raw-bin-v1",
+      "size": 4194304,
+      "sha256": "1111111111111111111111111111111111111111111111111111111111111111"
     }
-  ],
-
-  "signature": {
-    "algorithm": "ECDSA-P256-SHA256",
-    "key_id": "hmi-production-key-01",
-    "canonicalization": "RFC8785",
-    "scope": "all-fields-except-signature.value",
-    "encoding": "base64",
-    "value": null
   }
 }

@@ -1,40 +1,36 @@
 /**
  * @file fatfs_package_source_adapter.h
- * @brief SD-card FatFs adapter for upgrade-package file access.
+ * @brief SD-card FatFs adapters for the release volume.
  */
 #ifndef ADAPTERS_FATFS_PACKAGE_SOURCE_ADAPTER_H
 #define ADAPTERS_FATFS_PACKAGE_SOURCE_ADAPTER_H
 
 #include "firmware/package_source.h"
 
-/** Adapter state for the single CubeMX SD-card FatFs volume. */
+/** Shared mount and open-file ownership for the one SD/FatFs release volume. */
+typedef struct
+{
+    int mounted;
+    int package_file_open;
+} fatfs_release_volume_context_t;
+
 typedef struct
 {
     package_source_t interface;
-    int mounted;
-    int file_open;
+    fatfs_release_volume_context_t *volume;
 } fatfs_package_source_adapter_t;
 
-/**
- * @brief Initialize access to the CubeMX SD-card FatFs objects.
- *
- * @param[out] adapter Adapter object to initialize.
- *
- * @return FIRMWARE_STATUS_OK on success.
- * @return FIRMWARE_STATUS_INVALID_ARGUMENT if @p adapter is NULL.
- *
- * @pre MX_FATFS_Init and MX_SDMMC1_SD_Init have completed.
- */
-firmware_status_t FatFsPackageSourceAdapter_Init(
-    fatfs_package_source_adapter_t *adapter);
+firmware_status_t FatFsReleaseVolumeContext_Init(
+    fatfs_release_volume_context_t *volume);
 
 /**
- * @brief Return the package-source interface owned by an adapter.
- *
- * @param[in] adapter Initialized adapter, or NULL.
- *
- * @return Adapter-owned interface, or NULL for a NULL adapter.
+ * Initialize fixed-file and deprecated pathname compatibility access.
+ * The caller owns @p volume and must share it with the request-store adapter.
  */
+firmware_status_t FatFsPackageSourceAdapter_Init(
+    fatfs_package_source_adapter_t *adapter,
+    fatfs_release_volume_context_t *volume);
+
 const package_source_t *FatFsPackageSourceAdapter_Interface(
     const fatfs_package_source_adapter_t *adapter);
 

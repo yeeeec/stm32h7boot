@@ -314,13 +314,6 @@ static int TestFirstCommitAndSelection(void)
     TEST_ASSERT((loaded.sequence == 1U) &&
                 (loaded.format_version == BOOT_ACTIVE_RECORD_FORMAT_V2) &&
                 (loaded.state == BOOT_ACTIVE_RECORD_STATE_VALID) && (loaded.flags == 1U));
-    TEST_ASSERT(
-        BootControlService_LoadPairCandidate(
-            &service, BOOT_PAIR_1, &loaded) == FIRMWARE_STATUS_NOT_SUPPORTED);
-    TEST_ASSERT(
-        BootControlService_LoadPairCandidate(
-            &service, BOOT_PAIR_2, &loaded) == FIRMWARE_STATUS_NOT_SUPPORTED);
-
     StoreResetCounters(&store);
     TEST_ASSERT(CommitActive(&service, &pair_2) == 0);
     TEST_ASSERT(store.accepted_writes == ACTIVE_WRITE_COUNT);
@@ -432,39 +425,6 @@ static int TestCorruptRecordFallback(void)
     TEST_ASSERT(
         BootControlService_LoadActive(&service, &loaded) ==
         FIRMWARE_STATUS_INVALID_STATE);
-    return 0;
-}
-
-static int TestRecoveryCommitPreservesCandidate(void)
-{
-    fake_store_t store;
-    boot_control_service_t service;
-    crc32_iso_hdlc_t crc;
-    boot_active_record_t pair_1 = ActiveRecord(1U);
-    boot_active_record_t pair_2 = ActiveRecord(2U);
-    boot_active_record_t candidate;
-    boot_active_record_t loaded;
-    uint8_t preserved_record[256U];
-
-    StoreInit(&store);
-    TEST_ASSERT(ServiceInit(&service, &crc, &store) == 0);
-    TEST_ASSERT(CommitActive(&service, &pair_1) == 0);
-    TEST_ASSERT(CommitActive(&service, &pair_2) == 0);
-    TEST_ASSERT(BootControlService_LoadActive(&service, &candidate) == FIRMWARE_STATUS_OK);
-    memcpy(preserved_record, &store.bytes[ACTIVE_B_ADDRESS],
-           sizeof(preserved_record));
-
-    TEST_ASSERT(
-        BootControlService_CommitRecoveredStart(&service, &candidate) ==
-        FIRMWARE_STATUS_OK);
-    TEST_ASSERT(RunCommit(&service) == 0);
-    TEST_ASSERT(
-        BootControlService_GetState(&service) == SERVICE_RUN_STATE_SUCCEEDED);
-    TEST_ASSERT(memcmp(preserved_record, &store.bytes[ACTIVE_B_ADDRESS],
-                       sizeof(preserved_record)) == 0);
-    TEST_ASSERT(
-        BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
-    TEST_ASSERT((loaded.sequence == 3U) && (loaded.flags == 2U));
     return 0;
 }
 
@@ -630,7 +590,6 @@ int main(void)
     TEST_ASSERT(TestEqualSequenceRecords() == 0);
     TEST_ASSERT(TestAmbiguousSequenceRecords() == 0);
     TEST_ASSERT(TestCorruptRecordFallback() == 0);
-    TEST_ASSERT(TestRecoveryCommitPreservesCandidate() == 0);
     TEST_ASSERT(TestAcceptedWritePowerLoss() == 0);
     TEST_ASSERT(TestWriteFailureInjection() == 0);
     TEST_ASSERT(TestChecksumFailurePropagation() == 0);

@@ -9,11 +9,10 @@
 #include "services/capability/json_document.h"
 #include "services/capability/manifest_service_api.h"
 
-#define MANIFEST_SERVICE_TOKEN_CAPACITY 192U
+#define MANIFEST_SERVICE_TOKEN_CAPACITY 64U
 
-/* The fixed Schema has 118 tokens in the production test vector. Keep the
- * parser workspace within the 4 KiB static-memory budget with headroom for
- * malformed input before schema validation rejects it. */
+/* The V1 object schema uses 31 tokens.  Keep bounded headroom for malformed
+ * documents while staying well below the 4 KiB static-memory budget. */
 _Static_assert(
     (MANIFEST_SERVICE_TOKEN_CAPACITY * sizeof(json_token_t)) <= 4096U,
     "Manifest token workspace exceeds the static-memory budget");

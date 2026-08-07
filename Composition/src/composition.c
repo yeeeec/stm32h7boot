@@ -9,6 +9,7 @@
 #include "adapters/at24_boot_control_adapter.h"
 #include "adapters/cortex_m_application_jump_adapter.h"
 #include "adapters/fatfs_package_source_adapter.h"
+#include "adapters/fatfs_update_request_store_adapter.h"
 #include "adapters/spi_nor_block_adapter.h"
 #include "adapters/stm32_clock_adapter.h"
 #include "adapters/stm32_qspi_xip_adapter.h"
@@ -28,11 +29,10 @@
 #include "services/capability/boot_control_service.h"
 #include "services/capability/boot_control_service_api.h"
 #include "services/capability/manifest_service.h"
-#include "services/capability/slot_policy.h"
+#include "services/capability/update_request_service.h"
 #include "services/capability/vector_validation.h"
 #include "services/use_case/active_validation_service.h"
 #include "services/use_case/launch_service.h"
-#include "services/use_case/recovery_service.h"
 #include "services/use_case/update_service.h"
 
 #define SERVICE_IO_BUFFER_SIZE 4096U
@@ -45,20 +45,18 @@ static boot_control_service_t boot_control_service;
 static sha256_context_t manifest_hash_context;
 static sha256_context_t active_validation_hash_context;
 static manifest_service_t manifest_service;
+static update_request_service_t update_request_service;
+static fatfs_release_volume_context_t release_volume;
 static fatfs_package_source_adapter_t package_source_adapter;
+static fatfs_update_request_store_adapter_t request_store_adapter;
 static stm32_qspi_xip_adapter_t xip_adapter;
 static cortex_m_application_jump_adapter_t jump_adapter;
 static stm32_system_reset_adapter_t system_reset_adapter;
 static crc32_iso_hdlc_t crc32_provider;
 static active_validation_service_t active_validation_service;
 static launch_service_t launch_service;
-static recovery_service_t recovery_service;
 static update_service_t update_service;
 static uint8_t manifest_buffer[UPDATE_SERVICE_MANIFEST_MAX_SIZE]
-    __attribute__((section(".ram_d2"), aligned(32)));
-static uint8_t relocation_buffer[UPDATE_SERVICE_MAX_RELOCATIONS * HMI_RELOCATION_ENTRY_SIZE]
-    __attribute__((section(".ram_d2"), aligned(32)));
-static hmi_relocation_entry_t relocation_entries[UPDATE_SERVICE_MAX_RELOCATIONS]
     __attribute__((section(".ram_d2"), aligned(32)));
 static uint8_t service_io_buffer[SERVICE_IO_BUFFER_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
@@ -99,13 +97,6 @@ static hash_provider_t active_validation_hash_interface = {
     ManifestHashFinish,
 };
 
-static firmware_status_t LoadRecoveryCandidate(void *context, boot_pair_t pair,
-                                               boot_active_record_t *candidate)
-{
-    return BootControlService_LoadPairCandidate((boot_control_service_t *) context, pair,
-                                                candidate);
-}
-
 firmware_status_t Composition_Init(void)
 {
     firmware_status_t status;
@@ -113,7 +104,6 @@ firmware_status_t Composition_Init(void)
     async_block_device_info_t external_flash_info;
     active_validation_service_dependencies_t validation_dependencies;
     launch_service_dependencies_t launch_dependencies;
-    recovery_service_dependencies_t recovery_dependencies;
     update_service_dependencies_t update_dependencies;
 
     if (composition_initialized != 0)
@@ -155,14 +145,6 @@ firmware_status_t Composition_Init(void)
         LOG_ERROR("composition", "external flash geometry is invalid");
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    status = SlotPolicy_ValidateStorageGeometry(external_flash_info.capacity_bytes,
-                                                external_flash_info.erase_size);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        LOG_ERROR("composition", "external flash does not match slot policy");
-        return status;
-    }
-
     status = Crc32IsoHdlc_Init(&crc32_provider);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -176,6 +158,17 @@ firmware_status_t Composition_Init(void)
         if (!FirmwareStatus_IsOk(status))
         {
             LOG_ERROR("composition", "Manifest service init failed: %d", (int) status);
+            return status;
+        }
+    }
+
+    {
+        update_request_service_dependencies_t request_dependencies = {&manifest_hash_interface};
+
+        status = UpdateRequestService_Init(&update_request_service, &request_dependencies);
+        if (!FirmwareStatus_IsOk(status))
+        {
+            LOG_ERROR("composition", "Update request service init failed: %d", (int)status);
             return status;
         }
     }
@@ -200,7 +193,17 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
-    status = FatFsPackageSourceAdapter_Init(&package_source_adapter);
+    status = FatFsReleaseVolumeContext_Init(&release_volume);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status = FatFsPackageSourceAdapter_Init(&package_source_adapter, &release_volume);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status = FatFsUpdateRequestStoreAdapter_Init(&request_store_adapter, &release_volume);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -234,15 +237,6 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
-    recovery_dependencies.load_candidate    = LoadRecoveryCandidate;
-    recovery_dependencies.candidate_context = &boot_control_service;
-    recovery_dependencies.validation        = &active_validation_service;
-    status = RecoveryService_Init(&recovery_service, &recovery_dependencies);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-
     launch_dependencies.storage          = external_flash;
     launch_dependencies.xip_controller   = Stm32QspiXipAdapter_Interface(&xip_adapter);
     launch_dependencies.application_jump = CortexMApplicationJumpAdapter_Interface(&jump_adapter);
@@ -255,24 +249,17 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
-    update_dependencies.package_source =
+    update_dependencies.package_source       =
         FatFsPackageSourceAdapter_Interface(&package_source_adapter);
-    update_dependencies.storage                   = external_flash;
-    update_dependencies.checksum                  = Crc32IsoHdlc_Interface(&crc32_provider);
-    update_dependencies.hash                      = &manifest_hash_interface;
-    update_dependencies.manifest_service          = &manifest_service;
-    update_dependencies.manifest_path             = "/firmware/manifest.json";
-    update_dependencies.app_path                  = "/firmware/hmi.app.bin";
-    update_dependencies.relocation_path           = "/firmware/hmi.app.reloc.bin";
-    update_dependencies.gui_path                  = "/firmware/hmi.gui.bin";
-    update_dependencies.manifest_buffer           = manifest_buffer;
-    update_dependencies.manifest_buffer_size      = sizeof(manifest_buffer);
-    update_dependencies.io_buffer                 = service_io_buffer;
-    update_dependencies.io_buffer_size            = sizeof(service_io_buffer);
-    update_dependencies.relocation_buffer         = relocation_buffer;
-    update_dependencies.relocation_buffer_size    = sizeof(relocation_buffer);
-    update_dependencies.relocation_entries        = relocation_entries;
-    update_dependencies.relocation_entry_capacity = UPDATE_SERVICE_MAX_RELOCATIONS;
+    update_dependencies.manifest_service     = &manifest_service;
+    update_dependencies.update_request_service = &update_request_service;
+    update_dependencies.hash                 = &manifest_hash_interface;
+    update_dependencies.storage              = external_flash;
+    update_dependencies.runtime_layout       = BootRuntimeLayout_Get();
+    update_dependencies.manifest_buffer      = manifest_buffer;
+    update_dependencies.manifest_buffer_size = sizeof(manifest_buffer);
+    update_dependencies.io_buffer            = service_io_buffer;
+    update_dependencies.io_buffer_size       = sizeof(service_io_buffer);
     status = UpdateService_Init(&update_service, &update_dependencies);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -283,13 +270,14 @@ firmware_status_t Composition_Init(void)
         const application_dependencies_t application_dependencies = {
             .boot_control       = &boot_control_service,
             .update             = &update_service,
-            .recovery           = &recovery_service,
             .validation         = &active_validation_service,
             .launch             = &launch_service,
             .package_source     = FatFsPackageSourceAdapter_Interface(&package_source_adapter),
+            .update_request_store =
+                FatFsUpdateRequestStoreAdapter_Interface(&request_store_adapter),
+            .update_request_service = &update_request_service,
             .system_reset       = Stm32SystemResetAdapter_Interface(&system_reset_adapter),
             .bootloader_version = {1U, 0U, 0U},
-            .request_path       = "/boot_update_request.json",
         };
 
         status = Application_Configure(&application_dependencies);

@@ -2,6 +2,7 @@ add_library(firmware_adapters STATIC
     src/at24_boot_control_adapter.c
     src/cortex_m_application_jump_adapter.c
     src/fatfs_package_source_adapter.c
+    src/fatfs_update_request_store_adapter.c
     src/spi_nor_block_adapter.c
     src/stm32_clock_adapter.c
     src/stm32_qspi_xip_adapter.c

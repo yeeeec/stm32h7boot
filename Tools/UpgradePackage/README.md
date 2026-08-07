@@ -1,38 +1,89 @@
-# Raw SD Upgrade Package
+# Application Release Package Builder
 
-The current SD package is a Manifest-driven raw-image format. The application
-binary has no prepended container header.
+This independent host tool converts a canonical Application ELF into the fixed
+runtime package consumed by this Bootloader. It is not a Bootloader post-build
+step and must be run from the Application build once that project exists.
+
+## Input contract
+
+The Application ELF must have file-backed `PT_LOAD` program segments with these
+physical load addresses (`p_paddr`):
 
 ```text
-/
-|-- boot_update_request.json       # create this file last
-`-- firmware/
-    |-- manifest.json
-    |-- hmi.app.bin                # raw image linked at 0x90000000
-    |-- hmi.app.reloc.bin          # sorted <offset,u16 type,u16 reserved>
-    `-- hmi.gui.bin                # raw GUI/resource image
+APP: 0x90000000 .. 0x900FFFFF (maximum 1 MiB)
+GUI: 0x90200000 .. 0x909FFFFF (maximum 8 MiB)
 ```
 
-`manifest.json` version 2 describes the source image size, vector entry,
-source SHA/CRC, both post-relocation target CRCs, and the relocation table's
-size/count/CRC. The table itself is separate so the fixed embedded JSON token
-budget is not used for thousands of offsets.
+`p_paddr` is intentionally used instead of `p_vaddr`. This keeps initialized
+RAM data whose virtual address is in RAM but whose load address is inside APP
+in `hmi.app.bin`. Empty load segments do not contribute bytes. Every non-empty
+load range must fit wholly inside exactly one of the fixed regions.
 
-For production builds, link the application with `-Wl,--emit-relocs` and run:
+The tool maps APP and GUI addresses to offsets from their respective bases.
+Address gaps are filled with `0xFF`. The APP image must contain an eight-byte
+vector and a Thumb reset handler pointing into the APP region.
+
+## Dependency
+
+Install the host dependency before building a package:
+
+```powershell
+python -m pip install -r Tools/UpgradePackage/requirements.txt
+```
+
+## Build a release package
 
 ```powershell
 python Tools/UpgradePackage/build_upgrade_package.py build `
-  --app G:\upgrade\hmi.app.bin `
-  --gui G:\upgrade\hmi.gui.bin `
-  --elf E:\prjs\cmake\stm32h7app\build\Reloc2\stm32h7app.elf `
-  --output G:\
+  --elf E:\build\hmi-application.elf `
+  --output E:\release\hmi-1.2.3 `
+  --package-id hmi-1.2.3-20260807 `
+  --version 1.2.3 `
+  --build-number 20260807 `
+  --minimum-bootloader 1.0.0
 ```
 
-The tool validates the raw image, derives only `R_ARM_ABS32` XIP relocations,
-computes source and pair-1/pair-2 target CRCs, stages all files, verifies the
-package, and creates `boot_update_request.json` last. Signature fields retain
-the documented opaque placeholder until a real signing service is connected;
-the Bootloader does not verify ECDSA signatures.
+The result contains exactly:
 
-Use `verify --root G:\` to validate an already staged package without creating
-a request file.
+```text
+<output>/firmware/
+  manifest.json
+  hmi.app.bin
+  hmi.gui.bin
+```
+
+The Manifest uses the strict firmware V1 schema: fixed product and hardware,
+fixed file names, `raw-bin-v1`, final file sizes, and SHA-256 values computed
+from the files that were actually written. The tool stages and self-verifies
+all three files before replacing `firmware/`.
+
+## Verify
+
+```powershell
+python Tools/UpgradePackage/build_upgrade_package.py verify `
+  --package-root E:\release\hmi-1.2.3
+```
+
+## Development request only
+
+Normal `build` never generates `boot_update_request.json`. Production release
+authentication belongs to the trusted production process.
+
+For explicit development-only testing, generate a request after the final
+Manifest is present on disk:
+
+```powershell
+python Tools/UpgradePackage/build_upgrade_package.py create-dev-request `
+  --package-root E:\release\hmi-1.2.3
+```
+
+This command reads the raw `manifest.json` bytes and binds their SHA-256 to the
+strict request schema. It prints a development trust override warning and does
+not represent production release authentication.
+
+## Rejected input
+
+The tool rejects missing APP or GUI file-backed load data, ranges outside the
+fixed regions, ranges crossing a boundary, conflicting overlapping bytes,
+invalid vector reset addresses, invalid package identifiers or versions, and
+packages whose final files do not match their Manifest.

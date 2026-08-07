@@ -393,24 +393,6 @@ static firmware_status_t BeginCommit(boot_control_service_t *service,
     return FIRMWARE_STATUS_OK;
 }
 
-static int ActiveRecordsEqual(const boot_active_record_t *left, const boot_active_record_t *right)
-{
-    return (left->format_version == right->format_version) &&
-           (left->state == right->state) && (left->flags == right->flags) &&
-           (left->sequence == right->sequence) &&
-           (left->release_version.major == right->release_version.major) &&
-           (left->release_version.minor == right->release_version.minor) &&
-           (left->release_version.patch == right->release_version.patch) &&
-           (left->build_number == right->build_number) && (left->app_size == right->app_size) &&
-           (left->gui_size == right->gui_size) &&
-           (memcmp(left->package_id_hash, right->package_id_hash, sizeof(left->package_id_hash)) ==
-            0) &&
-           (memcmp(left->manifest_sha256, right->manifest_sha256, sizeof(left->manifest_sha256)) ==
-            0) &&
-           (memcmp(left->app_sha256, right->app_sha256, sizeof(left->app_sha256)) == 0) &&
-           (memcmp(left->gui_sha256, right->gui_sha256, sizeof(left->gui_sha256)) == 0);
-}
-
 static firmware_status_t StartCommit(boot_control_service_t *service,
                                      const boot_active_record_t *record)
 {
@@ -519,88 +501,10 @@ firmware_status_t BootControlService_LoadActive(boot_control_service_t *service,
     return status;
 }
 
-firmware_status_t BootControlService_LoadPairCandidate(boot_control_service_t *service,
-                                                       boot_pair_t pair,
-                                                       boot_active_record_t *record)
-{
-    if ((service == NULL) || (record == NULL))
-    {
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    }
-    if ((pair != BOOT_PAIR_1) && (pair != BOOT_PAIR_2))
-    {
-        return FIRMWARE_STATUS_OUT_OF_RANGE;
-    }
-
-    /* Active Record V2 deliberately has no pair identity. Keep this legacy
-     * entry point until Phase 8 removes pair recovery, but never infer a
-     * candidate from a V2 record. */
-    (void) pair;
-    return FIRMWARE_STATUS_NOT_SUPPORTED;
-}
-
 firmware_status_t BootControlService_CommitActiveStart(boot_control_service_t *service,
                                                        const boot_active_record_t *record)
 {
     return StartCommit(service, record);
-}
-
-firmware_status_t BootControlService_CommitRecoveredStart(boot_control_service_t *service,
-                                                          const boot_active_record_t *record)
-{
-    boot_active_record_t active_a;
-    boot_active_record_t active_b;
-    firmware_status_t status;
-    firmware_status_t status_a;
-    firmware_status_t status_b;
-    int matches_a;
-    int matches_b;
-
-    if ((service == NULL) || (record == NULL))
-    {
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    }
-    if ((service->initialized == 0) || (service->state == SERVICE_RUN_STATE_RUNNING))
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-
-    status = service->store->read(service->store->context, ACTIVE_RECORD_A_ADDRESS,
-                                  service->write_buffer, ACTIVE_RECORD_SIZE);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-    status = service->store->read(service->store->context, ACTIVE_RECORD_B_ADDRESS,
-                                  service->verify_buffer, ACTIVE_RECORD_SIZE);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-    status_a = ValidateActiveBuffer(service, service->write_buffer, &active_a);
-    status_b = ValidateActiveBuffer(service, service->verify_buffer, &active_b);
-    if ((!FirmwareStatus_IsOk(status_a) && !IsRecordUnavailable(status_a)) ||
-        (!FirmwareStatus_IsOk(status_b) && !IsRecordUnavailable(status_b)))
-    {
-        return !FirmwareStatus_IsOk(status_a) && !IsRecordUnavailable(status_a) ? status_a
-                                                                                   : status_b;
-    }
-
-    matches_a = FirmwareStatus_IsOk(status_a) && ActiveRecordsEqual(&active_a, record);
-    matches_b = FirmwareStatus_IsOk(status_b) && ActiveRecordsEqual(&active_b, record);
-    if ((matches_a == 0) && (matches_b == 0))
-    {
-        LOG_ERROR("bootctl", "recovered commit source record not found");
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-
-    /* Preserve one exact, already-validated source record throughout the
-     * recovery commit. If both copies match, preserve A. */
-    LOG_INFO("bootctl", "recovered commit target selected: source=%s next=%s",
-             (matches_a != 0) ? "A" : "B", (matches_a != 0) ? "B" : "A");
-    return BeginCommit(service, record,
-                       (matches_a != 0) ? ACTIVE_RECORD_B_ADDRESS : ACTIVE_RECORD_A_ADDRESS,
-                       record->sequence + 1U);
 }
 
 void BootControlService_Process(boot_control_service_t *service)

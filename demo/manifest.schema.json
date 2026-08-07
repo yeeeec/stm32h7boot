@@ -1,414 +1,78 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://example.invalid/hmi/manifest.schema.json",
-  "title": "HMI APP/GUI Upgrade Manifest Template",
-  "description": "Validates manifest structure. Null integrity fields are allowed only while preparing a template and must be rejected by the production packager and Bootloader.",
+  "title": "HMI RAW APP/GUI Upgrade Manifest",
   "type": "object",
   "additionalProperties": false,
-  "required": [
-    "format_version",
-    "package_id",
-    "product_id",
-    "hardware_id",
-    "build_number",
-    "created_utc",
-    "minimum_bootloader_version",
-    "release_groups",
-    "transaction",
-    "crc32_parameters",
-    "components",
-    "signature"
-  ],
+  "required": ["format_version", "package_id", "release", "target", "components"],
   "properties": {
-    "format_version": {
-      "const": 2
-    },
+    "format_version": { "const": 1 },
     "package_id": {
       "type": "string",
       "minLength": 1,
       "maxLength": 63,
       "pattern": "^[A-Za-z0-9._+-]+$"
     },
-    "product_id": {
-      "const": "HMI"
-    },
-    "hardware_id": {
-      "const": "STM32H743-W25Q256"
-    },
-    "build_number": {
-      "type": "integer",
-      "minimum": 0,
-      "maximum": 4294967295
-    },
-    "created_utc": {
+    "release": { "$ref": "#/$defs/release" },
+    "target": { "$ref": "#/$defs/target" },
+    "components": { "$ref": "#/$defs/components" }
+  },
+  "$defs": {
+    "sha256": {
       "type": "string",
-      "format": "date-time"
+      "pattern": "^[0-9a-f]{64}$"
     },
-    "minimum_bootloader_version": {
-      "$ref": "#/$defs/version"
-    },
-    "release_groups": {
-      "type": "array",
-      "minItems": 1,
-      "maxItems": 1,
-      "prefixItems": [
-        {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "id",
-            "version",
-            "atomic",
-            "components"
-          ],
-          "properties": {
-            "id": {
-              "const": "app-gui"
-            },
-            "version": {
-              "$ref": "#/$defs/version"
-            },
-            "atomic": {
-              "const": true
-            },
-            "components": {
-              "const": [
-                "app",
-                "gui"
-              ]
-            }
-          }
-        }
-      ],
-      "items": false
-    },
-    "transaction": {
+    "release": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "release_group_id",
-        "strategy",
-        "commit_store",
-        "commit_condition"
-      ],
+      "required": ["major", "minor", "patch", "build"],
       "properties": {
-        "release_group_id": {
-          "const": "app-gui"
-        },
-        "strategy": {
-          "const": "inactive-pair"
-        },
-        "commit_store": {
-          "const": "eeprom"
-        },
-        "commit_condition": {
-          "const": "all-components-crc-valid"
+        "major": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "minor": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "patch": { "type": "integer", "minimum": 0, "maximum": 65535 },
+        "build": { "type": "integer", "minimum": 0, "maximum": 4294967295 }
+      }
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["product", "hardware", "minimum_bootloader_version"],
+      "properties": {
+        "product": { "const": "HMI" },
+        "hardware": { "const": "STM32H743-W25Q256" },
+        "minimum_bootloader_version": {
+          "type": "string",
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"
         }
       }
     },
-    "crc32_parameters": {
+    "component": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "name",
-        "polynomial",
-        "initial_value",
-        "reflect_input",
-        "reflect_output",
-        "xor_output"
-      ],
+      "required": ["file", "format", "size", "sha256"],
       "properties": {
-        "name": {
-          "const": "CRC-32/ISO-HDLC"
-        },
-        "polynomial": {
-          "const": "0x04C11DB7"
-        },
-        "initial_value": {
-          "const": "0xFFFFFFFF"
-        },
-        "reflect_input": {
-          "const": true
-        },
-        "reflect_output": {
-          "const": true
-        },
-        "xor_output": {
-          "const": "0xFFFFFFFF"
-        }
+        "file": { "type": "string" },
+        "format": { "const": "raw-bin-v1" },
+        "size": { "type": "integer", "minimum": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
       }
     },
     "components": {
-      "type": "array",
-      "minItems": 2,
-      "maxItems": 2,
-      "prefixItems": [
-        {
-          "$ref": "#/$defs/appComponent"
-        },
-        {
-          "$ref": "#/$defs/guiComponent"
-        }
-      ],
-      "items": false
-    },
-    "signature": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "algorithm",
-        "key_id",
-        "canonicalization",
-        "scope",
-        "encoding",
-        "value"
-      ],
+      "required": ["app", "gui"],
       "properties": {
-        "algorithm": {
-          "const": "ECDSA-P256-SHA256"
-        },
-        "key_id": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 31,
-          "pattern": "^[A-Za-z0-9._-]+$"
-        },
-        "canonicalization": {
-          "const": "RFC8785"
-        },
-        "scope": {
-          "const": "all-fields-except-signature.value"
-        },
-        "encoding": {
-          "const": "base64"
-        },
-        "value": {
-          "$ref": "#/$defs/templateSignature"
-        }
-      }
-    }
-  },
-  "$defs": {
-    "version": {
-      "type": "string",
-      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
-      "maxLength": 31
-    },
-    "templateCrc32": {
-      "oneOf": [
-        {
-          "type": "string",
-          "pattern": "^[0-9A-F]{8}$"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "templateSha256": {
-      "oneOf": [
-        {
-          "type": "string",
-          "pattern": "^[0-9a-f]{64}$"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "templateSignature": {
-      "oneOf": [
-        {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 256,
-          "pattern": "^[A-Za-z0-9+/]+={0,2}$"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "appComponent": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "id",
-        "file",
-        "format",
-        "target",
-        "maximum_image_size_bytes",
-        "file_size_bytes",
-        "image_size_bytes",
-        "source_crc32",
-        "target_crc32",
-        "sha256",
-        "vector_offset",
-        "entry_offset",
-        "link_address",
-        "relocation"
-      ],
-      "properties": {
-        "id": {
-          "const": "app"
-        },
-        "file": {
-          "const": "hmi.app.bin"
-        },
-        "format": {
-          "const": "raw-xip-reloc-v2"
-        },
-        "target": {
-          "const": "inactive-app-slot"
-        },
-        "maximum_image_size_bytes": {
-          "const": 1048576
-        },
-        "file_size_bytes": {
-          "oneOf": [
-            {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 4294967295
-            },
-            {
-              "type": "null"
-            }
+        "app": {
+          "allOf": [
+            { "$ref": "#/$defs/component" },
+            { "properties": { "file": { "const": "hmi.app.bin" }, "size": { "maximum": 1048576 } } }
           ]
         },
-        "image_size_bytes": {
-          "oneOf": [
-            {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 1048576
-            },
-            {
-              "type": "null"
-            }
+        "gui": {
+          "allOf": [
+            { "$ref": "#/$defs/component" },
+            { "properties": { "file": { "const": "hmi.gui.bin" }, "size": { "maximum": 8388608 } } }
           ]
-        },
-        "source_crc32": {
-          "$ref": "#/$defs/templateCrc32"
-        },
-        "target_crc32": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "app1",
-            "app2"
-          ],
-          "properties": {
-            "app1": {
-              "$ref": "#/$defs/templateCrc32"
-            },
-            "app2": {
-              "$ref": "#/$defs/templateCrc32"
-            }
-          }
-        },
-        "sha256": {
-          "$ref": "#/$defs/templateSha256"
-        },
-        "vector_offset": {
-          "const": 0
-        },
-        "entry_offset": {
-          "oneOf": [
-            {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 4294967295
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "link_address": {
-          "const": 2415919104
-        },
-        "relocation": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "file",
-            "count",
-            "crc32",
-            "format"
-          ],
-          "properties": {
-            "file": {
-              "const": "hmi.app.reloc.bin"
-            },
-            "count": {
-              "oneOf": [
-                {
-                  "type": "integer",
-                  "minimum": 1,
-                  "maximum": 4096
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "crc32": {
-              "$ref": "#/$defs/templateCrc32"
-            },
-            "format": {
-              "const": "hmi-reloc-v1"
-            }
-          }
-        }
-      }
-    },
-    "guiComponent": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "id",
-        "file",
-        "format",
-        "target",
-        "maximum_image_size_bytes",
-        "file_size_bytes",
-        "crc32",
-        "sha256"
-      ],
-      "properties": {
-        "id": {
-          "const": "gui"
-        },
-        "file": {
-          "const": "hmi.gui.bin"
-        },
-        "format": {
-          "const": "raw"
-        },
-        "target": {
-          "const": "inactive-gui-slot"
-        },
-        "maximum_image_size_bytes": {
-          "const": 8388608
-        },
-        "file_size_bytes": {
-          "oneOf": [
-            {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 8388608
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "crc32": {
-          "$ref": "#/$defs/templateCrc32"
-        },
-        "sha256": {
-          "$ref": "#/$defs/templateSha256"
         }
       }
     }
