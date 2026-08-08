@@ -1,6 +1,6 @@
 /**
  * @file fatfs_update_request_store_adapter.h
- * @brief SD-card FatFs raw trusted-request store.
+ * @brief SD/FatFs 原始 trusted request 存储 Adapter。
  */
 #ifndef ADAPTERS_FATFS_UPDATE_REQUEST_STORE_ADAPTER_H
 #define ADAPTERS_FATFS_UPDATE_REQUEST_STORE_ADAPTER_H
@@ -10,7 +10,9 @@
 
 typedef struct
 {
+    /** 对外暴露的原始 request 存储回调表。 */
     update_request_store_t interface;
+    /** 与 Package Source 共享的卷状态及 request FIL 所有权。 */
     fatfs_release_volume_context_t *volume;
 } fatfs_update_request_store_adapter_t;
 

@@ -18,6 +18,8 @@ typedef struct
     int read_failure;
     int short_read;
     int mutate_after_preflight;
+    int remap_xip_during_gui_preflight;
+    uint32_t close_failures_remaining;
     uint32_t open_count;
     uint32_t close_count;
 } source_fixture_t;
@@ -27,6 +29,17 @@ typedef struct
     uint32_t value;
     uint32_t finish_count;
 } hash_fixture_t;
+
+typedef struct
+{
+    int mapped;
+    uint32_t exit_failures_remaining;
+    int exit_maps_indirect_on_error;
+    int exit_success_leaves_mapped;
+    uint32_t is_mapped_failures_remaining;
+    uint32_t exit_calls;
+    uint32_t is_mapped_calls;
+} xip_fixture_t;
 
 typedef struct
 {
@@ -42,6 +55,7 @@ typedef struct
     int target_read_failure;
     int target_corrupt;
     int source_erased_before_gui_hash;
+    int erase_while_xip_mapped;
     int invalid_program_address;
     uint8_t app_runtime[BOOT_APP_RUNTIME_SIZE];
     uint8_t gui_runtime[BOOT_GUI_RUNTIME_SIZE];
@@ -49,6 +63,7 @@ typedef struct
 
 static source_fixture_t source_fixture;
 static hash_fixture_t hash_fixture;
+static xip_fixture_t xip_fixture;
 static storage_fixture_t storage_fixture;
 static validated_manifest_t manifest_fixture;
 static firmware_status_t binding_status;
@@ -57,6 +72,7 @@ static update_request_service_t request_service;
 static update_service_t update_service;
 static package_source_t source_interface;
 static hash_provider_t hash_interface;
+static xip_controller_t xip_interface;
 static async_block_device_t storage_interface;
 static uint8_t manifest_buffer[UPDATE_SERVICE_MANIFEST_MAX_SIZE];
 static uint8_t io_buffer[UPDATE_SERVICE_IO_BUFFER_MIN_SIZE];
@@ -125,8 +141,13 @@ static firmware_status_t SourceClose(void *context)
 {
     source_fixture_t *source = (source_fixture_t *)context;
 
-    source->file_open = 0;
     ++source->close_count;
+    if (source->close_failures_remaining != 0U)
+    {
+        --source->close_failures_remaining;
+        return FIRMWARE_STATUS_IO_ERROR;
+    }
+    source->file_open = 0;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -159,6 +180,11 @@ static firmware_status_t SourceRead(void *context, uint32_t offset, uint8_t *dat
         return FIRMWARE_STATUS_IO_ERROR;
     }
     *bytes_read = (source->short_read != 0) && (size != 0U) ? size - 1U : size;
+    if ((source->remap_xip_during_gui_preflight != 0) &&
+        (source->open_file == PACKAGE_FILE_GUI) && (hash_fixture.finish_count == 1U))
+    {
+        xip_fixture.mapped = 1;
+    }
     for (index = 0U; index < *bytes_read; ++index)
     {
         if (source->open_file == PACKAGE_FILE_MANIFEST)
@@ -239,6 +265,55 @@ static hash_provider_t MakeHash(void)
     };
 
     return hash;
+}
+
+static firmware_status_t XipExit(void *context)
+{
+    xip_fixture_t *xip = (xip_fixture_t *)context;
+
+    ++xip->exit_calls;
+    if (xip->exit_failures_remaining != 0U)
+    {
+        --xip->exit_failures_remaining;
+        if (xip->exit_maps_indirect_on_error != 0)
+        {
+            xip->mapped = 0;
+        }
+        return FIRMWARE_STATUS_IO_ERROR;
+    }
+    if (xip->exit_success_leaves_mapped != 0)
+    {
+        return FIRMWARE_STATUS_OK;
+    }
+    xip->mapped = 0;
+    return FIRMWARE_STATUS_OK;
+}
+
+static firmware_status_t XipIsMapped(void *context, int *mapped)
+{
+    xip_fixture_t *xip = (xip_fixture_t *)context;
+
+    ++xip->is_mapped_calls;
+    if (xip->is_mapped_failures_remaining != 0U)
+    {
+        --xip->is_mapped_failures_remaining;
+        return FIRMWARE_STATUS_IO_ERROR;
+    }
+    *mapped = xip->mapped;
+    return FIRMWARE_STATUS_OK;
+}
+
+static xip_controller_t MakeXip(void)
+{
+    xip_controller_t xip = {
+        .context = &xip_fixture,
+        .enter_memory_mapped_read = NULL,
+        .exit_memory_mapped = XipExit,
+        .is_memory_mapped = XipIsMapped,
+        .invalidate_mapped_cache = NULL,
+    };
+
+    return xip;
 }
 
 static void StorageMemory(uint32_t address, uint8_t **memory, uint32_t *offset)
@@ -323,6 +398,10 @@ static firmware_status_t StorageEraseStart(void *context, uint32_t address, uint
     if (hash_fixture.finish_count < 2U)
     {
         storage_fixture.source_erased_before_gui_hash = 1;
+    }
+    if (xip_fixture.mapped != 0)
+    {
+        storage_fixture.erase_while_xip_mapped = 1;
     }
     if (address < BOOT_GUI_FLASH_OFFSET)
     {
@@ -424,6 +503,7 @@ static void ResetFixture(void)
 
     memset(&source_fixture, 0, sizeof(source_fixture));
     memset(&hash_fixture, 0, sizeof(hash_fixture));
+    memset(&xip_fixture, 0, sizeof(xip_fixture));
     memset(&storage_fixture, 0, offsetof(storage_fixture_t, app_runtime));
     memset(&manifest_fixture, 0, sizeof(manifest_fixture));
     memset(&manifest_service, 0, sizeof(manifest_service));
@@ -446,6 +526,7 @@ static void ResetFixture(void)
 
     source_interface = MakeSource();
     hash_interface = MakeHash();
+    xip_interface = MakeXip();
     storage_interface = MakeStorage();
     memset(&dependencies, 0, sizeof(dependencies));
     dependencies.package_source = &source_interface;
@@ -453,6 +534,7 @@ static void ResetFixture(void)
     dependencies.update_request_service = &request_service;
     dependencies.hash = &hash_interface;
     dependencies.storage = &storage_interface;
+    dependencies.xip_controller = &xip_interface;
     dependencies.runtime_layout = BootRuntimeLayout_Get();
     dependencies.manifest_buffer = manifest_buffer;
     dependencies.manifest_buffer_size = sizeof(manifest_buffer);
@@ -665,6 +747,174 @@ static void TestRuntimeBounds(void)
     assert(storage_fixture.app_erase_bytes == 0U);
 }
 
+static void TestXipOwnership(void)
+{
+    const service_result_t *result;
+
+    ResetFixture();
+    xip_fixture.is_mapped_failures_remaining = 1U;
+    Prepare();
+    Install();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_FAILED);
+    assert(xip_fixture.exit_calls == 0U);
+    assert(storage_fixture.app_erase_bytes == 0U);
+    result = UpdateService_GetResult(&update_service);
+    assert(result != NULL);
+    assert(result->error == BOOT_ERROR_XIP_SETUP);
+
+    ResetFixture();
+    xip_fixture.mapped = 1;
+    Prepare();
+    Install();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_SUCCEEDED);
+    assert(xip_fixture.exit_calls == 1U);
+    assert(xip_fixture.is_mapped_calls >= 2U);
+    assert(xip_fixture.mapped == 0);
+    assert(storage_fixture.erase_while_xip_mapped == 0);
+
+    ResetFixture();
+    xip_fixture.mapped = 1;
+    xip_fixture.exit_failures_remaining = UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT;
+    Prepare();
+    Install();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_FAILED);
+    assert(xip_fixture.exit_calls == UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT);
+    assert(xip_fixture.mapped != 0);
+    assert(storage_fixture.app_erase_bytes == 0U);
+    assert(UpdateService_RuntimeMayBeModified(&update_service) == 0);
+    result = UpdateService_GetResult(&update_service);
+    assert(result != NULL);
+    assert(result->error == BOOT_ERROR_XIP_SETUP);
+
+    ResetFixture();
+    xip_fixture.mapped = 1;
+    xip_fixture.exit_success_leaves_mapped = 1;
+    Prepare();
+    Install();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_FAILED);
+    assert(xip_fixture.exit_calls == UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT);
+    assert(xip_fixture.mapped != 0);
+    assert(storage_fixture.app_erase_bytes == 0U);
+    result = UpdateService_GetResult(&update_service);
+    assert(result != NULL);
+    assert(result->error == BOOT_ERROR_XIP_SETUP);
+
+    ResetFixture();
+    xip_fixture.mapped = 1;
+    xip_fixture.exit_failures_remaining = 1U;
+    Prepare();
+    Install();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_SUCCEEDED);
+    assert(xip_fixture.exit_calls == 2U);
+    assert(xip_fixture.mapped == 0);
+    assert(storage_fixture.erase_while_xip_mapped == 0);
+
+    ResetFixture();
+    xip_fixture.mapped = 1;
+    xip_fixture.exit_failures_remaining = 1U;
+    xip_fixture.exit_maps_indirect_on_error = 1;
+    Prepare();
+    Install();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_SUCCEEDED);
+    assert(xip_fixture.exit_calls == 1U);
+    assert(xip_fixture.mapped == 0);
+    assert(storage_fixture.erase_while_xip_mapped == 0);
+
+    ResetFixture();
+    source_fixture.remap_xip_during_gui_preflight = 1;
+    Prepare();
+    Install();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_SUCCEEDED);
+    assert(xip_fixture.exit_calls == 1U);
+    assert(xip_fixture.mapped == 0);
+    assert(storage_fixture.erase_while_xip_mapped == 0);
+}
+
+static void TestCloseRecovery(void)
+{
+    const service_result_t *result;
+
+    ResetFixture();
+    binding_status = FIRMWARE_STATUS_INVALID_STATE;
+    source_fixture.close_failures_remaining = 2U;
+    Prepare();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_FAILED);
+    assert(source_fixture.close_count == 3U);
+    assert(source_fixture.file_open == 0);
+    result = UpdateService_GetResult(&update_service);
+    assert(result != NULL);
+    assert(result->error == BOOT_ERROR_PREPARE);
+
+    ResetFixture();
+    binding_status = FIRMWARE_STATUS_INVALID_STATE;
+    source_fixture.close_failures_remaining = UPDATE_SERVICE_CLOSE_RETRY_LIMIT + 1U;
+    Prepare();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_FAILED);
+    assert(source_fixture.file_open != 0);
+    result = UpdateService_GetResult(&update_service);
+    assert(result != NULL);
+    assert(result->native_error == FIRMWARE_STATUS_IO_ERROR);
+}
+
+static void TestCancelRecovery(void)
+{
+    const service_result_t *result;
+    update_request_t request;
+
+    ResetFixture();
+    xip_fixture.mapped = 1;
+    Prepare();
+    assert(UpdateService_InstallStart(&update_service) == FIRMWARE_STATUS_OK);
+    assert(UpdateService_Cancel(&update_service) == FIRMWARE_STATUS_OK);
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_RUNNING);
+    RunToTerminal();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_CANCELLED);
+    assert(xip_fixture.exit_calls == 1U);
+    assert(xip_fixture.mapped == 0);
+    assert(storage_fixture.app_erase_bytes == 0U);
+
+    ResetFixture();
+    xip_fixture.mapped = 1;
+    xip_fixture.exit_failures_remaining = UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT;
+    Prepare();
+    assert(UpdateService_InstallStart(&update_service) == FIRMWARE_STATUS_OK);
+    assert(UpdateService_Cancel(&update_service) == FIRMWARE_STATUS_OK);
+    RunToTerminal();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_FAILED);
+    assert(xip_fixture.exit_calls == UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT);
+    assert(xip_fixture.mapped != 0);
+    result = UpdateService_GetResult(&update_service);
+    assert(result != NULL);
+    assert(result->error == BOOT_ERROR_XIP_SETUP);
+
+    ResetFixture();
+    request = MakeRequest();
+    source_fixture.mounted = 1;
+    source_fixture.close_failures_remaining = 2U;
+    assert(UpdateService_PrepareStart(&update_service, &request) == FIRMWARE_STATUS_OK);
+    UpdateService_Process(&update_service);
+    assert(source_fixture.file_open != 0);
+    assert(UpdateService_Cancel(&update_service) == FIRMWARE_STATUS_OK);
+    RunToTerminal();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_CANCELLED);
+    assert(source_fixture.close_count == 3U);
+    assert(source_fixture.file_open == 0);
+
+    ResetFixture();
+    request = MakeRequest();
+    source_fixture.mounted = 1;
+    source_fixture.close_failures_remaining = UPDATE_SERVICE_CLOSE_RETRY_LIMIT + 1U;
+    assert(UpdateService_PrepareStart(&update_service, &request) == FIRMWARE_STATUS_OK);
+    UpdateService_Process(&update_service);
+    assert(UpdateService_Cancel(&update_service) == FIRMWARE_STATUS_OK);
+    RunToTerminal();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_FAILED);
+    assert(source_fixture.file_open != 0);
+    result = UpdateService_GetResult(&update_service);
+    assert(result != NULL);
+    assert(result->native_error == FIRMWARE_STATUS_IO_ERROR);
+}
+
 int main(void)
 {
     TestSuccessAndCandidate();
@@ -672,5 +922,8 @@ int main(void)
     TestSourceFailuresDoNotErase();
     TestTargetFailures();
     TestRuntimeBounds();
+    TestXipOwnership();
+    TestCloseRecovery();
+    TestCancelRecovery();
     return 0;
 }

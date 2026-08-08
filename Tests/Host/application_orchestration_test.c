@@ -26,15 +26,18 @@ static struct update_request_service request_parser;
 static boot_active_record_t active_record;
 static boot_active_record_t candidate_record;
 static validated_manifest_t manifest;
+static service_result_t update_result;
 static service_run_state_t update_state;
 static service_run_state_t commit_state;
 static service_run_state_t validation_state;
 static int update_phase;
 static int runtime_modified;
 static int media_present = 1;
+static int source_mounted;
 static int request_present = 1;
 static int clear_status = FIRMWARE_STATUS_OK;
 static int mount_status = FIRMWARE_STATUS_OK;
+static int unmount_status = FIRMWARE_STATUS_OK;
 static int commit_status = FIRMWARE_STATUS_OK;
 static int install_status = FIRMWARE_STATUS_OK;
 static int validation_success = 1;
@@ -44,6 +47,7 @@ static uint32_t commit_count;
 static uint32_t clear_count;
 static uint32_t mount_count;
 static uint32_t unmount_count;
+static uint32_t unmount_failures_remaining;
 static uint32_t validation_count;
 static uint32_t launch_count;
 static uint32_t reset_count;
@@ -59,16 +63,39 @@ static firmware_status_t SourcePresent(void *context, int *present)
 
 static firmware_status_t SourceMount(void *context)
 {
+    firmware_status_t status;
+
     (void)context;
     ++mount_count;
-    return (firmware_status_t)mount_status;
+    status = (firmware_status_t)mount_status;
+    if (FirmwareStatus_IsOk(status))
+    {
+        source_mounted = 1;
+    }
+    return status;
 }
 
 static firmware_status_t SourceUnmount(void *context)
 {
+    firmware_status_t status;
+
     (void)context;
     ++unmount_count;
-    return FIRMWARE_STATUS_OK;
+    if (source_mounted == 0)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if (unmount_failures_remaining != 0U)
+    {
+        --unmount_failures_remaining;
+        return FIRMWARE_STATUS_IO_ERROR;
+    }
+    status = (firmware_status_t)unmount_status;
+    if (FirmwareStatus_IsOk(status))
+    {
+        source_mounted = 0;
+    }
+    return status;
 }
 
 static firmware_status_t SourceOpen(void *context, package_file_id_t file)
@@ -231,6 +258,10 @@ void UpdateService_Process(struct update_service *service)
 #if defined(TEST_INSTALL_POST_MUTATION)
         runtime_modified = 1;
         update_state = SERVICE_RUN_STATE_FAILED;
+#elif defined(TEST_INSTALL_XIP_FAILURE)
+        update_result.status = FIRMWARE_STATUS_IO_ERROR;
+        update_result.error = BOOT_ERROR_XIP_SETUP;
+        update_state = SERVICE_RUN_STATE_FAILED;
 #else
         update_state = SERVICE_RUN_STATE_SUCCEEDED;
 #endif
@@ -252,7 +283,7 @@ service_run_state_t UpdateService_GetState(const struct update_service *service)
 const service_result_t *UpdateService_GetResult(const struct update_service *service)
 {
     (void)service;
-    return NULL;
+    return &update_result;
 }
 
 const validated_manifest_t *UpdateService_GetManifest(const struct update_service *service)
@@ -370,6 +401,12 @@ int main(void)
 #if defined(TEST_MEDIA_MOUNT_FAILURE)
     mount_status = FIRMWARE_STATUS_IO_ERROR;
 #endif
+#if defined(TEST_UNMOUNT_RETRY)
+    unmount_failures_remaining = 2U;
+#endif
+#if defined(TEST_UNMOUNT_PERMANENT_FAILURE)
+    unmount_failures_remaining = 100U;
+#endif
 #if defined(TEST_RUNTIME_INVALID_NO_REQUEST)
     request_present = 0;
     validation_success = 0;
@@ -469,9 +506,34 @@ int main(void)
     assert(commit_count == 0U);
     assert(launch_count == 0U);
 #elif defined(TEST_INSTALL_POST_MUTATION)
+    assert(install_count == 1U);
     assert(commit_count == 0U);
     assert(launch_count == 0U);
-    assert(recovery_count == 0U);
+    assert(unmount_count == 1U);
+    assert(source_mounted == 0);
+    assert(reset_count == 1U);
+#elif defined(TEST_INSTALL_XIP_FAILURE)
+    assert(install_count == 1U);
+    assert(commit_count == 0U);
+    assert(clear_count == 0U);
+    assert(unmount_count == 1U);
+    assert(source_mounted == 0);
+    assert(reset_count == 1U);
+    assert(launch_count == 0U);
+#elif defined(TEST_UNMOUNT_RETRY)
+    assert(install_count == 1U);
+    assert(commit_count == 1U);
+    assert(unmount_count == 3U);
+    assert(source_mounted == 0);
+    assert(reset_count == 1U);
+    assert(launch_count == 0U);
+#elif defined(TEST_UNMOUNT_PERMANENT_FAILURE)
+    assert(install_count == 1U);
+    assert(commit_count == 1U);
+    assert(unmount_count == 3U);
+    assert(source_mounted != 0);
+    assert(reset_count == 0U);
+    assert(launch_count == 0U);
 #else
     assert(install_count == 1U);
     assert(commit_count == 1U);

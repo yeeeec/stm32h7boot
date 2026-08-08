@@ -16,6 +16,7 @@ void FatFsTest_Reset(void)
     memset(&SDFatFS, 0, sizeof(SDFatFS));
     memset(&SDFile, 0, sizeof(SDFile));
     fatfs_test_state.mount_result = FR_OK;
+    fatfs_test_state.unmount_result = FR_OK;
     fatfs_test_state.open_result = FR_OK;
     fatfs_test_state.close_result = FR_OK;
     fatfs_test_state.seek_result = FR_OK;
@@ -32,11 +33,10 @@ uint8_t BSP_SD_IsDetected(void)
 
 FRESULT f_mount(FATFS *fs, const char *path, BYTE opt)
 {
-    (void)fs;
     (void)path;
     (void)opt;
     ++fatfs_test_state.mount_calls;
-    return fatfs_test_state.mount_result;
+    return (fs == NULL) ? fatfs_test_state.unmount_result : fatfs_test_state.mount_result;
 }
 
 FRESULT f_open(FIL *file, const char *path, BYTE mode)

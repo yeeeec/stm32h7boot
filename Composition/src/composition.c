@@ -255,6 +255,9 @@ firmware_status_t Composition_Init(void)
     update_dependencies.update_request_service = &update_request_service;
     update_dependencies.hash                 = &manifest_hash_interface;
     update_dependencies.storage              = external_flash;
+    /* Update Service 在首次擦写前独占并确认 QSPI indirect 状态。 */
+    update_dependencies.xip_controller       =
+        Stm32QspiXipAdapter_Interface(&xip_adapter);
     update_dependencies.runtime_layout       = BootRuntimeLayout_Get();
     update_dependencies.manifest_buffer      = manifest_buffer;
     update_dependencies.manifest_buffer_size = sizeof(manifest_buffer);

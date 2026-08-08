@@ -16,6 +16,8 @@
 #include "services/use_case/launch_service_api.h"
 #include "services/use_case/update_service_api.h"
 
+#define APPLICATION_UNMOUNT_RETRY_LIMIT 3U
+
 typedef enum
 {
     APPLICATION_STAGE_STARTUP = 0,
@@ -37,6 +39,7 @@ typedef enum
     APPLICATION_STAGE_VALIDATE_PROCESS,
     APPLICATION_STAGE_LAUNCH,
     APPLICATION_STAGE_RESET,
+    APPLICATION_STAGE_RECOVERY_RESET,
     APPLICATION_STAGE_FAILED
 } application_stage_t;
 
@@ -51,6 +54,7 @@ static application_stage_t application_after_unmount;
 static int application_configured;
 static int application_initialized;
 static int application_media_mounted;
+static uint32_t application_unmount_attempts;
 static int application_has_active_record;
 static int application_stale_request;
 static int application_reset_after_cleanup;
@@ -63,7 +67,8 @@ static const char *ApplicationStageName(application_stage_t stage)
         "startup", "update-check", "mount", "request-load", "prepare-start",
         "prepare-process", "policy", "stale-validate-start", "stale-validate-process",
         "install-start", "install-process", "commit-start", "commit-process", "cleanup",
-        "unmount", "validate-start", "validate-process", "launch", "reset", "failed"};
+        "unmount", "validate-start", "validate-process", "launch", "reset",
+        "recovery-reset", "failed"};
     return ((unsigned int)stage < (sizeof(names) / sizeof(names[0]))) ? names[stage] : "unknown";
 }
 
@@ -85,7 +90,16 @@ static int HasActiveRecord(void)
 static void BeginUnmount(application_stage_t next)
 {
     application_after_unmount = next;
-    application_stage = (application_media_mounted != 0) ? APPLICATION_STAGE_UNMOUNT : next;
+    if (application_media_mounted != 0)
+    {
+        /* 每次进入卸载恢复都从零开始计数，但不伪造当前介质状态。 */
+        application_unmount_attempts = 0U;
+        application_stage = APPLICATION_STAGE_UNMOUNT;
+    }
+    else
+    {
+        application_stage = next;
+    }
 }
 
 static void FailClosed(void)
@@ -161,6 +175,7 @@ firmware_status_t Application_Init(void)
     }
     application_has_active_record = FirmwareStatus_IsOk(status) ? 1 : 0;
     application_media_mounted = 0;
+    application_unmount_attempts = 0U;
     application_stale_request = 0;
     application_reset_after_cleanup = 0;
     application_request_raw_size = 0U;
@@ -374,9 +389,15 @@ firmware_status_t Application_Process(void)
             else if (UpdateService_GetState(application_dependencies.update) ==
                      SERVICE_RUN_STATE_FAILED)
             {
-                if (UpdateService_RuntimeMayBeModified(application_dependencies.update) != 0)
+                const service_result_t *update_result =
+                    UpdateService_GetResult(application_dependencies.update);
+                if ((UpdateService_RuntimeMayBeModified(application_dependencies.update) != 0) ||
+                    ((update_result != NULL) &&
+                     (update_result->error == BOOT_ERROR_XIP_SETUP)))
                 {
-                    BeginUnmount(APPLICATION_STAGE_FAILED);
+                    /* Runtime 可能已损坏，或 QSPI 仍处于无法安全复用的状态；清理后
+                     * 复位，让下一轮从 trusted request 重新走恢复安装。 */
+                    BeginUnmount(APPLICATION_STAGE_RECOVERY_RESET);
                 }
                 else
                 {
@@ -428,12 +449,26 @@ firmware_status_t Application_Process(void)
         case APPLICATION_STAGE_UNMOUNT:
             status = application_dependencies.package_source->unmount(
                 application_dependencies.package_source->context);
-            if (!FirmwareStatus_IsOk(status))
+            if (FirmwareStatus_IsOk(status))
             {
-                LOG_WARN("app", "media unmount failed: status=%d", (int)status);
+                /* 只有 Adapter 确认卸载成功，Application 才能释放 mounted 所有权。 */
+                application_media_mounted = 0;
+                application_unmount_attempts = 0U;
+                application_stage = application_after_unmount;
             }
-            application_media_mounted = 0;
-            application_stage = application_after_unmount;
+            else
+            {
+                ++application_unmount_attempts;
+                LOG_WARN("app", "media unmount retry %lu/%u failed: status=%d",
+                         (unsigned long)application_unmount_attempts,
+                         (unsigned)APPLICATION_UNMOUNT_RETRY_LIMIT, (int)status);
+                if (application_unmount_attempts >= APPLICATION_UNMOUNT_RETRY_LIMIT)
+                {
+                    /* 实际卷状态仍为 mounted，继续启动或跳转不安全，必须停在 FAULT。 */
+                    LOG_ERROR("app", "media remains mounted after cleanup retries");
+                    FailClosed();
+                }
+            }
             break;
 
         case APPLICATION_STAGE_VALIDATE_START:
@@ -473,6 +508,14 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_RESET:
+            application_dependencies.system_reset->request(
+                application_dependencies.system_reset->context);
+            break;
+
+        case APPLICATION_STAGE_RECOVERY_RESET:
+            /* 安装已修改 Runtime 或 XIP 退出失败时，保留 request 并通过下一轮启动
+             * 重新执行 Prepare/Install；本轮绝不尝试启动可能不完整的镜像。 */
+            LOG_WARN("app", "resetting into update recovery");
             application_dependencies.system_reset->request(
                 application_dependencies.system_reset->context);
             break;

@@ -8,6 +8,7 @@
 typedef struct
 {
     FRESULT mount_result;
+    FRESULT unmount_result;
     FRESULT open_result;
     FRESULT close_result;
     FRESULT seek_result;

@@ -1,6 +1,9 @@
 /**
  * @file fatfs_package_source_adapter.c
- * @brief Fixed release-package access backed by the CubeMX SD FatFs volume.
+ * @brief 基于 CubeMX SD FatFs 卷的固定发布包访问 Adapter。
+ *
+ * 本 Adapter 同时维护发布文件与 trusted request 的共享卷所有权。所有状态标志
+ * 都只在对应 FatFs 操作成功后更新，便于 Application 在异常路径重试卸载。
  */
 #include "adapters/fatfs_package_source_adapter.h"
 
@@ -34,6 +37,29 @@ static firmware_status_t FatFsStatus(FRESULT result)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     return FIRMWARE_STATUS_IO_ERROR;
+}
+
+/**
+ * @brief 尝试关闭卷上下文中遗留的 request 文件。
+ *
+ * 该恢复函数由 unmount 调用，因此即使 Request Store 的同步读取阶段因 close
+ * 失败返回，后续 Application 仍能使用同一 CubeMX SDFile 继续重试。只有 f_close 返回
+ * FR_OK 才清除 request_file_open。
+ */
+static firmware_status_t ClosePendingRequestFile(fatfs_release_volume_context_t *volume)
+{
+    firmware_status_t status;
+
+    if ((volume == NULL) || (volume->request_file_open == 0))
+    {
+        return FIRMWARE_STATUS_OK;
+    }
+    status = FatFsStatus(f_close(&SDFile));
+    if (FirmwareStatus_IsOk(status))
+    {
+        volume->request_file_open = 0;
+    }
+    return status;
 }
 
 static firmware_status_t BuildSdPath(const char *path, char *full_path, size_t full_path_size)
@@ -113,7 +139,8 @@ static firmware_status_t Mount(void *context)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if (adapter->volume->mounted != 0)
+    if ((adapter->volume->mounted != 0) || (adapter->volume->package_file_open != 0) ||
+        (adapter->volume->request_file_open != 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -151,6 +178,12 @@ static firmware_status_t Unmount(void *context)
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+    /* request 文件可能因上一次同步 close 失败而遗留；先恢复其真实所有权。 */
+    status = ClosePendingRequestFile(adapter->volume);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
     status = FatFsStatus(f_mount(NULL, SDPath, 0U));
     if (FirmwareStatus_IsOk(status))
     {
@@ -168,7 +201,8 @@ static firmware_status_t OpenPath(fatfs_package_source_adapter_t *adapter, const
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if ((adapter->volume->mounted == 0) || (adapter->volume->package_file_open != 0))
+    if ((adapter->volume->mounted == 0) || (adapter->volume->package_file_open != 0) ||
+        (adapter->volume->request_file_open != 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -284,6 +318,7 @@ firmware_status_t FatFsReleaseVolumeContext_Init(fatfs_release_volume_context_t 
     }
     volume->mounted = 0;
     volume->package_file_open = 0;
+    volume->request_file_open = 0;
     return FIRMWARE_STATUS_OK;
 }
 

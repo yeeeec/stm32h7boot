@@ -93,9 +93,64 @@ static void TestClearAndPackageExclusion(void)
     assert(package_source->unmount(package_source->context) == FIRMWARE_STATUS_OK);
 }
 
+static void TestRequestCloseRecoveryDuringUnmount(void)
+{
+    fatfs_release_volume_context_t volume;
+    fatfs_package_source_adapter_t package_adapter;
+    fatfs_update_request_store_adapter_t request_adapter;
+    const package_source_t *package_source;
+    const update_request_store_t *request_store;
+    uint8_t buffer[UPDATE_REQUEST_STORE_MAX_RAW_SIZE];
+    uint32_t size;
+
+    ResetAdapters(&volume, &package_adapter, &request_adapter);
+    package_source = FatFsPackageSourceAdapter_Interface(&package_adapter);
+    request_store = FatFsUpdateRequestStoreAdapter_Interface(&request_adapter);
+    assert(package_source->mount(package_source->context) == FIRMWARE_STATUS_OK);
+    fatfs_test_state.file_data = malformed_request;
+    fatfs_test_state.file_size = sizeof(malformed_request) - 1U;
+    fatfs_test_state.close_result = FR_DISK_ERR;
+
+    assert(request_store->load_raw(request_store->context, buffer, sizeof(buffer), &size) ==
+           FIRMWARE_STATUS_IO_ERROR);
+    assert(volume.request_file_open != 0);
+    assert(package_source->open(package_source->context, PACKAGE_FILE_APP) ==
+           FIRMWARE_STATUS_INVALID_STATE);
+    assert(package_source->unmount(package_source->context) == FIRMWARE_STATUS_IO_ERROR);
+    assert(volume.mounted != 0);
+    assert(volume.request_file_open != 0);
+
+    fatfs_test_state.close_result = FR_OK;
+    assert(package_source->unmount(package_source->context) == FIRMWARE_STATUS_OK);
+    assert(volume.mounted == 0);
+    assert(volume.request_file_open == 0);
+}
+
+static void TestFatFsUnmountFailureRecovery(void)
+{
+    fatfs_release_volume_context_t volume;
+    fatfs_package_source_adapter_t package_adapter;
+    fatfs_update_request_store_adapter_t request_adapter;
+    const package_source_t *package_source;
+
+    ResetAdapters(&volume, &package_adapter, &request_adapter);
+    package_source = FatFsPackageSourceAdapter_Interface(&package_adapter);
+    assert(package_source->mount(package_source->context) == FIRMWARE_STATUS_OK);
+
+    fatfs_test_state.unmount_result = FR_DISK_ERR;
+    assert(package_source->unmount(package_source->context) == FIRMWARE_STATUS_IO_ERROR);
+    assert(volume.mounted != 0);
+
+    fatfs_test_state.unmount_result = FR_OK;
+    assert(package_source->unmount(package_source->context) == FIRMWARE_STATUS_OK);
+    assert(volume.mounted == 0);
+}
+
 int main(void)
 {
     TestRawLoad();
     TestClearAndPackageExclusion();
+    TestRequestCloseRecoveryDuringUnmount();
+    TestFatFsUnmountFailureRecovery();
     return 0;
 }

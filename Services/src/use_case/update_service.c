@@ -1,6 +1,10 @@
 /**
  * @file update_service.c
- * @brief Fixed APP/GUI runtime installer.
+ * @brief 固定 APP/GUI Runtime 的增量安装器。
+ *
+ * 安装遵循“先验证全部源文件、后首次擦除”的原则：Manifest、APP 和 GUI 都完成
+ * 长度及 SHA-256 校验后，才允许修改外部 Flash。每个 Process 调用只推进一次
+ * 有界读写、哈希、异步轮询或状态转换，以便由 Application 主循环安全驱动。
  */
 #include "services/use_case/update_service.h"
 
@@ -10,6 +14,11 @@
 #include "logging.h"
 #include "services/capability/update_request_service_api.h"
 
+/**
+ * @brief 将内部阶段转换为日志文字。
+ *
+ * 阶段枚举不属于公开 API；字符串只用于现场诊断，不能作为业务逻辑输入。
+ */
 static const char *UpdateStageName(update_stage_t stage)
 {
     switch (stage)
@@ -22,6 +31,9 @@ static const char *UpdateStageName(update_stage_t stage)
         case UPDATE_STAGE_SOURCE_GUI_SIZE: return "source-gui-size";
         case UPDATE_STAGE_SOURCE_GUI_HASH: return "source-gui-hash";
         case UPDATE_STAGE_SOURCE_GUI_VERIFY: return "source-gui-verify";
+        case UPDATE_STAGE_XIP_CHECK_INDIRECT: return "xip-check-indirect";
+        case UPDATE_STAGE_XIP_EXIT: return "xip-exit";
+        case UPDATE_STAGE_XIP_VERIFY_INDIRECT: return "xip-verify-indirect";
         case UPDATE_STAGE_APP_ERASE: return "app-erase";
         case UPDATE_STAGE_APP_ERASE_POLL: return "app-erase-poll";
         case UPDATE_STAGE_APP_PROGRAM_OPEN: return "app-program-open";
@@ -41,48 +53,110 @@ static const char *UpdateStageName(update_stage_t stage)
         case UPDATE_STAGE_GUI_TARGET_READ: return "gui-target-read";
         case UPDATE_STAGE_GUI_TARGET_HASH: return "gui-target-hash";
         case UPDATE_STAGE_BUILD_RECORD_CANDIDATE: return "build-record-candidate";
+        case UPDATE_STAGE_FAILURE_CLOSE: return "failure-close";
+        case UPDATE_STAGE_CANCEL_CLOSE: return "cancel-close";
+        case UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT: return "cancel-xip-check-indirect";
+        case UPDATE_STAGE_CANCEL_XIP_EXIT: return "cancel-xip-exit";
+        case UPDATE_STAGE_CANCEL_XIP_VERIFY_INDIRECT: return "cancel-xip-verify-indirect";
         default: return "other";
     }
 }
 
+/** 返回两个无符号 32 位数中的较小值，用于限制单次 I/O 长度。 */
 static uint32_t MinU32(uint32_t left, uint32_t right)
 {
     return (left < right) ? left : right;
 }
 
-static void Fail(update_service_t *service, firmware_status_t status, boot_error_t error)
+/**
+ * @brief 终止当前 Prepare 或 Install，并记录失败结果。
+ *
+ * 若发布源文件仍被服务打开，服务会先进入独立的关闭恢复阶段；只有 close 成功
+ * 或重试耗尽后才进入 FAILED。结果中的 stage 保留触发失败的内部阶段，避免清理
+ * 阶段掩盖根因；Application 只需读取公开生命周期。
+ */
+static void FinalizeFailure(update_service_t *service, firmware_status_t cleanup_status)
 {
-    if ((service->source_file_open != 0) && (service->package_source != NULL) &&
-        (service->package_source->close != NULL))
-    {
-        (void)service->package_source->close(service->package_source->context);
-        service->source_file_open = 0;
-    }
-    service->failure_status = status;
-    service->failure_error = error;
-    service->result.status = status;
-    service->result.error = error;
-    service->result.stage = (uint32_t)service->stage;
-    service->result.native_error = 0;
+    service->result.status = service->failure_status;
+    service->result.error = service->failure_error;
+    service->result.stage = (uint32_t)service->failure_stage;
+    service->result.native_error = FirmwareStatus_IsOk(cleanup_status) ? 0 : (int32_t)cleanup_status;
     service->state = SERVICE_RUN_STATE_FAILED;
     service->candidate_ready = 0;
 }
 
+/**
+ * @brief 完成已经清理干净的取消请求。
+ *
+ * CANCELLED 表示文件所有权已释放；若安装曾进入 XIP 保护区，也已通过 Adapter
+ * 确认回到 indirect 模式。结果快照记录最后的清理阶段，方便现场诊断。
+ */
+static void FinalizeCancellation(update_service_t *service)
+{
+    service->result.status = FIRMWARE_STATUS_OK;
+    service->result.error = BOOT_ERROR_NONE;
+    service->result.stage = (uint32_t)service->stage;
+    service->result.native_error = 0;
+    service->candidate_ready = 0;
+    service->cancel_requires_indirect = 0;
+    service->state = SERVICE_RUN_STATE_CANCELLED;
+    service->stage = UPDATE_STAGE_IDLE;
+}
+
+/** 将取消期间无法恢复的清理错误转换为可观察的 FAILED 结果。 */
+static void FinalizeCancellationFailure(update_service_t *service, firmware_status_t status,
+                                        boot_error_t error)
+{
+    service->failure_status = status;
+    service->failure_error = error;
+    service->failure_stage = service->stage;
+    FinalizeFailure(service, status);
+}
+
+/**
+ * @brief 记录首个失败，并在必要时把文件关闭恢复交给后续 Process 调用。
+ *
+ * 文件仍被服务占用时不能立即宣称失败已清理完成。保持 RUNNING 使 Application
+ * 继续驱动服务，直到真实 close 成功或有限重试耗尽。
+ */
+static void Fail(update_service_t *service, firmware_status_t status, boot_error_t error)
+{
+    service->failure_status = status;
+    service->failure_error = error;
+    service->failure_stage = service->stage;
+    service->candidate_ready = 0;
+    if (service->source_file_open != 0)
+    {
+        service->close_retry_count = 0U;
+        service->stage = UPDATE_STAGE_FAILURE_CLOSE;
+        return;
+    }
+    FinalizeFailure(service, FIRMWARE_STATUS_OK);
+}
+
+/** 重置本次源或目标数据流的哈希上下文。 */
 static firmware_status_t HashReset(update_service_t *service)
 {
     return service->hash->reset(service->hash->context);
 }
 
+/** 向当前哈希上下文追加一个已成功读取的数据块。 */
 static firmware_status_t HashUpdate(update_service_t *service, const void *data, uint32_t size)
 {
     return service->hash->update(service->hash->context, data, size);
 }
 
+/** 完成当前哈希上下文，并将 32 字节 SHA-256 写入调用者缓冲区。 */
 static firmware_status_t HashFinish(update_service_t *service, uint8_t digest[32U])
 {
     return service->hash->finish(service->hash->context, digest);
 }
 
+/**
+ * @brief 关闭当前发布源文件，并仅在底层 close 成功后更新所有权标志。
+ *
+ * source_file_open 表示真实的服务层文件占用状态，不能因一次失败而提前清零。
+ */
 static firmware_status_t CloseSource(update_service_t *service)
 {
     firmware_status_t status;
@@ -99,6 +173,77 @@ static firmware_status_t CloseSource(update_service_t *service)
     return status;
 }
 
+/**
+ * @brief 在主操作失败后重试关闭发布源文件。
+ *
+ * 当 close 最终成功时，服务才公布原始操作失败；当有限重试全部失败时，真实的
+ * source_file_open 状态保持为真，供上层卸载失败和 fail-closed 路径准确反映。
+ */
+static void ProcessFailureClose(update_service_t *service)
+{
+    firmware_status_t status = CloseSource(service);
+
+    if (FirmwareStatus_IsOk(status))
+    {
+        FinalizeFailure(service, FIRMWARE_STATUS_OK);
+        return;
+    }
+
+    ++service->close_retry_count;
+    LOG_WARN("update", "source close retry %lu/%u failed: status=%d",
+             (unsigned long)service->close_retry_count,
+             (unsigned)UPDATE_SERVICE_CLOSE_RETRY_LIMIT, (int)status);
+    if (service->close_retry_count >= UPDATE_SERVICE_CLOSE_RETRY_LIMIT)
+    {
+        FinalizeFailure(service, status);
+    }
+}
+
+/**
+ * @brief 在取消时进入下一项真实清理工作，或在所有权均已释放后公布 CANCELLED。
+ */
+static void ContinueCancellationCleanup(update_service_t *service)
+{
+    if (service->cancel_requires_indirect != 0)
+    {
+        service->xip_exit_attempts = 0U;
+        service->stage = UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT;
+        return;
+    }
+    FinalizeCancellation(service);
+}
+
+/**
+ * @brief 重试关闭取消请求遗留的发布文件。
+ *
+ * close 连续失败时，服务仍保留 source_file_open，且以 FAILED 收敛，避免之后的
+ * Process 重新回到原安装阶段并继续破坏性操作。
+ */
+static void ProcessCancelClose(update_service_t *service)
+{
+    firmware_status_t status = CloseSource(service);
+
+    if (FirmwareStatus_IsOk(status))
+    {
+        ContinueCancellationCleanup(service);
+        return;
+    }
+
+    ++service->close_retry_count;
+    LOG_WARN("update", "cancel source close retry %lu/%u failed: status=%d",
+             (unsigned long)service->close_retry_count,
+             (unsigned)UPDATE_SERVICE_CLOSE_RETRY_LIMIT, (int)status);
+    if (service->close_retry_count >= UPDATE_SERVICE_CLOSE_RETRY_LIMIT)
+    {
+        FinalizeCancellationFailure(service, status, BOOT_ERROR_INTERNAL);
+    }
+}
+
+/**
+ * @brief 验证注入的固定布局是否与发布合同及实际 Flash 几何兼容。
+ *
+ * 除检查 APP/GUI 地址常量外，还确保所有分区边界按擦除粒度对齐且不越过设备容量。
+ */
 static firmware_status_t ValidateRuntimeLayout(const async_block_device_info_t *storage_info,
                                                 const boot_runtime_layout_t *layout)
 {
@@ -109,6 +254,7 @@ static firmware_status_t ValidateRuntimeLayout(const async_block_device_info_t *
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    /* 禁止用“看似合法”的可注入布局改变冻结的量产分区合同。 */
     if ((layout->app_offset != BOOT_APP_FLASH_OFFSET) ||
         (layout->app_xip_base != BOOT_APP_RUNTIME_BASE) ||
         (layout->app_max_size != BOOT_APP_RUNTIME_SIZE) ||
@@ -118,6 +264,7 @@ static firmware_status_t ValidateRuntimeLayout(const async_block_device_info_t *
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+    /* 擦除范围必须按器件粒度对齐，并完整落在物理容量内。 */
     if ((layout->app_offset % storage_info->erase_size) != 0U ||
         (layout->gui_offset % storage_info->erase_size) != 0U ||
         (layout->app_max_size % storage_info->erase_size) != 0U ||
@@ -136,6 +283,11 @@ static firmware_status_t ValidateRuntimeLayout(const async_block_device_info_t *
     return FIRMWARE_STATUS_OK;
 }
 
+/**
+ * @brief 取得当前已打开源文件的长度，并与 Manifest 和分区容量交叉校验。
+ *
+ * 文件长度为零、超过分区或不等于 Manifest 声明值都会被拒绝。
+ */
 static firmware_status_t GetSourceSize(update_service_t *service, uint32_t expected,
                                         uint32_t maximum, uint32_t *actual)
 {
@@ -153,6 +305,11 @@ static firmware_status_t GetSourceSize(update_service_t *service, uint32_t expec
     return FIRMWARE_STATUS_OK;
 }
 
+/**
+ * @brief 按当前擦除偏移启动一个 Flash 擦除单元。
+ *
+ * 调用者负责随后轮询操作结果；达到分区末尾时不触发底层 I/O。
+ */
 static firmware_status_t StartErase(update_service_t *service, uint32_t base, uint32_t size,
                                     uint32_t offset)
 {
@@ -165,6 +322,7 @@ static firmware_status_t StartErase(update_service_t *service, uint32_t base, ui
     return service->storage->erase_start(service->storage->context, base + offset, erase_size);
 }
 
+/** 轮询异步块设备，并读取当前操作结果快照。 */
 static firmware_status_t PollOperation(update_service_t *service,
                                        async_block_device_operation_result_t *operation)
 {
@@ -177,6 +335,11 @@ static firmware_status_t PollOperation(update_service_t *service,
     return service->storage->get_operation_result(service->storage->context, operation);
 }
 
+/**
+ * @brief 计算下一次页编程的安全块大小。
+ *
+ * 块不会跨越 Flash program_size 边界、I/O 缓冲区或当前 Runtime 分区末尾。
+ */
 static firmware_status_t NextProgramChunk(update_service_t *service, uint32_t runtime_size,
                                           uint32_t *chunk_size)
 {
@@ -200,6 +363,11 @@ static firmware_status_t NextProgramChunk(update_service_t *service, uint32_t ru
     return FIRMWARE_STATUS_OK;
 }
 
+/**
+ * @brief 打开当前 APP/GUI 源文件，并初始化其流式写入上下文。
+ *
+ * 在任何程序操作之前再次检查源文件长度，避免安装前后文件被替换或截断。
+ */
 static firmware_status_t StartProgramSource(update_service_t *service,
                                             package_file_id_t file,
                                             const manifest_app_component_t *component,
@@ -219,11 +387,182 @@ static firmware_status_t StartProgramSource(update_service_t *service,
     {
         return status;
     }
+    /* 保留当前组件和固定目标区域，后续阶段无需重新根据 app/gui 分支取值。 */
     service->active_component = component;
     service->active_runtime_offset = runtime_offset;
     service->active_runtime_size = runtime_size;
     service->program_offset = 0U;
     return HashReset(service);
+}
+
+/**
+ * @brief 在 XIP 间接模式确认完成后进入源预检或实际擦除。
+ *
+ * 初次检查只保护整个安装会话的起点；APP/GUI 预检结束后会再次检查，以覆盖其他
+ * 串行使用者在较长预检窗口中重新进入 memory-mapped 模式的情况。
+ */
+static void ContinueAfterIndirectConfirmation(update_service_t *service)
+{
+    if (service->xip_check_before_runtime_mutation != 0)
+    {
+        service->xip_check_before_runtime_mutation = 0;
+        service->stage = UPDATE_STAGE_APP_ERASE;
+    }
+    else
+    {
+        service->stage = UPDATE_STAGE_SOURCE_APP_OPEN;
+    }
+}
+
+/**
+ * @brief 在首次擦除及真正开始擦除前确认 QSPI 已处于 indirect 模式。
+ *
+ * Update Service 是唯一执行 Runtime 擦写的上层所有者，因此它必须处理已遗留的
+ * memory-mapped 状态。先查询，再退出，再查询后置条件；任何一步查询失败都会在不
+ * 修改 Runtime 的前提下终止安装。Abort 调用的返回值并不等同于硬件后置状态：即使
+ * 返回超时或 I/O 错误，也必须查询一次，只有确认仍映射时才继续有限重试。
+ */
+static void ProcessEnsureIndirectMode(update_service_t *service)
+{
+    firmware_status_t status;
+    int mapped = 0;
+
+    switch (service->stage)
+    {
+        case UPDATE_STAGE_XIP_CHECK_INDIRECT:
+            status = service->xip_controller->is_memory_mapped(
+                service->xip_controller->context, &mapped);
+            if (!FirmwareStatus_IsOk(status))
+            {
+                Fail(service, status, BOOT_ERROR_XIP_SETUP);
+            }
+            else if (mapped == 0)
+            {
+                /* 已是 indirect 模式，无需无条件 Abort，直接进入源文件预检。 */
+                ContinueAfterIndirectConfirmation(service);
+            }
+            else
+            {
+                service->stage = UPDATE_STAGE_XIP_EXIT;
+            }
+            break;
+
+        case UPDATE_STAGE_XIP_EXIT:
+            status = service->xip_controller->exit_memory_mapped(
+                service->xip_controller->context);
+            ++service->xip_exit_attempts;
+            if (!FirmwareStatus_IsOk(status))
+            {
+                LOG_WARN("update", "xip exit attempt %lu/%u returned status=%d",
+                         (unsigned long)service->xip_exit_attempts,
+                         (unsigned)UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT, (int)status);
+            }
+            /* HAL Abort 可能在完成硬件退出后才报告超时；后置查询才是事实依据。 */
+            service->stage = UPDATE_STAGE_XIP_VERIFY_INDIRECT;
+            break;
+
+        case UPDATE_STAGE_XIP_VERIFY_INDIRECT:
+            status = service->xip_controller->is_memory_mapped(
+                service->xip_controller->context, &mapped);
+            if (!FirmwareStatus_IsOk(status))
+            {
+                Fail(service, status, BOOT_ERROR_XIP_SETUP);
+            }
+            else if (mapped != 0)
+            {
+                /* Adapter 报告仍映射时重新 Abort；达到上限后禁止任何擦写。 */
+                if (service->xip_exit_attempts >= UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT)
+                {
+                    Fail(service, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_XIP_SETUP);
+                }
+                else
+                {
+                    service->stage = UPDATE_STAGE_XIP_EXIT;
+                }
+            }
+            else
+            {
+                LOG_INFO("update", "xip confirmed indirect before runtime mutation");
+                ContinueAfterIndirectConfirmation(service);
+            }
+            break;
+
+        default:
+            Fail(service, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_XIP_SETUP);
+            break;
+    }
+}
+
+/**
+ * @brief 在取消安装时将 QSPI 收敛到已确认的 indirect 模式。
+ *
+ * 此路径和正常安装一样以查询结果为准。这样即便 Abort 返回错误，只要硬件已完成
+ * 退出，取消仍可安全完成；反之即使调用返回成功但仍映射，也绝不报告 CANCELLED。
+ */
+static void ProcessCancelEnsureIndirectMode(update_service_t *service)
+{
+    firmware_status_t status;
+    int mapped = 0;
+
+    switch (service->stage)
+    {
+        case UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT:
+            status = service->xip_controller->is_memory_mapped(
+                service->xip_controller->context, &mapped);
+            if (!FirmwareStatus_IsOk(status))
+            {
+                FinalizeCancellationFailure(service, status, BOOT_ERROR_XIP_SETUP);
+            }
+            else if (mapped == 0)
+            {
+                FinalizeCancellation(service);
+            }
+            else
+            {
+                service->stage = UPDATE_STAGE_CANCEL_XIP_EXIT;
+            }
+            break;
+
+        case UPDATE_STAGE_CANCEL_XIP_EXIT:
+            status = service->xip_controller->exit_memory_mapped(
+                service->xip_controller->context);
+            ++service->xip_exit_attempts;
+            if (!FirmwareStatus_IsOk(status))
+            {
+                LOG_WARN("update", "cancel xip exit attempt %lu/%u returned status=%d",
+                         (unsigned long)service->xip_exit_attempts,
+                         (unsigned)UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT, (int)status);
+            }
+            service->stage = UPDATE_STAGE_CANCEL_XIP_VERIFY_INDIRECT;
+            break;
+
+        case UPDATE_STAGE_CANCEL_XIP_VERIFY_INDIRECT:
+            status = service->xip_controller->is_memory_mapped(
+                service->xip_controller->context, &mapped);
+            if (!FirmwareStatus_IsOk(status))
+            {
+                FinalizeCancellationFailure(service, status, BOOT_ERROR_XIP_SETUP);
+            }
+            else if (mapped == 0)
+            {
+                FinalizeCancellation(service);
+            }
+            else if (service->xip_exit_attempts >= UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT)
+            {
+                FinalizeCancellationFailure(service, FIRMWARE_STATUS_INVALID_STATE,
+                                             BOOT_ERROR_XIP_SETUP);
+            }
+            else
+            {
+                service->stage = UPDATE_STAGE_CANCEL_XIP_EXIT;
+            }
+            break;
+
+        default:
+            FinalizeCancellationFailure(service, FIRMWARE_STATUS_INVALID_STATE,
+                                         BOOT_ERROR_XIP_SETUP);
+            break;
+    }
 }
 
 firmware_status_t UpdateService_Init(update_service_t *service,
@@ -232,10 +571,12 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     firmware_status_t status;
     async_block_device_info_t info;
 
+    /* 先验证顶层依赖对象，再验证每个服务实际会调用的回调。 */
     if ((service == NULL) || (dependencies == NULL) || (dependencies->package_source == NULL) ||
         (dependencies->manifest_service == NULL) ||
         (dependencies->update_request_service == NULL) || (dependencies->hash == NULL) ||
-        (dependencies->storage == NULL) || (dependencies->runtime_layout == NULL) ||
+        (dependencies->storage == NULL) || (dependencies->xip_controller == NULL) ||
+        (dependencies->runtime_layout == NULL) ||
         (dependencies->manifest_buffer == NULL) || (dependencies->io_buffer == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
@@ -249,7 +590,9 @@ firmware_status_t UpdateService_Init(update_service_t *service,
         (dependencies->storage->read == NULL) ||
         (dependencies->storage->program_start == NULL) ||
         (dependencies->storage->erase_start == NULL) || (dependencies->storage->poll == NULL) ||
-        (dependencies->storage->get_operation_result == NULL))
+        (dependencies->storage->get_operation_result == NULL) ||
+        (dependencies->xip_controller->is_memory_mapped == NULL) ||
+        (dependencies->xip_controller->exit_memory_mapped == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -257,6 +600,7 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+    /* Flash 几何在 Init 时读取一次，并作为本实例的安装约束冻结。 */
     status = dependencies->storage->get_info(dependencies->storage->context, &info);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -267,18 +611,21 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     {
         return status;
     }
+    /* Manifest 需要完整驻留，流式缓冲区至少能容纳一个 Flash program 单元。 */
     if ((dependencies->manifest_buffer_size < MANIFEST_SERVICE_MAX_DOCUMENT_SIZE) ||
         (dependencies->io_buffer_size < info.program_size))
     {
         return FIRMWARE_STATUS_BUFFER_TOO_SMALL;
     }
 
+    /* 仅在所有验证通过后清零并发布已初始化状态，失败不会破坏调用者对象。 */
     memset(service, 0, sizeof(*service));
     service->package_source = dependencies->package_source;
     service->manifest_service = dependencies->manifest_service;
     service->update_request_service = dependencies->update_request_service;
     service->hash = dependencies->hash;
     service->storage = dependencies->storage;
+    service->xip_controller = dependencies->xip_controller;
     service->runtime_layout = dependencies->runtime_layout;
     service->storage_info = info;
     service->manifest_buffer = dependencies->manifest_buffer;
@@ -300,16 +647,27 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service,
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    /* 同一实例必须完成或被复位后才能接受新的 trusted request。 */
     if ((implementation->initialized == 0) ||
-        (implementation->state != SERVICE_RUN_STATE_IDLE))
+        (implementation->state != SERVICE_RUN_STATE_IDLE) ||
+        (implementation->source_file_open != 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+    /* 复制请求和清空上次输出，防止上一次安装残留影响本次策略。 */
     implementation->request = *request;
     memset(&implementation->manifest, 0, sizeof(implementation->manifest));
     memset(&implementation->candidate_record, 0, sizeof(implementation->candidate_record));
+    implementation->manifest_ready = 0;
     implementation->candidate_ready = 0;
     implementation->runtime_may_be_modified = 0;
+    implementation->failure_status = FIRMWARE_STATUS_OK;
+    implementation->failure_error = BOOT_ERROR_NONE;
+    implementation->failure_stage = UPDATE_STAGE_IDLE;
+    implementation->close_retry_count = 0U;
+    implementation->xip_exit_attempts = 0U;
+    implementation->xip_check_before_runtime_mutation = 0;
+    implementation->cancel_requires_indirect = 0;
     implementation->manifest_size = 0U;
     implementation->manifest_offset = 0U;
     implementation->stage = UPDATE_STAGE_PREPARE_MANIFEST_OPEN;
@@ -329,15 +687,25 @@ firmware_status_t UpdateService_InstallStart(struct update_service *service)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    /* Install 只能消费刚刚成功 Prepare 的 Manifest，不能绕过源校验。 */
     if ((implementation->initialized == 0) ||
         (implementation->state != SERVICE_RUN_STATE_SUCCEEDED) ||
-        (implementation->stage != UPDATE_STAGE_PREPARED))
+        (implementation->stage != UPDATE_STAGE_PREPARED) ||
+        (implementation->manifest_ready == 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
     implementation->candidate_ready = 0;
     implementation->runtime_may_be_modified = 0;
-    implementation->stage = UPDATE_STAGE_SOURCE_APP_OPEN;
+    if (implementation->source_file_open != 0)
+    {
+        /* Install 不得覆盖仍被上一次流程持有的真实文件状态。 */
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    implementation->xip_exit_attempts = 0U;
+    implementation->xip_check_before_runtime_mutation = 0;
+    implementation->cancel_requires_indirect = 0;
+    implementation->stage = UPDATE_STAGE_XIP_CHECK_INDIRECT;
     implementation->state = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
 }
@@ -351,6 +719,7 @@ static void ProcessPrepare(update_service_t *service)
     switch (service->stage)
     {
         case UPDATE_STAGE_PREPARE_MANIFEST_OPEN:
+            /* 固定文件名由 PackageSource Adapter 决定，Service 不接触路径字符串。 */
             status = service->package_source->open(service->package_source->context,
                                                    PACKAGE_FILE_MANIFEST);
             if (!FirmwareStatus_IsOk(status))
@@ -362,6 +731,7 @@ static void ProcessPrepare(update_service_t *service)
             service->stage = UPDATE_STAGE_PREPARE_MANIFEST_SIZE;
             break;
         case UPDATE_STAGE_PREPARE_MANIFEST_SIZE:
+            /* 在读取前限制长度，避免把超大或空 Manifest 拷入静态缓冲区。 */
             status = service->package_source->get_size(service->package_source->context,
                                                        &service->manifest_size);
             if (!FirmwareStatus_IsOk(status) || (service->manifest_size == 0U) ||
@@ -376,6 +746,7 @@ static void ProcessPrepare(update_service_t *service)
             service->stage = UPDATE_STAGE_PREPARE_MANIFEST_READ;
             break;
         case UPDATE_STAGE_PREPARE_MANIFEST_READ:
+            /* 每次只搬运一块，直到整个 Manifest 已连续填充到专用缓冲区。 */
             chunk = MinU32(service->io_buffer_size,
                            service->manifest_size - service->manifest_offset);
             bytes_read = 0U;
@@ -395,6 +766,7 @@ static void ProcessPrepare(update_service_t *service)
             }
             break;
         case UPDATE_STAGE_PREPARE_MANIFEST_CLOSE:
+            /* 解析前先释放文件，保证后续 APP/GUI 打开及卷卸载不会发生重入。 */
             status = CloseSource(service);
             if (!FirmwareStatus_IsOk(status))
             {
@@ -404,6 +776,7 @@ static void ProcessPrepare(update_service_t *service)
             service->stage = UPDATE_STAGE_PREPARE_MANIFEST_PARSE;
             break;
         case UPDATE_STAGE_PREPARE_MANIFEST_PARSE:
+            /* 先检查 Manifest 自身，再验证它与 trusted request 的绑定关系。 */
             status = ManifestService_ParseAndValidate(
                 service->manifest_service, service->manifest_buffer, service->manifest_size,
                 &service->manifest);
@@ -420,6 +793,8 @@ static void ProcessPrepare(update_service_t *service)
                 Fail(service, status, BOOT_ERROR_MANIFEST_BINDING);
                 break;
             }
+            /* Prepare 成功只表示来源可信且完整；版本策略仍由 Application 决定。 */
+            service->manifest_ready = 1;
             service->stage = UPDATE_STAGE_PREPARED;
             service->state = SERVICE_RUN_STATE_SUCCEEDED;
             break;
@@ -428,6 +803,12 @@ static void ProcessPrepare(update_service_t *service)
     }
 }
 
+/**
+ * @brief 对 APP 或 GUI 源文件执行安装前的完整性预检。
+ *
+ * 同一状态机实现复用 APP/GUI 两种组件：先打开并确认精确长度，再流式计算摘要，
+ * 校验通过后关闭文件。只有 GUI 也通过预检，流程才会进入 APP 首次擦除。
+ */
 static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
                               const manifest_app_component_t *component, uint32_t maximum_size,
                               update_stage_t size_stage,
@@ -442,6 +823,7 @@ static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
     {
         case UPDATE_STAGE_SOURCE_APP_OPEN:
         case UPDATE_STAGE_SOURCE_GUI_OPEN:
+            /* 每次仅允许打开一个固定 payload，避免 FatFs 卷上同时持有多个文件。 */
             status = service->package_source->open(service->package_source->context, file);
             if (!FirmwareStatus_IsOk(status))
             {
@@ -453,6 +835,7 @@ static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
             break;
         case UPDATE_STAGE_SOURCE_APP_SIZE:
         case UPDATE_STAGE_SOURCE_GUI_SIZE:
+            /* 文件长度必须同时等于 Manifest 和对应固定 Runtime 分区约束。 */
             status = GetSourceSize(service, component->size_bytes, maximum_size,
                                    &service->active_source_size);
             if (!FirmwareStatus_IsOk(status))
@@ -472,6 +855,7 @@ static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
             break;
         case UPDATE_STAGE_SOURCE_APP_HASH:
         case UPDATE_STAGE_SOURCE_GUI_HASH:
+            /* 预检哈希直接覆盖 io_buffer；该阶段尚未发生任何 Flash 擦写。 */
             chunk = MinU32(service->io_buffer_size,
                            service->active_source_size - service->source_offset);
             bytes_read = 0U;
@@ -493,6 +877,7 @@ static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
             service->source_offset += chunk;
             if (service->source_offset >= service->active_source_size)
             {
+                /* 最后一块写入后一次性完成 SHA-256，避免以中间状态做比较。 */
                 status = HashFinish(service, service->source_digest);
                 if (!FirmwareStatus_IsOk(status))
                 {
@@ -506,6 +891,7 @@ static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
             break;
         case UPDATE_STAGE_SOURCE_APP_VERIFY:
         case UPDATE_STAGE_SOURCE_GUI_VERIFY:
+            /* 摘要完全一致后才释放该文件并转到下一组件或首个擦除阶段。 */
             if (memcmp(service->source_digest, component->sha256,
                        FIRMWARE_SHA256_DIGEST_SIZE) != 0)
             {
@@ -518,10 +904,14 @@ static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
                 Fail(service, status, hash_error);
                 break;
             }
+            /* APP 校验完后继续预检 GUI；GUI 校验完后才允许破坏性操作。 */
             service->stage = (file == PACKAGE_FILE_APP) ? UPDATE_STAGE_SOURCE_GUI_OPEN
-                                                         : UPDATE_STAGE_APP_ERASE;
+                                                         : UPDATE_STAGE_XIP_CHECK_INDIRECT;
             if (file == PACKAGE_FILE_GUI)
             {
+                /* 预检可能持续较久，真正首个擦除前必须再次确认 XIP 后置状态。 */
+                service->xip_check_before_runtime_mutation = 1;
+                service->xip_exit_attempts = 0U;
                 service->erase_offset = 0U;
             }
             break;
@@ -530,6 +920,12 @@ static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
     }
 }
 
+/**
+ * @brief 驱动 APP 或 GUI 固定分区的异步逐块擦除。
+ *
+ * app 非零时处理 APP；否则处理 GUI。APP 第一个擦除单元启动后，
+ * runtime_may_be_modified 置位并保持，供 Application 在失败时选择 fail-closed。
+ */
 static void ProcessErase(update_service_t *service, int app)
 {
     uint32_t base = app != 0 ? service->runtime_layout->app_offset
@@ -546,6 +942,7 @@ static void ProcessErase(update_service_t *service, int app)
 
     if (service->stage == stage)
     {
+        /* 全部分区已擦除时才允许打开源文件进行页编程。 */
         if (service->erase_offset >= size)
         {
             service->stage = next_stage;
@@ -553,9 +950,10 @@ static void ProcessErase(update_service_t *service, int app)
         }
         if (app != 0)
         {
-            /* From this point onward any failure may leave Runtime partial. */
+            /* 从此刻起任何失败都可能留下不完整 APP Runtime，标志必须粘滞。 */
             service->runtime_may_be_modified = 1;
         }
+        /* 以固定间隔记录长耗时擦除进度，避免每页都产生日志噪声。 */
         if ((service->erase_offset == 0U) ||
             ((service->erase_offset % (64U * 1024U)) == 0U))
         {
@@ -576,6 +974,7 @@ static void ProcessErase(update_service_t *service, int app)
         return;
     }
 
+    /* 启动后由后续 Process 调用轮询，BUSY 不改变阶段和偏移。 */
     status = PollOperation(service, &operation);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -600,11 +999,18 @@ static void ProcessErase(update_service_t *service, int app)
     }
     else
     {
+        /* 本擦除单元确认成功后，移动到下一个按几何粒度对齐的偏移。 */
         service->erase_offset += service->storage_info.erase_size;
         service->stage = stage;
     }
 }
 
+/**
+ * @brief 驱动 APP 或 GUI 的“读源文件、页编程、源哈希、关闭文件”流程。
+ *
+ * app 非零时处理 APP；否则处理 GUI。读取块严格限制在 Flash 页边界内，异步写入
+ * 完成后才增加 program_offset，确保失败时偏移仍反映最后确认完成的位置。
+ */
 static void ProcessProgram(update_service_t *service, int app)
 {
     const package_file_id_t file = app != 0 ? PACKAGE_FILE_APP : PACKAGE_FILE_GUI;
@@ -634,6 +1040,7 @@ static void ProcessProgram(update_service_t *service, int app)
     {
         case UPDATE_STAGE_APP_PROGRAM_OPEN:
         case UPDATE_STAGE_GUI_PROGRAM_OPEN:
+            /* 再次打开并检查源文件，防止预检结束后文件被换成不同长度的内容。 */
             status = StartProgramSource(service, file, component, base, runtime_size);
             if (!FirmwareStatus_IsOk(status))
             {
@@ -644,6 +1051,7 @@ static void ProcessProgram(update_service_t *service, int app)
             break;
         case UPDATE_STAGE_APP_PROGRAM_READ:
         case UPDATE_STAGE_GUI_PROGRAM_READ:
+            /* 计算不跨页的下一块；零长度意味着全部 payload 已交给 Flash。 */
             status = NextProgramChunk(service, runtime_size, &chunk);
             if (!FirmwareStatus_IsOk(status))
             {
@@ -656,6 +1064,7 @@ static void ProcessProgram(update_service_t *service, int app)
                 break;
             }
             bytes_read = 0U;
+            /* 同一块先加入源哈希，再交给 program_start，保证写入内容可追溯。 */
             status = service->package_source->read_at(
                 service->package_source->context, service->program_offset, service->io_buffer,
                 chunk, &bytes_read);
@@ -676,6 +1085,7 @@ static void ProcessProgram(update_service_t *service, int app)
             break;
         case UPDATE_STAGE_APP_PROGRAM_START:
         case UPDATE_STAGE_GUI_PROGRAM_START:
+            /* Adapter 将该请求转为异步页编程；本阶段不假设写入已完成。 */
             status = service->storage->program_start(
                 service->storage->context, base + service->program_offset, service->io_buffer,
                 service->pending_program_size);
@@ -688,6 +1098,7 @@ static void ProcessProgram(update_service_t *service, int app)
             break;
         case UPDATE_STAGE_APP_PROGRAM_POLL:
         case UPDATE_STAGE_GUI_PROGRAM_POLL:
+            /* 只有底层报告成功，才提交该块的逻辑偏移。 */
             status = PollOperation(service, &operation);
             if (!FirmwareStatus_IsOk(status))
             {
@@ -712,6 +1123,7 @@ static void ProcessProgram(update_service_t *service, int app)
             break;
         case UPDATE_STAGE_APP_PROGRAM_HASH:
         case UPDATE_STAGE_GUI_PROGRAM_HASH:
+            /* 写入期间重新计算的源摘要必须仍等于 Manifest，防止介质中途变化。 */
             status = HashFinish(service, service->source_digest);
             if (!FirmwareStatus_IsOk(status) ||
                 (memcmp(service->source_digest, component->sha256,
@@ -727,6 +1139,7 @@ static void ProcessProgram(update_service_t *service, int app)
                 Fail(service, status, error);
                 break;
             }
+            /* 源文件已关闭后，切换到独立哈希上下文对目标 Runtime 做回读验证。 */
             service->target_offset = 0U;
             status = HashReset(service);
             if (!FirmwareStatus_IsOk(status))
@@ -742,6 +1155,12 @@ static void ProcessProgram(update_service_t *service, int app)
     }
 }
 
+/**
+ * @brief 分块回读 APP 或 GUI Runtime，并验证其最终 SHA-256。
+ *
+ * 此步骤验证的是实际写入 Flash 的字节，而非仍在 SD/eMMC 上的源文件；只有两个
+ * 组件都通过回读校验，才能创建候选 Active Record。
+ */
 static void ProcessTarget(update_service_t *service, int app)
 {
     uint32_t size = app != 0 ? service->manifest.app.size_bytes : service->manifest.gui.size_bytes;
@@ -755,11 +1174,13 @@ static void ProcessTarget(update_service_t *service, int app)
 
     if (service->stage == read_stage)
     {
+        /* 逐块从固定 Flash 偏移读取，不通过 XIP 地址读取以避免 Cache 歧义。 */
         if (service->target_offset >= size)
         {
             service->stage = hash_stage;
             return;
         }
+        /* 最后一块可短于 io_buffer，但绝不超过 Manifest 声明的真实 payload 长度。 */
         chunk = MinU32(service->io_buffer_size, size - service->target_offset);
         status = service->storage->read(service->storage->context, base + service->target_offset,
                                         service->io_buffer, chunk);
@@ -778,6 +1199,7 @@ static void ProcessTarget(update_service_t *service, int app)
         return;
     }
 
+    /* 所有目标字节都被计入后，完成摘要并与 Manifest 中的安装目标比较。 */
     status = HashFinish(service, service->target_digest);
     if (!FirmwareStatus_IsOk(status) ||
         (memcmp(service->target_digest,
@@ -788,6 +1210,7 @@ static void ProcessTarget(update_service_t *service, int app)
              hash_error);
         return;
     }
+    /* APP 验证后进入 GUI 擦除；GUI 验证后才生成候选控制记录。 */
     service->stage = app != 0 ? UPDATE_STAGE_GUI_ERASE : UPDATE_STAGE_BUILD_RECORD_CANDIDATE;
     service->erase_offset = 0U;
 }
@@ -797,11 +1220,13 @@ void UpdateService_Process(struct update_service *service)
     update_service_t *implementation = (update_service_t *)service;
     int source_gui;
 
+    /* 非运行态调用是安全的空操作，防止 Application 轮询终态时触发重复 I/O。 */
     if ((implementation == NULL) || (implementation->initialized == 0) ||
         (implementation->state != SERVICE_RUN_STATE_RUNNING))
     {
         return;
     }
+    /* 每次阶段变化只输出一次进度日志，偏移可辅助诊断异常中断位置。 */
     if ((implementation->stage != implementation->logged_stage) ||
         (implementation->stage_logged == 0))
     {
@@ -813,12 +1238,33 @@ void UpdateService_Process(struct update_service *service)
         implementation->logged_stage = implementation->stage;
         implementation->stage_logged = 1;
     }
+    if ((implementation->stage == UPDATE_STAGE_XIP_CHECK_INDIRECT) ||
+        (implementation->stage == UPDATE_STAGE_XIP_EXIT) ||
+        (implementation->stage == UPDATE_STAGE_XIP_VERIFY_INDIRECT))
+    {
+        ProcessEnsureIndirectMode(implementation);
+        return;
+    }
+    if (implementation->stage == UPDATE_STAGE_CANCEL_CLOSE)
+    {
+        ProcessCancelClose(implementation);
+        return;
+    }
+    if ((implementation->stage == UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT) ||
+        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_EXIT) ||
+        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_VERIFY_INDIRECT))
+    {
+        ProcessCancelEnsureIndirectMode(implementation);
+        return;
+    }
+    /* 使用连续枚举区间将细粒度状态委托给对应子状态机。 */
     if ((implementation->stage >= UPDATE_STAGE_PREPARE_MANIFEST_OPEN) &&
         (implementation->stage <= UPDATE_STAGE_PREPARE_MANIFEST_PARSE))
     {
         ProcessPrepare(implementation);
         return;
     }
+    /* APP 与 GUI 源预检复用同一处理函数，只通过参数决定当前组件。 */
     if ((implementation->stage >= UPDATE_STAGE_SOURCE_APP_OPEN) &&
         (implementation->stage <= UPDATE_STAGE_SOURCE_GUI_VERIFY))
     {
@@ -841,6 +1287,7 @@ void UpdateService_Process(struct update_service *service)
                                           : BOOT_ERROR_APP_SOURCE_HASH);
         return;
     }
+    /* 以下顺序固定：APP 擦除/写入/回读，再 GUI 擦除/写入/回读。 */
     if ((implementation->stage == UPDATE_STAGE_APP_ERASE) ||
         (implementation->stage == UPDATE_STAGE_APP_ERASE_POLL))
     {
@@ -879,6 +1326,7 @@ void UpdateService_Process(struct update_service *service)
     }
     if (implementation->stage == UPDATE_STAGE_BUILD_RECORD_CANDIDATE)
     {
+        /* 候选记录只复制已验证字段；真正的 EEPROM 原子提交由 Application 触发。 */
         memset(&implementation->candidate_record, 0, sizeof(implementation->candidate_record));
         implementation->candidate_record.format_version = BOOT_ACTIVE_RECORD_FORMAT_V2;
         implementation->candidate_record.state = BOOT_ACTIVE_RECORD_STATE_VALID;
@@ -896,9 +1344,20 @@ void UpdateService_Process(struct update_service *service)
                sizeof(implementation->candidate_record.app_sha256));
         memcpy(implementation->candidate_record.gui_sha256, implementation->manifest.gui.sha256,
                sizeof(implementation->candidate_record.gui_sha256));
+        /* Install 成功并不代表激活完成，等待 BootControlService 的后续提交。 */
         implementation->candidate_ready = 1;
         implementation->state = SERVICE_RUN_STATE_SUCCEEDED;
+        return;
     }
+
+    if (implementation->stage == UPDATE_STAGE_FAILURE_CLOSE)
+    {
+        ProcessFailureClose(implementation);
+        return;
+    }
+
+    /* RUNNING 却落入未知阶段时不能静默卡死，必须以内部错误结束。 */
+    Fail(implementation, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_INVALID_STATE);
 }
 
 firmware_status_t UpdateService_Cancel(struct update_service *service)
@@ -909,25 +1368,51 @@ firmware_status_t UpdateService_Cancel(struct update_service *service)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    /*
+     * 以粘滞的真实写入标志而非枚举序号判断是否可取消。失败关闭阶段已经有根因和
+     * 专属 close 恢复流程，不能用取消掩盖它；主动取消只适用于仍在正常前置流程中
+     * 的请求。
+     */
     if ((implementation->initialized == 0) ||
         (implementation->state != SERVICE_RUN_STATE_RUNNING) ||
-        (implementation->stage >= UPDATE_STAGE_APP_ERASE))
+        (implementation->runtime_may_be_modified != 0) ||
+        (implementation->stage == UPDATE_STAGE_FAILURE_CLOSE) ||
+        (implementation->stage == UPDATE_STAGE_CANCEL_CLOSE) ||
+        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT) ||
+        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_EXIT) ||
+        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_VERIFY_INDIRECT))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    (void)CloseSource(implementation);
-    implementation->state = SERVICE_RUN_STATE_CANCELLED;
-    implementation->stage = UPDATE_STAGE_IDLE;
+    /*
+     * 初次 XIP 检查后，服务已经拥有“所有 Runtime 擦写必须 indirect”的责任。即使
+     * 此刻还在源预检，也要在取消终态前重新查询并在需要时退出 memory-mapped。
+     */
+    implementation->cancel_requires_indirect =
+        ((implementation->stage >= UPDATE_STAGE_XIP_CHECK_INDIRECT) &&
+         (implementation->stage <= UPDATE_STAGE_SOURCE_GUI_VERIFY))
+            ? 1
+            : 0;
+    implementation->close_retry_count = 0U;
+    implementation->candidate_ready = 0;
+    if (implementation->source_file_open != 0)
+    {
+        implementation->stage = UPDATE_STAGE_CANCEL_CLOSE;
+        return FIRMWARE_STATUS_OK;
+    }
+    ContinueCancellationCleanup(implementation);
     return FIRMWARE_STATUS_OK;
 }
 
 service_run_state_t UpdateService_GetState(const struct update_service *service)
 {
+    /* 读取 NULL 服务时返回 FAILED，使 Application 保持 fail-closed。 */
     return (service == NULL) ? SERVICE_RUN_STATE_FAILED : service->state;
 }
 
 const service_result_t *UpdateService_GetResult(const struct update_service *service)
 {
+    /* 结果在下一次 PrepareStart 前由服务对象持有。 */
     return (service == NULL) ? NULL : &service->result;
 }
 
@@ -935,7 +1420,8 @@ const validated_manifest_t *UpdateService_GetManifest(const struct update_servic
 {
     const update_service_t *implementation = (const update_service_t *)service;
 
-    return (implementation == NULL) || (implementation->stage < UPDATE_STAGE_PREPARED)
+    /* 只暴露已完成完整绑定校验的 Manifest，清理阶段不能借枚举顺序泄漏半成品。 */
+    return (implementation == NULL) || (implementation->manifest_ready == 0)
                ? NULL
                : &implementation->manifest;
 }
@@ -944,6 +1430,7 @@ const boot_active_record_t *UpdateService_GetCandidate(const struct update_servi
 {
     const update_service_t *implementation = (const update_service_t *)service;
 
+    /* 只有 APP 与 GUI 目标回读均成功后，候选记录才可交给 EEPROM 提交服务。 */
     return (implementation == NULL) || (implementation->candidate_ready == 0)
                ? NULL
                : &implementation->candidate_record;
@@ -951,6 +1438,7 @@ const boot_active_record_t *UpdateService_GetCandidate(const struct update_servi
 
 int UpdateService_RuntimeMayBeModified(const struct update_service *service)
 {
+    /* 该标志一旦在 APP 首次擦除时置位，直到下次 Prepare 都保持为真。 */
     return (service != NULL) &&
            (((const update_service_t *)service)->runtime_may_be_modified != 0);
 }

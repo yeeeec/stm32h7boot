@@ -1,6 +1,9 @@
 /**
  * @file fatfs_update_request_store_adapter.c
- * @brief Raw fixed trusted-request storage on the CubeMX SD FatFs volume.
+ * @brief 基于 CubeMX SD FatFs 卷的原始固定 trusted request 存储。
+ *
+ * Request Store 与 Package Source 共享卷状态，并串行复用 CubeMX 的 SDFile，
+ * 从而在同步读取中的 close 失败后仍可由后续 unmount 重试关闭。
  */
 #include "adapters/fatfs_update_request_store_adapter.h"
 
@@ -53,11 +56,30 @@ static firmware_status_t BuildRequestPath(char *full_path, size_t full_path_size
     return FIRMWARE_STATUS_OK;
 }
 
-static firmware_status_t CloseRequestFile(FIL *file, firmware_status_t status)
+/**
+ * @brief 关闭共享上下文中的 request 文件并合并主操作结果。
+ *
+ * close 失败优先返回，因为它意味着卷仍被占用；无论主读取是否失败，
+ * request_file_open 只有在底层 f_close 成功后才清零。
+ */
+static firmware_status_t CloseRequestFile(fatfs_update_request_store_adapter_t *adapter,
+                                           firmware_status_t status)
 {
-    firmware_status_t close_status = FatFsRequestStatus(f_close(file));
+    firmware_status_t close_status;
 
-    return FirmwareStatus_IsOk(status) ? close_status : status;
+    if ((adapter == NULL) || (adapter->volume == NULL) ||
+        (adapter->volume->request_file_open == 0))
+    {
+        return status;
+    }
+    close_status = FatFsRequestStatus(f_close(&SDFile));
+    if (FirmwareStatus_IsOk(close_status))
+    {
+        adapter->volume->request_file_open = 0;
+        return status;
+    }
+
+    return close_status;
 }
 
 static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capacity,
@@ -66,7 +88,6 @@ static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capaci
     fatfs_update_request_store_adapter_t *adapter =
         (fatfs_update_request_store_adapter_t *)context;
     char full_path[FATFS_REQUEST_PATH_BUFFER_SIZE];
-    FIL request_file;
     FSIZE_t request_size;
     UINT bytes_read;
     firmware_status_t status;
@@ -76,7 +97,8 @@ static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capaci
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if ((adapter->volume->mounted == 0) || (adapter->volume->package_file_open != 0))
+    if ((adapter->volume->mounted == 0) || (adapter->volume->package_file_open != 0) ||
+        (adapter->volume->request_file_open != 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -85,26 +107,27 @@ static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capaci
     {
         return status;
     }
-    result = f_open(&request_file, full_path, FA_READ | FA_OPEN_EXISTING);
+    result = f_open(&SDFile, full_path, FA_READ | FA_OPEN_EXISTING);
     status = FatFsRequestStatus(result);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
+    adapter->volume->request_file_open = 1;
 
-    request_size = f_size(&request_file);
+    request_size = f_size(&SDFile);
     if ((request_size > UINT32_MAX) || (request_size > UPDATE_REQUEST_STORE_MAX_RAW_SIZE) ||
         (request_size > capacity) || (request_size > UINT_MAX))
     {
-        return CloseRequestFile(&request_file, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+        return CloseRequestFile(adapter, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
     }
     if (request_size == 0U)
     {
         *size = 0U;
-        return CloseRequestFile(&request_file, FIRMWARE_STATUS_OK);
+        return CloseRequestFile(adapter, FIRMWARE_STATUS_OK);
     }
 
-    result = f_read(&request_file, buffer, (UINT)request_size, &bytes_read);
+    result = f_read(&SDFile, buffer, (UINT)request_size, &bytes_read);
     status = FatFsRequestStatus(result);
     if (FirmwareStatus_IsOk(status) && (bytes_read != (UINT)request_size))
     {
@@ -114,7 +137,7 @@ static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capaci
     {
         *size = (uint32_t)request_size;
     }
-    return CloseRequestFile(&request_file, status);
+    return CloseRequestFile(adapter, status);
 }
 
 static firmware_status_t Clear(void *context)
@@ -128,7 +151,8 @@ static firmware_status_t Clear(void *context)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if ((adapter->volume->mounted == 0) || (adapter->volume->package_file_open != 0))
+    if ((adapter->volume->mounted == 0) || (adapter->volume->package_file_open != 0) ||
+        (adapter->volume->request_file_open != 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }

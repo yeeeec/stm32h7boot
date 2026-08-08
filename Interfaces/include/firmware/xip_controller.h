@@ -27,7 +27,10 @@ typedef struct
     xip_controller_enter_fn enter_memory_mapped_read;
     /** Return to indirect mode before erase or program operations. */
     xip_controller_exit_fn exit_memory_mapped;
-    /** Query whether the memory-mapped window is active. */
+    /**
+     * Query whether the memory-mapped window is actually active in the peripheral.
+     * Implementations must not report only a stale software ownership cache.
+     */
     xip_controller_is_mapped_fn is_memory_mapped;
     /** Invalidate data and instruction cache state for a mapped byte range. */
     xip_controller_invalidate_fn invalidate_mapped_cache;
