@@ -1,6 +1,11 @@
 /**
  * @file bsp_eeprom.c
- * @brief STM32 HAL I2C1 port for the AT24C128 driver.
+ * @brief AT24C128 驱动的板级 STM32 I2C 绑定。
+ *
+ * 可移植驱动负责页边界和写周期 Policy。本模块持有静态驱动实例，将未移位的
+ * 7-bit 设备地址转换为 HAL 约定，并将传输结果映射为 Firmware Status。
+ * EEPROM 就绪状态通过 acknowledge poll 生命周期确认：NACK 本身不能证明传输
+ * 失败，因为设备在提交 Page 时会有意返回 NACK。
  */
 #include "bsp/bsp_eeprom.h"
 
@@ -76,7 +81,10 @@ static firmware_status_t I2cProbeReady(
         (uint16_t)((uint16_t)device_address_7bit << 1U),
         1U,
         1U);
-    /* An AT24 intentionally NACKs while its internal write cycle is active. */
+    /*
+     * HAL 无法区分预期的 Busy NACK 与临时探测失败。两者都报告为未就绪，
+     * 由 AT24 驱动的有界写周期 Timeout 决定最终结果。
+     */
     *ready = (status == HAL_OK) ? 1 : 0;
     return FIRMWARE_STATUS_OK;
 }
@@ -115,6 +123,10 @@ firmware_status_t BSP_EepromInit(const bsp_eeprom_config_t *config)
     {
         return status;
     }
+    /*
+     * 探测失败是本次 Boot 的终态。驱动已经绑定并被保留，因此重试初始化会
+     * 违反其生命周期约束。
+     */
     return At24_Probe(&eeprom);
 }
 

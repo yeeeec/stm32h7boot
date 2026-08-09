@@ -1,6 +1,10 @@
 /**
  * @file bsp_sdram.c
- * @brief FMC SDRAM initialization and HAL port binding.
+ * @brief 外部 SDRAM 的板级时序和 STM32 FMC 绑定。
+ *
+ * 可移植 SDRAM 驱动负责必需的上电命令顺序。本模块持有静态驱动实例，并提供
+ * 板级 Bank、Mode Register、Refresh 和 HAL Status 转换。BSP_SdramInit() 成功
+ * 完成前不得访问外部 SDRAM。
  */
 #include "bsp/bsp_sdram.h"
 
@@ -13,7 +17,7 @@
 #define BSP_SDRAM_STARTUP_DELAY_MS   1U
 #define BSP_SDRAM_AUTO_REFRESH_COUNT 8U
 
-/* 100 MHz SDCLK: 64 ms / 8192 rows, minus the STM32H7 timing margin. */
+/* 根据板级 SDCLK、设备行周期和 FMC 裕量推导。 */
 #define BSP_SDRAM_REFRESH_RATE       761U
 
 #define BSP_SDRAM_MODE_BURST_LENGTH_1 0x0000U
@@ -46,7 +50,7 @@ static firmware_status_t SendCommand(
     SDRAM_HandleTypeDef *handle = (SDRAM_HandleTypeDef *)context;
     FMC_SDRAM_CommandTypeDef hal_command = {0};
 
-    /* Translate the portable SDRAM startup sequence to STM32 FMC commands. */
+    /* 所有板级命令都指向实际安装的唯一 SDRAM Bank。 */
     hal_command.CommandTarget = FMC_SDRAM_CMD_TARGET_BANK1;
     hal_command.AutoRefreshNumber = auto_refresh_count;
     hal_command.ModeRegisterDefinition = mode_register;

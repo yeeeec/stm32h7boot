@@ -1,6 +1,6 @@
 /**
  * @file platform_time.h
- * @brief Millisecond time helpers backed by the STM32 HAL tick.
+ * @brief 基于 STM32 HAL Tick 的毫秒时间辅助函数。
  */
 #ifndef PLATFORM_TIME_H
 #define PLATFORM_TIME_H
@@ -8,19 +8,19 @@
 #include <stdint.h>
 
 /**
- * @brief Return the current monotonic tick count.
+ * @brief 返回当前单调递增 Tick 计数。
  *
- * @return Elapsed time in milliseconds as a wrapping 32-bit counter.
+ * @return 以可回绕 32 位计数器表示的毫秒时间。
  */
 uint32_t Platform_TimeNowMs(void);
 
 /**
- * @brief Check whether a duration has elapsed since a saved tick value.
+ * @brief 检查自保存 Tick 值起指定 Duration 是否已经过去。
  *
- * @param[in] start_ms Tick value captured at the start of the interval.
- * @param[in] duration_ms Required duration in milliseconds.
+ * @param[in] start_ms 在时间间隔开始时保存的 Tick 值。
+ * @param[in] duration_ms 要求经过的毫秒 Duration。
  *
- * @return Nonzero when the duration has elapsed, including across tick wraparound.
+ * @return Duration 已经过期时返回非零，包括跨 Tick 回绕的情况。
  */
 int Platform_TimeElapsed(uint32_t start_ms, uint32_t duration_ms);
 

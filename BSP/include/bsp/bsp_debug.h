@@ -1,6 +1,6 @@
 /**
  * @file bsp_debug.h
- * @brief Blocking byte output through the board debug UART.
+ * @brief 通过板级 Debug UART 阻塞输出字节。
  */
 #ifndef BSP_DEBUG_H
 #define BSP_DEBUG_H
@@ -11,17 +11,18 @@
 #include "firmware/status.h"
 
 /**
- * @brief Transmit bytes through the initialized board debug UART.
+ * @brief 通过已初始化的板级 Debug UART 发送字节。
  *
- * @param[in] data Source bytes; may be NULL only when @p size is zero.
- * @param[in] size Number of bytes to transmit.
+ * @param[in] data 源字节；仅当 @p size 为零时允许为 NULL。
+ * @param[in] size 要发送的字节数。
  *
- * @return FIRMWARE_STATUS_OK when all bytes are transmitted.
- * @return FIRMWARE_STATUS_INVALID_ARGUMENT for a NULL buffer with nonzero size.
- * @return FIRMWARE_STATUS_INVALID_STATE before BSP initialization.
- * @return FIRMWARE_STATUS_IO_ERROR if a UART transfer fails.
+ * @return 所有字节发送完成时返回 FIRMWARE_STATUS_OK。
+ * @return Buffer 为 NULL 且 size 非零时返回 FIRMWARE_STATUS_INVALID_ARGUMENT。
+ * @return BSP 初始化前返回 FIRMWARE_STATUS_INVALID_STATE。
+ * @return UART 传输失败时返回 FIRMWARE_STATUS_IO_ERROR。
  *
- * @note The operation may block for up to 20 ms per HAL transfer chunk.
+ * @note 调用是同步的，每个传输 Chunk 可能阻塞至配置的 HAL Timeout；函数
+ *       返回后不会保留 @p data。
  */
 firmware_status_t BSP_DebugWrite(const uint8_t *data, size_t size);
 

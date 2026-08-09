@@ -1,6 +1,11 @@
 /**
  * @file bsp_external_flash.c
- * @brief QSPI HAL port binding for the external SPI NOR flash.
+ * @brief 可移植 SPI NOR 驱动的板级 QSPI 传输实现。
+ *
+ * 驱动负责 JEDEC 探测、地址模式选择、几何参数和操作状态。本模块持有静态
+ * 设备实例，并将每个驱动事务转换为保守的单线 STM32 QSPI 命令。本模块不负责
+ * XIP/memory-mapped 状态切换；该职责属于 Launch 和 Update Service 使用的专用
+ * XIP Adapter。
  */
 #include "bsp/bsp_external_flash.h"
 
@@ -39,7 +44,10 @@ static firmware_status_t PrepareCommand(
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
-    /* Build one-line QSPI transactions expected by the SPI NOR driver. */
+    /*
+     * Command、Address、Data 阶段保持 1-1-1 mode。更快的板级模式需要协调
+     * Driver Contract，不能在此处自行推断。
+     */
     memset(command, 0, sizeof(*command));
     command->InstructionMode = QSPI_INSTRUCTION_1_LINE;
     command->Instruction = transaction->instruction;
@@ -153,6 +161,7 @@ static void QspiDelayMs(void *context, uint32_t delay_ms)
 firmware_status_t BSP_ExternalFlashInit(void)
 {
     spi_nor_port_t port;
+    /* 零值选择可移植驱动定义的权威 Timeout 默认值。 */
     spi_nor_config_t config = {0};
 
     if (hqspi.State == HAL_QSPI_STATE_RESET)
@@ -169,6 +178,7 @@ firmware_status_t BSP_ExternalFlashInit(void)
     port.poll_hook = NULL;
     port.max_transfer_size = BSP_QSPI_MAX_TRANSFER_SIZE;
 
+    /* SpiNor_Init 会先校验 JEDEC Identity，再使对象对外可见。 */
     return SpiNor_Init(&external_flash, &port, &config);
 }
 

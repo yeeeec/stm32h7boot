@@ -1,6 +1,9 @@
 /**
  * @file platform_cache.c
- * @brief STM32H7 D-Cache maintenance implementation.
+ * @brief 在 DMA Ownership 边界执行带校验的 CMSIS D-Cache Maintenance。
+ *
+ * 必须使用精确的 Cache Line 范围，避免 Invalidate 丢弃相邻对象的脏字节。
+ * Wrapper 还保护 CMSIS 的有符号长度 ABI，避免 size_t 截断。
  */
 #include "platform/platform_cache.h"
 
@@ -10,7 +13,7 @@
 
 static firmware_status_t CacheValidate(const void *address, size_t size)
 {
-    /* CMSIS takes a signed byte count; reject values it cannot represent. */
+    /* CMSIS 使用有符号字节数；拒绝其无法表示的值。 */
     if ((address == NULL) || (size == 0U) ||
         (size > (size_t)INT32_MAX) ||
         (((uintptr_t)address % PLATFORM_DCACHE_LINE_SIZE) != 0U) ||

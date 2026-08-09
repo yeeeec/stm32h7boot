@@ -1,6 +1,10 @@
 /**
  * @file bsp.c
- * @brief Board-support-package lifecycle implementation.
+ * @brief 按顺序构建 BSP 持有的板级设备。
+ *
+ * CubeMX 负责创建外设 Handle；本模块校验这些 Handle，并将其绑定到可移植
+ * 设备驱动。设备初始化有固定顺序且不是事务性的。失败可能使前面的设备保持
+ * 就绪，但 BSP_IsInitialized() 仍为 false，上层必须 Fail-closed。
  */
 #include "bsp/bsp.h"
 
@@ -53,6 +57,7 @@ firmware_status_t BSP_Init(void)
         return status;
     }
 
+    /* 只有整套板级依赖有效后才发布就绪状态。 */
     bsp_initialized = 1;
     return FIRMWARE_STATUS_OK;
 }

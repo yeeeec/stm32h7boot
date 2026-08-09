@@ -1,6 +1,10 @@
 /**
  * @file platform.c
- * @brief STM32H7 platform lifecycle implementation.
+ * @brief Reset Cause 捕获和 Watchdog Maintenance 生命周期。
+ *
+ * 只有保存 Reset Flag 且 Watchdog Refresh Contract 成功后才发布 Platform 就绪
+ * 状态。上层 Event Loop 必须定期调用 Platform_Process()；Application 停滞时，
+ * 不会有中断在后台刷新 Watchdog。
  */
 #include "platform/platform.h"
 
@@ -40,7 +44,7 @@ firmware_status_t Platform_Process(void)
     }
 
     now_ms = Platform_TimeNowMs();
-    /* Unsigned subtraction keeps scheduling valid across tick wraparound. */
+    /* 无符号减法保证调度比较可跨 Tick 回绕。 */
     if ((uint32_t)(now_ms - last_watchdog_refresh_ms) >=
         PLATFORM_WATCHDOG_REFRESH_INTERVAL_MS)
     {
@@ -50,6 +54,7 @@ firmware_status_t Platform_Process(void)
         {
             return status;
         }
+        /* 只有硬件接受 Refresh 后才推进调度时间点。 */
         last_watchdog_refresh_ms = now_ms;
     }
 

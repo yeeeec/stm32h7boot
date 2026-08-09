@@ -1,6 +1,6 @@
 /**
  * @file bsp_eeprom.h
- * @brief Board I2C binding for an AT24C128 EEPROM.
+ * @brief AT24C128 EEPROM 的板级 I2C 绑定。
  */
 #ifndef BSP_EEPROM_H
 #define BSP_EEPROM_H
@@ -11,29 +11,37 @@
 
 struct at24;
 
-/** Board-selectable EEPROM address and driver timeout. */
+/** 绑定已安装 EEPROM 时同步消费的配置。 */
 typedef struct
 {
-    uint8_t device_address_7bit; /**< Schematic-derived address in 0x50..0x57. */
-    uint32_t write_timeout_ms; /**< Maximum AT24 internal write-cycle time. */
+    uint8_t device_address_7bit; /**< 由原理图确定的 0x50..0x57 地址。 */
+    uint32_t write_timeout_ms; /**< AT24 内部写周期的最大时间。 */
 } bsp_eeprom_config_t;
 
 /**
- * @brief Bind I2C1 to the board AT24C128 device.
+ * @brief 将 I2C1 绑定到板级 AT24C128 设备。
  *
- * @param[in] config Address and timeout confirmed for the populated board.
+ * @param[in] config 已确认的板级地址和 Timeout。BSP 会复制两个值，不保留该指针。
  *
- * @return FIRMWARE_STATUS_OK on success.
- * @return FIRMWARE_STATUS_INVALID_ARGUMENT for a NULL configuration.
- * @return FIRMWARE_STATUS_INVALID_STATE if I2C1 is reset or already bound.
- * @return A driver validation status otherwise.
+ * @return 成功时返回 FIRMWARE_STATUS_OK。
+ * @return 配置为 NULL 时返回 FIRMWARE_STATUS_INVALID_ARGUMENT。
+ * @return I2C1 处于 Reset 或已经绑定时返回 FIRMWARE_STATUS_INVALID_STATE。
+ * @return 其他情况返回驱动校验状态。
  *
- * @note WP is not controlled until a board GPIO binding is defined. The
- *       populated board must keep the EEPROM writable when this API is used.
+ * @note 在定义板级 GPIO 绑定前不会控制 WP。调用此 API 时，实际板卡必须
+ *       保持 EEPROM 可写。
  */
 firmware_status_t BSP_EepromInit(const bsp_eeprom_config_t *config);
 
-/** Return the BSP-owned initialized AT24 driver, or NULL before initialization. */
+/**
+ * @brief 返回已初始化的 AT24 驱动实例。
+ *
+ * @return 驱动绑定后返回 BSP 持有的静态生命周期对象，绑定前返回 NULL。
+ *         非 NULL 结果不能覆盖 BSP_EepromInit() 探测失败；初始化失败后调用者
+ *         必须忽略该对象。
+ *
+ * @note 调用者不得释放或重新初始化返回对象。
+ */
 struct at24 *BSP_EepromDevice(void);
 
 #endif

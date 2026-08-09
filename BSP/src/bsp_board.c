@@ -1,6 +1,6 @@
 /**
  * @file bsp_board.c
- * @brief Static board identity implementation.
+ * @brief 静态 Board Identity 实现。
  */
 #include "bsp/bsp_board.h"
 

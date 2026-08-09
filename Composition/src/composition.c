@@ -1,6 +1,14 @@
 /**
  * @file composition.c
- * @brief Composition-root dependency binding implementation.
+ * @brief 生产 Firmware 镜像的静态依赖图。
+ *
+ * Composition Root 持有所有 Adapter 和 Service 实例，将 BSP 设备转换为面向
+ * Architecture 的接口，并向 Application 提供最终依赖图。本模块只包含 wiring
+ * 和不变的 Board Policy；Boot、Update、Validation、Launch 决策仍由所属层负责。
+ *
+ * 只有所有依赖成功初始化后，才通过 Application_Configure() 发布依赖图。初始化
+ * 没有 rollback，因此任何失败都是当前 Boot 的终态，并且必须保持
+ * Composition_IsInitialized() 为 false。
  */
 #include "composition/composition.h"
 
@@ -56,10 +64,20 @@ static crc32_iso_hdlc_t crc32_provider;
 static active_validation_service_t active_validation_service;
 static launch_service_t launch_service;
 static update_service_t update_service;
+
+/*
+ * Service 工作区具有静态生命周期。放置到 D2 可将大 Buffer 移出主 SRAM，
+ * Cache-line 对齐则满足需要 DMA/Cache maintenance 的 Consumer Contract。
+ */
 static uint8_t manifest_buffer[UPDATE_SERVICE_MANIFEST_MAX_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
 static uint8_t service_io_buffer[SERVICE_IO_BUFFER_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
+
+/*
+ * 该表是可执行镜像的策略，不是对所有可写 RAM 的探测。Vector Validation
+ * 必须拒绝落在这些区域之外的初始 Stack Pointer。
+ */
 static const memory_region_t application_sram_regions[] = {
     {0x20000000UL, 128UL * 1024UL},
     {0x24000000UL, 512UL * 1024UL},
@@ -90,6 +108,10 @@ static hash_provider_t manifest_hash_interface = {
     ManifestHashFinish,
 };
 
+/*
+ * Active Runtime Validation 使用独立的可变 Hash Context，避免其 Digest 生命周期
+ * 破坏 Manifest/Update Request 的 Hash 状态。
+ */
 static hash_provider_t active_validation_hash_interface = {
     &active_validation_hash_context,
     ManifestHashReset,
@@ -112,7 +134,7 @@ firmware_status_t Composition_Init(void)
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    /* Construct all concrete adapters before exposing their interfaces. */
+    /* 先配置 Logger，保证后续依赖失败仍可诊断。 */
     STM32ClockAdapter_Init(&clock_adapter);
     UartLogAdapter_Init(&log_adapter);
 
@@ -131,7 +153,7 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
-    /* Validate device geometry before making storage available to services. */
+    /* 几何参数无效时必须在任何 Service 修改 Runtime 前失败。 */
     external_flash = SpiNorBlockAdapter_AsyncInterface(&external_flash_adapter);
     status         = external_flash->get_info(external_flash->context, &external_flash_info);
     if (!FirmwareStatus_IsOk(status))
@@ -255,7 +277,10 @@ firmware_status_t Composition_Init(void)
     update_dependencies.update_request_service = &update_request_service;
     update_dependencies.hash                 = &manifest_hash_interface;
     update_dependencies.storage              = external_flash;
-    /* Update Service 在首次擦写前独占并确认 QSPI indirect 状态。 */
+    /*
+     * 安装期间由 Update Service 独占 XIP 状态切换，并必须在首次 Runtime
+     * 擦除前肯定确认已处于 indirect mode。
+     */
     update_dependencies.xip_controller       =
         Stm32QspiXipAdapter_Interface(&xip_adapter);
     update_dependencies.runtime_layout       = BootRuntimeLayout_Get();

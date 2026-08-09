@@ -1,6 +1,9 @@
 /**
  * @file platform_critical.c
- * @brief Interrupt-mask based critical-section implementation.
+ * @brief 为可嵌套本地 Core Critical Section 保存 PRIMASK。
+ *
+ * 保存之前的屏蔽状态是不变量，可防止外层 Critical Section 仍持有排他边界
+ * 时，内层 Section 提前启用中断。DMB 保证该边界两侧的共享内存访问顺序。
  */
 #include "platform/platform_critical.h"
 
@@ -8,7 +11,6 @@
 
 platform_critical_state_t Platform_CriticalEnter(void)
 {
-    /* Preserve the caller's mask so nested sections do not enable interrupts early. */
     platform_critical_state_t state = __get_PRIMASK();
 
     __disable_irq();

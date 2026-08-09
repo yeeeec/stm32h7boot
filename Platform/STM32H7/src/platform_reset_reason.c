@@ -1,6 +1,10 @@
 /**
  * @file platform_reset_reason.c
- * @brief STM32 RCC reset-flag decoding implementation.
+ * @brief STM32 RCC Reset Flag 的一次性捕获。
+ *
+ * RCC 可能同时保留多个 Cause Flag。先检查具体的 Watchdog 和 Software Cause，
+ * 再检查通用 Power/Pin 标识，使诊断保留最有价值的原因。只有将结果复制到
+ * Platform 静态状态后才清除这些 Flag。
  */
 #include "platform/platform_reset_reason.h"
 
@@ -10,7 +14,6 @@ static platform_reset_reason_t captured_reason = PLATFORM_RESET_REASON_UNKNOWN;
 
 void Platform_ResetReasonCapture(void)
 {
-    /* Check causes in priority order before clearing the one-shot RCC flags. */
     if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDG1RST) != 0U)
     {
         captured_reason = PLATFORM_RESET_REASON_INDEPENDENT_WATCHDOG;
