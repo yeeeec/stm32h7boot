@@ -43,34 +43,56 @@
 #include "services/use_case/launch_service.h"
 #include "services/use_case/update_service.h"
 
+/** Update 与 Active Validation 单步复用的 I/O 缓冲区容量，单位为字节。 */
 #define SERVICE_IO_BUFFER_SIZE 4096U
 
+/** 为日志系统提供单调时钟的 STM32 Platform Adapter。 */
 static stm32_clock_adapter_t clock_adapter;
+/** 把格式化日志写入调试 UART 的 Adapter。 */
 static uart_log_adapter_t log_adapter;
+/** 将 BSP 外部 NOR Flash 转换为异步块设备接口的 Adapter。 */
 static spi_nor_block_adapter_t external_flash_adapter;
+/** 将 BSP AT24 EEPROM 转换为 Boot Control 存储接口的 Adapter。 */
 static at24_boot_control_adapter_t eeprom_adapter;
+/** 负责 Active Record A/B 选择和原子提交的 Service。 */
 static boot_control_service_t boot_control_service;
+/** Manifest、Trusted Request 与 Update Prepare 串行复用的 SHA-256 Context。 */
 static sha256_context_t manifest_hash_context;
+/** Active Runtime 校验独占的 SHA-256 Context。 */
 static sha256_context_t active_validation_hash_context;
+/** 严格解析并验证发布 Manifest 的 Service。 */
 static manifest_service_t manifest_service;
+/** 严格解析 Trusted Request 并验证 Manifest 绑定的 Service。 */
 static update_request_service_t update_request_service;
+/** Package Source 与 Request Store 共同借用的 FatFs 发布卷上下文。 */
 static fatfs_release_volume_context_t release_volume;
+/** 向 Service 暴露固定发布文件访问能力的 Package Source Adapter。 */
 static fatfs_package_source_adapter_t package_source_adapter;
+/** 向 Application 暴露 Trusted Request 加载和清除能力的 Adapter。 */
 static fatfs_update_request_store_adapter_t request_store_adapter;
+/** 管理 QSPI indirect 与 memory-mapped 模式切换的 XIP Adapter。 */
 static stm32_qspi_xip_adapter_t xip_adapter;
+/** 执行 Cortex-M VTOR、MSP 和 Reset Handler 交接的 Adapter。 */
 static cortex_m_application_jump_adapter_t jump_adapter;
+/** 执行不可返回全系统复位请求的 Adapter。 */
 static stm32_system_reset_adapter_t system_reset_adapter;
+/** 为 Boot Control Record 提供 CRC-32/ISO-HDLC 的 Provider。 */
 static crc32_iso_hdlc_t crc32_provider;
+/** 增量校验当前 Active APP/GUI Runtime 的 Service。 */
 static active_validation_service_t active_validation_service;
+/** 完成 XIP 建立和最终 APP 跳转的 Service。 */
 static launch_service_t launch_service;
+/** 准备发布包并安装固定 APP/GUI Runtime 的 Service。 */
 static update_service_t update_service;
 
 /*
  * Service 工作区具有静态生命周期。放置到 D2 可将大 Buffer 移出主 SRAM，
  * Cache-line 对齐则满足需要 DMA/Cache maintenance 的 Consumer Contract。
  */
+/** Manifest 原始文档及解析过程使用的固定容量工作区。 */
 static uint8_t manifest_buffer[UPDATE_SERVICE_MANIFEST_MAX_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
+/** Update 与 Active Validation 分时复用的块 I/O 工作区。 */
 static uint8_t service_io_buffer[SERVICE_IO_BUFFER_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
 
@@ -79,28 +101,56 @@ static uint8_t service_io_buffer[SERVICE_IO_BUFFER_SIZE]
  * 必须拒绝落在这些区域之外的初始 Stack Pointer。
  */
 static const memory_region_t application_sram_regions[] = {
+    /* Cortex-M DTCM，起始地址 0x20000000，容量 128 KiB。 */
     {0x20000000UL, 128UL * 1024UL},
+    /* AXI SRAM，起始地址 0x24000000，容量 512 KiB。 */
     {0x24000000UL, 512UL * 1024UL},
+    /* D2 SRAM1/2/3 连续区域，起始地址 0x30000000，总容量 288 KiB。 */
     {0x30000000UL, 288UL * 1024UL},
+    /* D3 SRAM4，起始地址 0x38000000，容量 64 KiB。 */
     {0x38000000UL, 64UL * 1024UL},
 };
+/** 完整依赖图已经发布给 Application 的就绪标志。 */
 static int composition_initialized;
+
+/**
+ * @brief 重置接口绑定的 SHA-256 Context，开始一次新摘要计算。
+ *
+ * @param[in,out] context 指向 Hash 接口绑定的 sha256_context_t，不允许为 NULL。
+ * @return Sha256_Reset() 返回的状态。
+ */
 static firmware_status_t ManifestHashReset(void *context)
 {
     return Sha256_Reset((sha256_context_t *) context);
 }
 
+/**
+ * @brief 把一段连续字节加入接口绑定的 SHA-256 摘要。
+ *
+ * @param[in,out] context 指向 Hash 接口绑定的 sha256_context_t，不允许为 NULL。
+ * @param[in] data 本次加入摘要的数据起始地址；当 @p size 为零时允许为 NULL。
+ * @param[in] size @p data 中同步消费的字节数，允许为零且函数不会保留该 Buffer。
+ * @return Sha256_Update() 返回的状态。
+ */
 static firmware_status_t ManifestHashUpdate(void *context, const void *data, size_t size)
 {
     return Sha256_Update((sha256_context_t *) context, data, size);
 }
 
+/**
+ * @brief 完成接口绑定的 SHA-256 计算并输出固定长度摘要。
+ *
+ * @param[in] context 指向 Hash 接口绑定的 sha256_context_t，不允许为 NULL。
+ * @param[out] digest 接收 FIRMWARE_SHA256_DIGEST_SIZE 字节摘要的非 NULL 缓冲区。
+ * @return Sha256_Finish() 返回的状态。
+ */
 static firmware_status_t ManifestHashFinish(void *context,
                                             uint8_t digest[FIRMWARE_SHA256_DIGEST_SIZE])
 {
     return Sha256_Finish((sha256_context_t *) context, digest);
 }
 
+/** Manifest、Request 与 Update Service 按 Application 编排顺序共享的 Hash 接口。 */
 static hash_provider_t manifest_hash_interface = {
     &manifest_hash_context,
     ManifestHashReset,
@@ -108,7 +158,7 @@ static hash_provider_t manifest_hash_interface = {
     ManifestHashFinish,
 };
 
-/*
+/**
  * Active Runtime Validation 使用独立的可变 Hash Context，避免其 Digest 生命周期
  * 破坏 Manifest/Update Request 的 Hash 状态。
  */
@@ -121,6 +171,7 @@ static hash_provider_t active_validation_hash_interface = {
 
 firmware_status_t Composition_Init(void)
 {
+    /* 所有局部 Dependencies 只用于初始化；Service 会复制其中的借用指针。 */
     firmware_status_t status;
     const async_block_device_t *external_flash;
     async_block_device_info_t external_flash_info;
@@ -128,6 +179,7 @@ firmware_status_t Composition_Init(void)
     launch_service_dependencies_t launch_dependencies;
     update_service_dependencies_t update_dependencies;
 
+    /* 装配过程不可回滚，禁止在同一 Boot 中对已发布对象重复初始化。 */
     if (composition_initialized != 0)
     {
         LOG_WARN("composition", "initialization requested more than once");
@@ -146,6 +198,7 @@ firmware_status_t Composition_Init(void)
     }
     LOG_DEBUG("composition", "logger dependencies bound");
 
+    /* 外部 Flash Adapter 是安装、校验和启动三个流程共享的唯一块设备入口。 */
     status = SpiNorBlockAdapter_Init(&external_flash_adapter, BSP_ExternalFlashDevice());
     if (!FirmwareStatus_IsOk(status))
     {
@@ -167,6 +220,8 @@ firmware_status_t Composition_Init(void)
         LOG_ERROR("composition", "external flash geometry is invalid");
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+
+    /* Boot Control 使用独立 CRC Provider 校验 EEPROM 中的持久化记录。 */
     status = Crc32IsoHdlc_Init(&crc32_provider);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -174,6 +229,7 @@ firmware_status_t Composition_Init(void)
     }
 
     {
+        /* Manifest Service 借用共享 Hash 接口，解析期间独占其 Context。 */
         manifest_service_dependencies_t manifest_dependencies = {&manifest_hash_interface};
 
         status = ManifestService_Init(&manifest_service, &manifest_dependencies);
@@ -185,6 +241,7 @@ firmware_status_t Composition_Init(void)
     }
 
     {
+        /* Request Service 与 Manifest Service 分时复用同一 Hash Context。 */
         update_request_service_dependencies_t request_dependencies = {&manifest_hash_interface};
 
         status = UpdateRequestService_Init(&update_request_service, &request_dependencies);
@@ -195,6 +252,7 @@ firmware_status_t Composition_Init(void)
         }
     }
 
+    /* EEPROM Adapter 和 CRC Provider 共同构成 Boot Control 的持久化边界。 */
     status = At24BootControlAdapter_Init(&eeprom_adapter, BSP_EepromDevice());
     if (!FirmwareStatus_IsOk(status))
     {
@@ -215,6 +273,7 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
+    /* 两个 FatFs Adapter 共享同一发布卷，Application 统一管理挂载 Ownership。 */
     status = FatFsReleaseVolumeContext_Init(&release_volume);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -230,11 +289,15 @@ firmware_status_t Composition_Init(void)
     {
         return status;
     }
+
+    /* hqspi 已由 BSP 初始化；此处只建立模式切换与 Cache 控制接口。 */
     status = Stm32QspiXipAdapter_Init(&xip_adapter, &hqspi);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
+
+    /* Jump 与 Reset Adapter 封装最终不可逆的 Platform 控制权交接操作。 */
     status = CortexMApplicationJumpAdapter_Init(&jump_adapter);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -246,6 +309,7 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
+    /* Active Validation 独占 Hash Context，但与 Update 分时复用 D2 I/O Buffer。 */
     validation_dependencies.storage      = external_flash;
     validation_dependencies.hash         = &active_validation_hash_interface;
     validation_dependencies.buffer       = service_io_buffer;
@@ -259,6 +323,7 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
+    /* Launch 复用同一 Flash/XIP 对象，并以固定 SRAM 表约束向量表初始 MSP。 */
     launch_dependencies.storage          = external_flash;
     launch_dependencies.xip_controller   = Stm32QspiXipAdapter_Interface(&xip_adapter);
     launch_dependencies.application_jump = CortexMApplicationJumpAdapter_Interface(&jump_adapter);
@@ -271,6 +336,7 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
+    /* Update 汇合发布卷、解析、Flash、XIP、布局和工作区，是依赖最多的 Service。 */
     update_dependencies.package_source       =
         FatFsPackageSourceAdapter_Interface(&package_source_adapter);
     update_dependencies.manifest_service     = &manifest_service;
@@ -295,6 +361,7 @@ firmware_status_t Composition_Init(void)
     }
 
     {
+        /* 最后才发布顶层依赖，确保 Application 永远看不到半初始化对象图。 */
         const application_dependencies_t application_dependencies = {
             .boot_control       = &boot_control_service,
             .update             = &update_service,
@@ -320,6 +387,7 @@ firmware_status_t Composition_Init(void)
              (unsigned long) external_flash_info.program_size,
              (unsigned long) external_flash_info.erase_size);
 
+    /* 就绪标志必须是整个对象图成功初始化并被 Application 接受后的最后一次写入。 */
     composition_initialized = 1;
     LOG_INFO("composition", "service dependencies initialized");
     return FIRMWARE_STATUS_OK;
@@ -327,5 +395,6 @@ firmware_status_t Composition_Init(void)
 
 int Composition_IsInitialized(void)
 {
+    /* 失败路径从不置位，调用者不能把部分初始化的私有对象误判为可用依赖图。 */
     return composition_initialized;
 }

@@ -1,6 +1,9 @@
 /**
  * @file application.c
- * @brief Top-level Application orchestration for trusted fixed-runtime updates.
+ * @brief 受信固定 Runtime 更新的顶层 Application 编排实现。
+ *
+ * 本模块持有 Bootloader 的唯一顶层状态机。它负责选择继续启动、执行更新、
+ * 恢复复位或 fail-closed，但把具体 I/O 和领域校验委托给注入的 Service。
  */
 #include "application/application.h"
 #include "application/application_config.h"
@@ -16,51 +19,97 @@
 #include "services/use_case/launch_service_api.h"
 #include "services/use_case/update_service_api.h"
 
+/** 清理发布卷时允许的最大卸载尝试次数。 */
 #define APPLICATION_UNMOUNT_RETRY_LIMIT 3U
 
+/** Application 从启动检查到 APP 交接的顶层编排阶段。 */
 typedef enum
 {
+    /** 初始化完成，等待进入每次启动都必须执行的更新介质检查。 */
     APPLICATION_STAGE_STARTUP = 0,
+    /** 查询发布介质是否存在；不存在时转入当前 Runtime 校验。 */
     APPLICATION_STAGE_UPDATE_CHECK,
+    /** 挂载包含 Trusted Request 和发布包的介质。 */
     APPLICATION_STAGE_MOUNT,
+    /** 从已挂载卷加载 Trusted Request 原始文档。 */
     APPLICATION_STAGE_REQUEST_LOAD,
+    /** 解析请求并启动发布包 Prepare 生命周期。 */
     APPLICATION_STAGE_PREPARE_START,
+    /** 增量驱动发布包读取、绑定和源文件预校验。 */
     APPLICATION_STAGE_PREPARE_PROCESS,
+    /** 检查 Bootloader 最低版本、重复请求和升级版本策略。 */
     APPLICATION_STAGE_POLICY,
+    /** 对重复请求所指向的当前 Runtime 启动校验。 */
     APPLICATION_STAGE_STALE_VALIDATE_START,
+    /** 增量驱动重复请求场景下的当前 Runtime 校验。 */
     APPLICATION_STAGE_STALE_VALIDATE_PROCESS,
+    /** 启动 APP/GUI Runtime 安装生命周期。 */
     APPLICATION_STAGE_INSTALL_START,
+    /** 增量驱动 Runtime 擦除、写入和回读校验。 */
     APPLICATION_STAGE_INSTALL_PROCESS,
+    /** 启动候选 Active Record 原子提交。 */
     APPLICATION_STAGE_COMMIT_START,
+    /** 增量驱动候选 Active Record 提交。 */
     APPLICATION_STAGE_COMMIT_PROCESS,
+    /** 清除已消费的 Trusted Request 并选择后续动作。 */
     APPLICATION_STAGE_CLEANUP,
+    /** 释放 Application 持有的发布卷挂载所有权。 */
     APPLICATION_STAGE_UNMOUNT,
+    /** 启动当前 Active Runtime 完整性校验。 */
     APPLICATION_STAGE_VALIDATE_START,
+    /** 增量驱动当前 Active Runtime 完整性校验。 */
     APPLICATION_STAGE_VALIDATE_PROCESS,
+    /** 配置 XIP 并把控制权交给已校验 APP。 */
     APPLICATION_STAGE_LAUNCH,
+    /** 新 Active Record 提交完成后请求全系统复位。 */
     APPLICATION_STAGE_RESET,
+    /** Runtime 可能已损坏时保留请求并复位进入恢复安装。 */
     APPLICATION_STAGE_RECOVERY_RESET,
+    /** 不允许继续更新或启动的 fail-closed 终态。 */
     APPLICATION_STAGE_FAILED
 } application_stage_t;
 
+/** Application 借用的依赖图；仅由 Application_Configure() 写入一次。 */
 static application_dependencies_t application_dependencies;
+/** 当前由 Boot Control 选中、允许参与校验和启动的 Active Record。 */
 static boot_active_record_t application_active_record;
+/** 安装成功后等待提交的候选 Active Record 副本。 */
 static boot_active_record_t application_candidate_record;
+/** 由 Trusted Request 原始文档解析得到的受信请求。 */
 static update_request_t application_request;
+/** Trusted Request 的固定容量原始文档缓冲区。 */
 static uint8_t application_request_raw[UPDATE_REQUEST_STORE_MAX_RAW_SIZE];
+/** application_request_raw 中本次加载的有效字节数。 */
 static uint32_t application_request_raw_size;
+/** 当前顶层编排阶段。 */
 static application_stage_t application_stage;
+/** 发布卷成功卸载后需要进入的阶段。 */
 static application_stage_t application_after_unmount;
+/** 依赖图已通过校验并发布的标志。 */
 static int application_configured;
+/** Application_Init() 已成功完成的标志。 */
 static int application_initialized;
+/** Application 当前是否持有发布卷的挂载所有权。 */
 static int application_media_mounted;
+/** 当前卸载恢复流程已执行的尝试次数。 */
 static uint32_t application_unmount_attempts;
+/** application_active_record 是否包含可用记录。 */
 static int application_has_active_record;
+/** 当前请求是否与 Active Record 绑定到同一发布包。 */
 static int application_stale_request;
+/** 执行 Trusted Request 清理步骤后是否必须通过复位启用新 Runtime。 */
 static int application_reset_after_cleanup;
+/** 当前阶段是否已经输出过入口日志。 */
 static int application_stage_logged;
+/** 最近一次输出入口日志的阶段。 */
 static application_stage_t application_logged_stage;
 
+/**
+ * @brief 将顶层阶段转换为稳定的诊断文本。
+ *
+ * @param[in] stage 待转换的 Application 阶段。
+ * @return 静态只读阶段名称；未知枚举值返回 "unknown"。
+ */
 static const char *ApplicationStageName(application_stage_t stage)
 {
     static const char *const names[] = {
@@ -72,6 +121,7 @@ static const char *ApplicationStageName(application_stage_t stage)
     return ((unsigned int)stage < (sizeof(names) / sizeof(names[0]))) ? names[stage] : "unknown";
 }
 
+/** @brief 每个阶段首次被处理时输出一次入口日志。 */
 static void LogStageEntry(void)
 {
     if ((application_stage_logged == 0) || (application_logged_stage != application_stage))
@@ -82,11 +132,17 @@ static void LogStageEntry(void)
     }
 }
 
+/** @brief 返回当前是否存在允许校验和启动的 Active Record。 */
 static int HasActiveRecord(void)
 {
     return application_has_active_record != 0;
 }
 
+/**
+ * @brief 在必要时先卸载发布卷，再进入指定的后续阶段。
+ *
+ * @param[in] next 卸载成功或无需卸载时进入的阶段。
+ */
 static void BeginUnmount(application_stage_t next)
 {
     application_after_unmount = next;
@@ -102,16 +158,24 @@ static void BeginUnmount(application_stage_t next)
     }
 }
 
+/** @brief 将顶层状态机置入禁止继续启动的 fail-closed 终态。 */
 static void FailClosed(void)
 {
     application_stage = APPLICATION_STAGE_FAILED;
 }
 
+/** @brief 放弃当前更新路径，卸载介质后校验现有 Runtime。 */
 static void ContinueCurrentRuntime(void)
 {
     BeginUnmount(HasActiveRecord() ? APPLICATION_STAGE_VALIDATE_START : APPLICATION_STAGE_FAILED);
 }
 
+/**
+ * @brief 判断已准备的 Manifest 是否就是当前 Active Record 对应的发布包。
+ *
+ * @param[in] manifest Update Service 完成绑定校验后的 Manifest，允许为 NULL。
+ * @return 非零表示 Package ID 和 Manifest 摘要均与 Active Record 相同。
+ */
 static int IsSamePackage(const validated_manifest_t *manifest)
 {
     return HasActiveRecord() && (manifest != NULL) &&
@@ -121,6 +185,7 @@ static int IsSamePackage(const validated_manifest_t *manifest)
                    sizeof(application_active_record.manifest_sha256)) == 0);
 }
 
+/** @brief 有 Active Record 时进入校验，否则直接进入 fail-closed 终态。 */
 static void StartValidationOrFault(void)
 {
     application_stage = HasActiveRecord() ? APPLICATION_STAGE_VALIDATE_START
@@ -138,6 +203,7 @@ firmware_status_t Application_Configure(const application_dependencies_t *depend
     }
     source = dependencies->package_source;
     store = dependencies->update_request_store;
+    /* 顶层状态机只接收可完整执行更新、清理、复位和启动路径的依赖组合。 */
     if ((dependencies->boot_control == NULL) || (dependencies->update == NULL) ||
         (dependencies->validation == NULL) || (dependencies->launch == NULL) ||
         (dependencies->update_request_service == NULL) || (source == NULL) ||
@@ -152,6 +218,7 @@ firmware_status_t Application_Configure(const application_dependencies_t *depend
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+    /* 这里只复制借用指针；Composition 必须让所有依赖对象保持静态生命周期。 */
     application_dependencies = *dependencies;
     application_configured = 1;
     return FIRMWARE_STATUS_OK;
@@ -165,14 +232,17 @@ firmware_status_t Application_Init(void)
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+    /* Active Record 是现有 Runtime 获得校验和启动资格的唯一持久化依据。 */
     status = BootControlService_LoadActive(application_dependencies.boot_control,
                                             &application_active_record);
+    /* 无有效记录是允许进入恢复更新的启动状态，底层 I/O 错误则必须立即失败。 */
     if (!FirmwareStatus_IsOk(status) && (status != FIRMWARE_STATUS_INVALID_STATE) &&
         (status != FIRMWARE_STATUS_OUT_OF_RANGE) && (status != FIRMWARE_STATUS_NOT_FOUND))
     {
         application_stage = APPLICATION_STAGE_FAILED;
         return status;
     }
+    /* 每次 Boot 都重建易失编排状态，不沿用上一轮未完成流程的内存标志。 */
     application_has_active_record = FirmwareStatus_IsOk(status) ? 1 : 0;
     application_media_mounted = 0;
     application_unmount_attempts = 0U;
@@ -198,13 +268,15 @@ firmware_status_t Application_Process(void)
     switch (application_stage)
     {
         case APPLICATION_STAGE_STARTUP:
-            /* Active Record loading is complete; every boot now checks the trusted request. */
+            /* Active Record 加载完成后，每次 Boot 都先检查是否存在受信更新请求。 */
             application_stage = APPLICATION_STAGE_UPDATE_CHECK;
             break;
 
         case APPLICATION_STAGE_UPDATE_CHECK:
         {
             int present = 0;
+
+            /* 介质查询失败等同于本轮无可用更新，但不能绕过已有 Runtime 校验。 */
             status = application_dependencies.package_source->is_media_present(
                 application_dependencies.package_source->context, &present);
             if (!FirmwareStatus_IsOk(status))
@@ -223,6 +295,7 @@ firmware_status_t Application_Process(void)
         }
 
         case APPLICATION_STAGE_MOUNT:
+            /* mount 成功后由 Application 持有 Volume，所有退出路径都必须先卸载。 */
             status = application_dependencies.package_source->mount(
                 application_dependencies.package_source->context);
             if (FirmwareStatus_IsOk(status))
@@ -237,6 +310,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_REQUEST_LOAD:
+            /* 先加载有界原始字节，信任和 schema 决策统一留给请求解析 Service。 */
             application_request_raw_size = 0U;
             status = application_dependencies.update_request_store->load_raw(
                 application_dependencies.update_request_store->context,
@@ -259,6 +333,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_PREPARE_START:
+            /* 严格解析请求后再启动 Prepare；此阶段尚不会修改 Runtime。 */
             status = UpdateRequestService_ParseAndValidate(
                 application_dependencies.update_request_service, application_request_raw,
                 application_request_raw_size, &application_request);
@@ -282,6 +357,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_PREPARE_PROCESS:
+            /* 单次只推进一个有界 Service 步骤，保持主循环可响应。 */
             UpdateService_Process(application_dependencies.update);
             if (UpdateService_GetState(application_dependencies.update) ==
                 SERVICE_RUN_STATE_SUCCEEDED)
@@ -299,17 +375,21 @@ firmware_status_t Application_Process(void)
         {
             const validated_manifest_t *manifest =
                 UpdateService_GetManifest(application_dependencies.update);
+
+            /* 只有完成请求、Manifest 和源文件绑定校验的对象才能参与版本决策。 */
             if (manifest == NULL)
             {
                 ContinueCurrentRuntime();
                 break;
             }
+            /* 包要求的最低 Bootloader 版本高于当前版本时禁止安装。 */
             if (VersionPolicy_Compare(&application_dependencies.bootloader_version,
                                       &manifest->minimum_bootloader_version) < 0)
             {
                 ContinueCurrentRuntime();
                 break;
             }
+            /* 重复请求先验证现有 Runtime；仅在现有内容损坏时重新安装同一包。 */
             application_stale_request = IsSamePackage(manifest);
             if (application_stale_request != 0)
             {
@@ -319,6 +399,7 @@ firmware_status_t Application_Process(void)
                      !VersionPolicy_IsUpgrade(&application_active_record.release_version,
                                               &manifest->release_version))
             {
+                /* 不同包必须严格升级，禁止降级或相同 Release Version 的替换。 */
                 ContinueCurrentRuntime();
             }
             else
@@ -329,6 +410,7 @@ firmware_status_t Application_Process(void)
         }
 
         case APPLICATION_STAGE_STALE_VALIDATE_START:
+            /* 重复请求不直接擦写 Flash；先证明当前 Active Runtime 是否仍然完整。 */
             status = ActiveValidationService_Start(application_dependencies.validation,
                                                    &application_active_record);
             if (FirmwareStatus_IsOk(status))
@@ -342,6 +424,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_STALE_VALIDATE_PROCESS:
+            /* 校验成功即可消费重复请求；失败则把同一受信包作为恢复源重新安装。 */
             ActiveValidationService_Process(application_dependencies.validation);
             if (ActiveValidationService_GetState(application_dependencies.validation) ==
                 SERVICE_RUN_STATE_SUCCEEDED)
@@ -357,6 +440,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_INSTALL_START:
+            /* 版本策略接受后才允许 Update Service 进入可能擦除 Runtime 的阶段。 */
             status = UpdateService_InstallStart(application_dependencies.update);
             if (FirmwareStatus_IsOk(status))
             {
@@ -369,6 +453,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_INSTALL_PROCESS:
+            /* 安装成功仅生成候选记录，在 Boot Control 原子提交前不得视为 Active。 */
             UpdateService_Process(application_dependencies.update);
             if (UpdateService_GetState(application_dependencies.update) ==
                 SERVICE_RUN_STATE_SUCCEEDED)
@@ -391,6 +476,7 @@ firmware_status_t Application_Process(void)
             {
                 const service_result_t *update_result =
                     UpdateService_GetResult(application_dependencies.update);
+                /* 任何可能留下半写 Runtime 或异常 XIP 状态的失败都只能复位恢复。 */
                 if ((UpdateService_RuntimeMayBeModified(application_dependencies.update) != 0) ||
                     ((update_result != NULL) &&
                      (update_result->error == BOOT_ERROR_XIP_SETUP)))
@@ -407,6 +493,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_COMMIT_START:
+            /* 只有 APP/GUI 写入和目标回读均成功后，才开始发布候选 Active Record。 */
             status = BootControlService_CommitActiveStart(application_dependencies.boot_control,
                                                            &application_candidate_record);
             if (FirmwareStatus_IsOk(status))
@@ -420,6 +507,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_COMMIT_PROCESS:
+            /* EEPROM 原子提交成功是新 Runtime 获得 Active 身份的唯一时刻。 */
             BootControlService_Process(application_dependencies.boot_control);
             if (BootControlService_GetState(application_dependencies.boot_control) ==
                 SERVICE_RUN_STATE_SUCCEEDED)
@@ -436,6 +524,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_CLEANUP:
+            /* 到达 Cleanup 表示请求已被成功处理；清除失败只保留告警供下轮幂等处理。 */
             status = application_dependencies.update_request_store->clear(
                 application_dependencies.update_request_store->context);
             if (!FirmwareStatus_IsOk(status))
@@ -447,6 +536,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_UNMOUNT:
+            /* 只有成功卸载发布卷，后续 Runtime 校验、跳转或复位才允许继续。 */
             status = application_dependencies.package_source->unmount(
                 application_dependencies.package_source->context);
             if (FirmwareStatus_IsOk(status))
@@ -472,6 +562,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_VALIDATE_START:
+            /* 无 Active Record 时没有可授权启动的镜像，禁止退化为直接跳转。 */
             if (!HasActiveRecord())
             {
                 FailClosed();
@@ -485,6 +576,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_VALIDATE_PROCESS:
+            /* APP 向量、APP 摘要和 GUI 摘要全部通过后才允许进入 Launch。 */
             ActiveValidationService_Process(application_dependencies.validation);
             if (ActiveValidationService_GetState(application_dependencies.validation) ==
                 SERVICE_RUN_STATE_SUCCEEDED)
@@ -499,6 +591,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_LAUNCH:
+            /* 成功交接不会返回；任何返回错误都意味着本轮必须 fail-closed。 */
             status = LaunchService_Execute(application_dependencies.launch,
                                            &application_active_record);
             if (!FirmwareStatus_IsOk(status))
@@ -508,6 +601,7 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_RESET:
+            /* 新 Active Record 已提交且请求清理已尝试，复位后按正常路径验证并交接。 */
             application_dependencies.system_reset->request(
                 application_dependencies.system_reset->context);
             break;
@@ -521,9 +615,11 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_FAILED:
+            /* 失败终态不再接触存储或尝试启动，等待外部看门狗或人工恢复。 */
             return FIRMWARE_STATUS_INVALID_STATE;
 
         default:
+            /* 未知枚举值按内部状态损坏处理，绝不猜测可恢复路径。 */
             return FIRMWARE_STATUS_INVALID_STATE;
     }
     return FIRMWARE_STATUS_OK;
