@@ -13,6 +13,7 @@
 #include "firmware/async_block_device.h"
 #include "firmware/hash.h"
 #include "firmware/package_source.h"
+#include "firmware/system_clock.h"
 #include "firmware/xip_controller.h"
 #include "services/capability/manifest_service.h"
 #include "services/capability/update_request_service.h"
@@ -28,6 +29,10 @@
 #define UPDATE_SERVICE_XIP_EXIT_RETRY_LIMIT 3U
 /** 发布文件关闭失败后，服务在进入终态前最多重试 close 的次数。 */
 #define UPDATE_SERVICE_CLOSE_RETRY_LIMIT 3U
+/** 安装进度日志的最小输出间隔，避免同步串口阻塞擦写状态机。 */
+#define UPDATE_SERVICE_PROGRESS_LOG_INTERVAL_MS 1000U
+/** 两次安装进度日志之间要求的最小百分比变化。 */
+#define UPDATE_SERVICE_PROGRESS_LOG_STEP_PERCENT 1U
 
 /** Update Service 的外部依赖及调用者持有的两个工作缓冲区。 */
 typedef struct
@@ -40,6 +45,8 @@ typedef struct
     update_request_service_t *update_request_service;
     /** 用于源和目标 SHA-256 的哈希 Provider。 */
     const hash_provider_t *hash;
+    /** 为安装进度日志限流提供的单调毫秒时钟。 */
+    const system_clock_t *clock;
     /** 以 Flash 偏移操作 APP/GUI 分区的异步块设备。 */
     const async_block_device_t *storage;
     /** 安装前确保外部 Flash 退出 memory-mapped 模式的独占控制接口。 */
@@ -156,6 +163,8 @@ typedef struct update_service
     update_request_service_t *update_request_service;
     /** 哈希 Provider。 */
     const hash_provider_t *hash;
+    /** 单调毫秒时钟，用于限制安装进度日志频率。 */
+    const system_clock_t *clock;
     /** Runtime 外部 Flash 接口。 */
     const async_block_device_t *storage;
     /** QSPI XIP 模式控制接口；更新期间只使用其退出与状态查询能力。 */
@@ -234,6 +243,12 @@ typedef struct update_service
     int xip_check_before_runtime_mutation;
     /** 已接受的取消请求是否还必须确认 QSPI 已回到 indirect 模式。 */
     int cancel_requires_indirect;
+    /** 上一次输出的安装总进度百分比。 */
+    uint32_t progress_last_percent;
+    /** 上一次进度日志时间；安装开始时保存限流基准。 */
+    uint32_t progress_last_log_ms;
+    /** InstallStart 是否已经启动本次进度跟踪。 */
+    int progress_tracking_started;
     /** 上一次已输出日志的内部阶段。 */
     update_stage_t logged_stage;
     /** 是否已经输出当前阶段入口日志。 */

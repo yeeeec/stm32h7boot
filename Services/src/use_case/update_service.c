@@ -104,6 +104,27 @@ static uint32_t MinU32(uint32_t left, uint32_t right)
     return (left < right) ? left : right;
 }
 
+/** 返回该阶段是否会在逐页编程或逐扇区擦除时高频往返。 */
+static int IsHighFrequencyStage(update_stage_t stage)
+{
+    switch (stage)
+    {
+        case UPDATE_STAGE_APP_ERASE:
+        case UPDATE_STAGE_APP_ERASE_POLL:
+        case UPDATE_STAGE_APP_PROGRAM_READ:
+        case UPDATE_STAGE_APP_PROGRAM_START:
+        case UPDATE_STAGE_APP_PROGRAM_POLL:
+        case UPDATE_STAGE_GUI_ERASE:
+        case UPDATE_STAGE_GUI_ERASE_POLL:
+        case UPDATE_STAGE_GUI_PROGRAM_READ:
+        case UPDATE_STAGE_GUI_PROGRAM_START:
+        case UPDATE_STAGE_GUI_PROGRAM_POLL:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 /**
  * @brief 终止当前 Prepare 或 Install，并记录失败结果。
  *
@@ -609,6 +630,7 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     if ((service == NULL) || (dependencies == NULL) || (dependencies->package_source == NULL) ||
         (dependencies->manifest_service == NULL) ||
         (dependencies->update_request_service == NULL) || (dependencies->hash == NULL) ||
+        (dependencies->clock == NULL) ||
         (dependencies->storage == NULL) || (dependencies->xip_controller == NULL) ||
         (dependencies->runtime_layout == NULL) || (dependencies->manifest_buffer == NULL) ||
         (dependencies->io_buffer == NULL))
@@ -620,6 +642,7 @@ firmware_status_t UpdateService_Init(update_service_t *service,
         (dependencies->package_source->get_size == NULL) ||
         (dependencies->package_source->read_at == NULL) || (dependencies->hash->reset == NULL) ||
         (dependencies->hash->update == NULL) || (dependencies->hash->finish == NULL) ||
+        (dependencies->clock->now_ms == NULL) ||
         (dependencies->storage->get_info == NULL) || (dependencies->storage->read == NULL) ||
         (dependencies->storage->program_start == NULL) ||
         (dependencies->storage->erase_start == NULL) || (dependencies->storage->poll == NULL) ||
@@ -657,6 +680,7 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     service->manifest_service       = dependencies->manifest_service;
     service->update_request_service = dependencies->update_request_service;
     service->hash                   = dependencies->hash;
+    service->clock                  = dependencies->clock;
     service->storage                = dependencies->storage;
     service->xip_controller         = dependencies->xip_controller;
     service->runtime_layout         = dependencies->runtime_layout;
@@ -700,6 +724,9 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service,
     implementation->xip_exit_attempts                 = 0U;
     implementation->xip_check_before_runtime_mutation = 0;
     implementation->cancel_requires_indirect          = 0;
+    implementation->progress_last_percent             = 0U;
+    implementation->progress_last_log_ms              = 0U;
+    implementation->progress_tracking_started         = 0;
     implementation->manifest_size                     = 0U;
     implementation->manifest_offset                   = 0U;
     implementation->stage                             = UPDATE_STAGE_PREPARE_MANIFEST_OPEN;
@@ -736,6 +763,10 @@ firmware_status_t UpdateService_InstallStart(struct update_service *service)
     implementation->xip_exit_attempts                 = 0U;
     implementation->xip_check_before_runtime_mutation = 0;
     implementation->cancel_requires_indirect          = 0;
+    implementation->progress_last_percent             = 0U;
+    implementation->progress_last_log_ms =
+        implementation->clock->now_ms(implementation->clock->context);
+    implementation->progress_tracking_started = 1;
     implementation->stage                             = UPDATE_STAGE_XIP_CHECK_INDIRECT;
     implementation->state                             = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
@@ -996,6 +1027,132 @@ static firmware_status_t CalculateEraseLength(const update_service_t *service, i
 }
 
 /**
+ * @brief 计算安装全过程的单调字节进度百分比。
+ *
+ * 总工作量包含 APP/GUI 源预检、实际擦除、编程和目标回读。擦除长度使用真实的
+ * 扇区对齐范围；阶段切换时累计值只前进，不会因 APP/GUI 或子阶段变化归零。
+ */
+static int CalculateInstallProgressPercent(const update_service_t *service, uint32_t *percent)
+{
+    uint32_t app_erase_size;
+    uint32_t gui_erase_size;
+    uint64_t app_size;
+    uint64_t gui_size;
+    uint64_t completed;
+    uint64_t total;
+
+    if ((service == NULL) || (percent == NULL) ||
+        !FirmwareStatus_IsOk(CalculateEraseLength(service, 1, &app_erase_size)) ||
+        !FirmwareStatus_IsOk(CalculateEraseLength(service, 0, &gui_erase_size)))
+    {
+        return 0;
+    }
+
+    app_size = service->manifest.app.size_bytes;
+    gui_size = service->manifest.gui.size_bytes;
+    total = (3ULL * app_size) + (3ULL * gui_size) + app_erase_size + gui_erase_size;
+    if (total == 0ULL)
+    {
+        return 0;
+    }
+
+    if ((service->stage == UPDATE_STAGE_XIP_CHECK_INDIRECT) ||
+        (service->stage == UPDATE_STAGE_XIP_EXIT) ||
+        (service->stage == UPDATE_STAGE_XIP_VERIFY_INDIRECT))
+    {
+        completed = service->xip_check_before_runtime_mutation != 0 ? app_size + gui_size : 0ULL;
+    }
+    else if ((service->stage >= UPDATE_STAGE_SOURCE_APP_OPEN) &&
+             (service->stage <= UPDATE_STAGE_SOURCE_APP_VERIFY))
+    {
+        completed = MinU32(service->source_offset, (uint32_t) app_size);
+    }
+    else if ((service->stage >= UPDATE_STAGE_SOURCE_GUI_OPEN) &&
+             (service->stage <= UPDATE_STAGE_SOURCE_GUI_VERIFY))
+    {
+        completed = app_size + MinU32(service->source_offset, (uint32_t) gui_size);
+    }
+    else if ((service->stage == UPDATE_STAGE_APP_ERASE) ||
+             (service->stage == UPDATE_STAGE_APP_ERASE_POLL))
+    {
+        completed = app_size + gui_size + MinU32(service->erase_offset, app_erase_size);
+    }
+    else if ((service->stage >= UPDATE_STAGE_APP_PROGRAM_OPEN) &&
+             (service->stage <= UPDATE_STAGE_APP_PROGRAM_HASH))
+    {
+        completed = app_size + gui_size + app_erase_size +
+                    MinU32(service->program_offset, (uint32_t) app_size);
+    }
+    else if ((service->stage == UPDATE_STAGE_APP_TARGET_READ) ||
+             (service->stage == UPDATE_STAGE_APP_TARGET_HASH))
+    {
+        completed = app_size + gui_size + app_erase_size + app_size +
+                    MinU32(service->target_offset, (uint32_t) app_size);
+    }
+    else if ((service->stage == UPDATE_STAGE_GUI_ERASE) ||
+             (service->stage == UPDATE_STAGE_GUI_ERASE_POLL))
+    {
+        completed = (3ULL * app_size) + gui_size + app_erase_size +
+                    MinU32(service->erase_offset, gui_erase_size);
+    }
+    else if ((service->stage >= UPDATE_STAGE_GUI_PROGRAM_OPEN) &&
+             (service->stage <= UPDATE_STAGE_GUI_PROGRAM_HASH))
+    {
+        completed = (3ULL * app_size) + gui_size + app_erase_size + gui_erase_size +
+                    MinU32(service->program_offset, (uint32_t) gui_size);
+    }
+    else if ((service->stage == UPDATE_STAGE_GUI_TARGET_READ) ||
+             (service->stage == UPDATE_STAGE_GUI_TARGET_HASH))
+    {
+        completed = (3ULL * app_size) + (2ULL * gui_size) + app_erase_size + gui_erase_size +
+                    MinU32(service->target_offset, (uint32_t) gui_size);
+    }
+    else if (service->stage == UPDATE_STAGE_BUILD_RECORD_CANDIDATE)
+    {
+        completed = total;
+    }
+    else
+    {
+        return 0;
+    }
+
+    if (completed > total)
+    {
+        completed = total;
+    }
+    *percent = (uint32_t)((completed * 100ULL) / total);
+    return 1;
+}
+
+/** 满足“至少前进 1% 且至少间隔 5 秒”时输出当时的实际总进度。 */
+static void ReportInstallProgress(update_service_t *service)
+{
+    uint32_t now_ms;
+    uint32_t percent;
+
+    if ((service == NULL) || (service->progress_tracking_started == 0))
+    {
+        return;
+    }
+    now_ms = service->clock->now_ms(service->clock->context);
+    if ((uint32_t)(now_ms - service->progress_last_log_ms) <
+        UPDATE_SERVICE_PROGRESS_LOG_INTERVAL_MS)
+    {
+        return;
+    }
+    if ((CalculateInstallProgressPercent(service, &percent) == 0) ||
+        (percent < service->progress_last_percent + UPDATE_SERVICE_PROGRESS_LOG_STEP_PERCENT))
+    {
+        return;
+    }
+
+    LOG_INFO("update", "progress=%lu%% stage=%s", (unsigned long) percent,
+             UpdateStageName(service->stage));
+    service->progress_last_percent = percent;
+    service->progress_last_log_ms  = now_ms;
+}
+
+/**
  * @brief Drive asynchronous sector erasure for one APP or GUI payload.
  *
  * app non-zero selects APP; otherwise GUI. APP's first erase sets
@@ -1035,12 +1192,6 @@ static void ProcessErase(update_service_t *service, int app)
         {
             /* 从此刻起任何失败都可能留下不完整 APP Runtime，标志必须粘滞。 */
             service->runtime_may_be_modified = 1;
-        }
-        /* 以固定间隔记录长耗时擦除进度，避免每页都产生日志噪声。 */
-        if ((service->erase_offset == 0U) || ((service->erase_offset % (64U * 1024U)) == 0U))
-        {
-            LOG_INFO("update", "%s start offset=0x%08lx/%lu", app != 0 ? "app-erase" : "gui-erase",
-                     (unsigned long) service->erase_offset, (unsigned long) size);
         }
         status = StartErase(service, base, size, service->erase_offset);
         if (!FirmwareStatus_IsOk(status))
@@ -1310,15 +1461,19 @@ void UpdateService_Process(struct update_service *service)
     {
         return;
     }
-    /* 每次阶段变化只输出一次进度日志，偏移可辅助诊断异常中断位置。 */
+    ReportInstallProgress(implementation);
+    /* 保留低频阶段入口诊断；逐页编程和逐扇区擦除由限流总进度替代。 */
     if ((implementation->stage != implementation->logged_stage) ||
         (implementation->stage_logged == 0))
     {
-        LOG_INFO("update", "stage=%s(%u) erase=0x%08lx program=0x%08lx target=0x%08lx",
-                 UpdateStageName(implementation->stage), (unsigned) implementation->stage,
-                 (unsigned long) implementation->erase_offset,
-                 (unsigned long) implementation->program_offset,
-                 (unsigned long) implementation->target_offset);
+        if (IsHighFrequencyStage(implementation->stage) == 0)
+        {
+            LOG_INFO("update", "stage=%s(%u) erase=0x%08lx program=0x%08lx target=0x%08lx",
+                     UpdateStageName(implementation->stage), (unsigned) implementation->stage,
+                     (unsigned long) implementation->erase_offset,
+                     (unsigned long) implementation->program_offset,
+                     (unsigned long) implementation->target_offset);
+        }
         implementation->logged_stage = implementation->stage;
         implementation->stage_logged = 1;
     }

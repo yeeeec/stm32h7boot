@@ -74,8 +74,19 @@ static package_source_t source_interface;
 static hash_provider_t hash_interface;
 static xip_controller_t xip_interface;
 static async_block_device_t storage_interface;
+static uint32_t clock_now_ms;
 static uint8_t manifest_buffer[UPDATE_SERVICE_MANIFEST_MAX_SIZE];
 static uint8_t io_buffer[UPDATE_SERVICE_IO_BUFFER_MIN_SIZE];
+
+static uint32_t ClockNowMs(void *context)
+{
+    return *(const uint32_t *)context;
+}
+
+static const system_clock_t clock_interface = {
+    &clock_now_ms,
+    ClockNowMs,
+};
 
 static uint8_t SourceByte(package_file_id_t file, uint32_t offset)
 {
@@ -509,6 +520,7 @@ static void ResetFixture(void)
     memset(&manifest_service, 0, sizeof(manifest_service));
     memset(&request_service, 0, sizeof(request_service));
     memset(&update_service, 0, sizeof(update_service));
+    clock_now_ms = 0U;
     memset(manifest_buffer, 0xA5, sizeof(manifest_buffer));
     source_fixture.sizes[PACKAGE_FILE_MANIFEST] = 4U;
     source_fixture.sizes[PACKAGE_FILE_APP] = 513U;
@@ -533,6 +545,7 @@ static void ResetFixture(void)
     dependencies.manifest_service = &manifest_service;
     dependencies.update_request_service = &request_service;
     dependencies.hash = &hash_interface;
+    dependencies.clock = &clock_interface;
     dependencies.storage = &storage_interface;
     dependencies.xip_controller = &xip_interface;
     dependencies.runtime_layout = BootRuntimeLayout_Get();
@@ -638,6 +651,49 @@ static void TestAlignedEraseRange(void)
     assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_SUCCEEDED);
     assert(storage_fixture.app_erase_bytes == 4096U);
     assert(storage_fixture.gui_erase_bytes == 8192U);
+}
+
+static void TestProgressLogRateLimit(void)
+{
+    uint32_t first_percent;
+    uint32_t count;
+
+    ResetFixture();
+    Prepare();
+    assert(UpdateService_InstallStart(&update_service) == FIRMWARE_STATUS_OK);
+    assert(update_service.progress_tracking_started != 0);
+
+    clock_now_ms = UPDATE_SERVICE_PROGRESS_LOG_INTERVAL_MS - 1U;
+    for (count = 0U; count < 12U; ++count)
+    {
+        UpdateService_Process(&update_service);
+    }
+    assert(update_service.progress_last_percent == 0U);
+
+    clock_now_ms = UPDATE_SERVICE_PROGRESS_LOG_INTERVAL_MS;
+    for (count = 0U; (count < 20U) && (update_service.progress_last_percent == 0U); ++count)
+    {
+        UpdateService_Process(&update_service);
+    }
+    first_percent = update_service.progress_last_percent;
+    assert(first_percent >= UPDATE_SERVICE_PROGRESS_LOG_STEP_PERCENT);
+
+    for (count = 0U; count < 40U; ++count)
+    {
+        UpdateService_Process(&update_service);
+    }
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_RUNNING);
+    assert(update_service.progress_last_percent == first_percent);
+
+    clock_now_ms += UPDATE_SERVICE_PROGRESS_LOG_INTERVAL_MS;
+    for (count = 0U; (count < 20U) &&
+                     (update_service.progress_last_percent == first_percent); ++count)
+    {
+        UpdateService_Process(&update_service);
+    }
+    assert(update_service.progress_last_percent >
+           first_percent + UPDATE_SERVICE_PROGRESS_LOG_STEP_PERCENT);
+    RunToTerminal();
 }
 
 static void TestStateGuardsAndLegacy(void)
@@ -938,6 +994,7 @@ int main(void)
 {
     TestSuccessAndCandidate();
     TestAlignedEraseRange();
+    TestProgressLogRateLimit();
     TestStateGuardsAndLegacy();
     TestSourceFailuresDoNotErase();
     TestTargetFailures();

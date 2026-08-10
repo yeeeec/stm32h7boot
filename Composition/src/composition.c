@@ -342,6 +342,7 @@ firmware_status_t Composition_Init(void)
     update_dependencies.manifest_service     = &manifest_service;
     update_dependencies.update_request_service = &update_request_service;
     update_dependencies.hash                 = &manifest_hash_interface;
+    update_dependencies.clock                = STM32ClockAdapter_Interface(&clock_adapter);
     update_dependencies.storage              = external_flash;
     /*
      * 安装期间由 Update Service 独占 XIP 状态切换，并必须在首次 Runtime
