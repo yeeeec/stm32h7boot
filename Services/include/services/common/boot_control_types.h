@@ -12,6 +12,7 @@
 #include <stdint.h>
 
 #include "services/common/boot_types.h"
+#include "services/common/update_request_types.h"
 
 /** Package ID 截断哈希长度，单位为字节。 */
 #define BOOT_CONTROL_PACKAGE_ID_HASH_SIZE 16U
@@ -19,8 +20,12 @@
 #define BOOT_CONTROL_MANIFEST_HASH_SIZE   32U
 /** APP 或 GUI SHA-256 摘要长度，单位为字节。 */
 #define BOOT_CONTROL_IMAGE_HASH_SIZE      32U
+/** Therapy MCU 固件持久化元数据允许的最大镜像大小。 */
+#define BOOT_CONTROL_THERAPY_MAX_SIZE     (512UL * 1024UL)
 /** 当前持久化记录格式版本。 */
 #define BOOT_ACTIVE_RECORD_FORMAT_V2      2U
+/** 增加 Therapy MCU 安装元数据的持久化记录格式。 */
+#define BOOT_ACTIVE_RECORD_FORMAT_V3      3U
 /** 单个 EEPROM 槽中 Active Record 的固定占用大小，单位为字节。 */
 #define BOOT_ACTIVE_RECORD_SIZE           256U
 /** 表示记录已通过提交流程并可作为启动候选项的状态值。 */
@@ -34,7 +39,7 @@
  */
 typedef struct
 {
-    /** 记录格式，当前必须为 @ref BOOT_ACTIVE_RECORD_FORMAT_V2。 */
+    /** 记录格式，读取兼容 V2；含 therapy 元数据时使用 V3。 */
     uint16_t format_version;
     /** 记录有效性状态，正常启动只接受 @ref BOOT_ACTIVE_RECORD_STATE_VALID。 */
     uint8_t state;
@@ -58,6 +63,14 @@ typedef struct
     uint8_t app_sha256[BOOT_CONTROL_IMAGE_HASH_SIZE];
     /** 已安装 GUI payload 的 SHA-256 摘要。 */
     uint8_t gui_sha256[BOOT_CONTROL_IMAGE_HASH_SIZE];
+    /** 当前持久化的组件集合；V2 读取时自动解释为 APP|GUI。 */
+    uint32_t component_mask;
+    /** 已安装 therapy.app.bin 的有效 payload 长度。 */
+    uint32_t therapy_size;
+    /** 已安装 Therapy MCU 固件版本，用于严格禁止降级。 */
+    release_version_t therapy_version;
+    /** 已安装 therapy.app.bin 的 SHA-256 摘要。 */
+    uint8_t therapy_sha256[BOOT_CONTROL_IMAGE_HASH_SIZE];
 } boot_active_record_t;
 
 #endif

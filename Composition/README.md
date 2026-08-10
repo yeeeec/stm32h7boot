@@ -146,6 +146,7 @@ application_jump->execute(
 | `update` | 准备发布包并安装 APP/GUI Runtime |
 | `validation` | 启动前增量校验当前 Runtime |
 | `launch` | 配置 XIP 并跳转到 APP |
+| `secondary_mcu_update` | Application 驱动 therapy.app.bin 串口升级的外部 MCU Service |
 | `package_source` | 挂载、读取和卸载发布卷中的固定文件 |
 | `update_request_store` | 加载和清除 Trusted Request |
 | `update_request_service` | 解析请求并绑定 Manifest |
@@ -172,7 +173,8 @@ Composition 初始化完成后不会再次参与业务流程。主循环调用
     -> 加载并解析 Trusted Request
     -> Prepare 发布包
     -> 执行版本策略
-    -> Install APP/GUI
+    -> Install selected APP/GUI
+    -> Hash-check and program selected therapy.app.bin
     -> 提交 Active Record
     -> 清理 Request 并卸载介质
     -> 校验 Active Runtime
@@ -182,12 +184,31 @@ Composition 初始化完成后不会再次参与业务流程。主循环调用
 每次 `Application_Process()` 只推进一个有界步骤，避免一次调用长时间阻塞主循环。
 Composition 不决定这些状态迁移，只提供状态机所需的对象和接口。
 
+Application 只在请求掩码选择 therapy 且 Manifest 提供该组件时打开镜像文件，再把
+Manifest 的大小和 SHA-256 与 Composition 的固定目标布局组合成
+`secondary_mcu_update_request_t` 传给 Service。therapy 目标地址、容量和擦除页布局
+属于 `composition_config.h` 的产品配置，不从 Manifest 或文件读取。
+
+外部 MCU 的预留资源固定通过以下 Package Source 标识选择：
+
+```c
+package_source->open(package_source->context, PACKAGE_FILE_THERAPY_APP);
+```
+
+该标识对应 `/firmware/therapy.app.bin`。打开成功后，
+`Composition_GetSecondaryMcuImageSource()` 才能读取该文件；文件的关闭和卷的卸载
+仍由 Application 工作流负责。
+
 ## 8. 所有权和生命周期
 
 - Composition 持有 Adapter、Service、Hash Context 和工作缓冲区的实际存储。
 - Service 只借用 Composition 注入的接口指针，不负责释放硬件对象。
 - `package_source` 与 `update_request_store` 共享同一个 FatFs Volume Context；
   Application 负责挂载和卸载的流程所有权。
+- `secondary_mcu_image_source_adapter` 只观察 Package Source 当前已打开的文件，
+  不取得 open/close 所有权；文件选择和关闭仍属于 Application 工作流。
+- 从 MCU Programmer 与 Secondary MCU Service 由 Composition 持有；Source 原文和
+  目标回读使用两块互不重叠、32 字节对齐的 D2 RAM 缓冲区。
 - `manifest_hash_interface` 被 Manifest、Request 和 Update Service 分时复用，不能
   并发执行两次摘要计算。
 - Active Validation 使用独立的 Hash Context，避免破坏 Manifest/Request 的摘要状态。

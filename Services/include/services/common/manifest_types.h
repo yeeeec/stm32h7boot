@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "services/common/boot_types.h"
+#include "services/common/update_request_types.h"
 
 /** package_id 的最大可见字符数，不含结尾 NUL。 */
 #define MANIFEST_PACKAGE_ID_MAX_SIZE 63U
@@ -20,6 +21,8 @@
 #define MANIFEST_SHA256_SIZE         32U
 /** package_id 派生哈希的截断长度，单位为字节。 */
 #define MANIFEST_PACKAGE_HASH_SIZE   16U
+/** therapy.app.bin 允许的最大 RAW 镜像大小。 */
+#define MANIFEST_THERAPY_MAX_SIZE    (512UL * 1024UL)
 
 /** 单个 APP 或 GUI payload 在发布包中的受验证描述。 */
 typedef struct
@@ -34,6 +37,8 @@ typedef struct
 
 /** GUI 的字段契约当前与 APP payload 相同，保留别名以表达业务语义。 */
 typedef manifest_app_component_t manifest_gui_component_t;
+/** Therapy MCU 镜像沿用无头 RAW payload 字段契约。 */
+typedef manifest_app_component_t manifest_therapy_component_t;
 
 /** 已通过严格校验且可绑定到 trusted request 的完整 Manifest。 */
 typedef struct
@@ -50,6 +55,10 @@ typedef struct
     manifest_app_component_t app;
     /** GUI payload 描述。 */
     manifest_gui_component_t gui;
+    /** Therapy MCU payload 描述；未声明时保持为零。 */
+    manifest_therapy_component_t therapy;
+    /** Manifest 实际声明的 @ref UPDATE_COMPONENT_APP 组件集合。 */
+    uint32_t component_mask;
     /** 原始 Manifest 文本的 SHA-256 摘要。 */
     uint8_t manifest_sha256[MANIFEST_SHA256_SIZE];
     /** package_id 的固定长度截断哈希，用于 Active Record。 */

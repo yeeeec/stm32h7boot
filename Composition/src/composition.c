@@ -18,16 +18,20 @@
 #include "adapters/cortex_m_application_jump_adapter.h"
 #include "adapters/fatfs_package_source_adapter.h"
 #include "adapters/fatfs_update_request_store_adapter.h"
+#include "adapters/package_image_source_adapter.h"
 #include "adapters/spi_nor_block_adapter.h"
 #include "adapters/stm32_clock_adapter.h"
 #include "adapters/stm32_qspi_xip_adapter.h"
+#include "adapters/stm32_rom_boot_programmer_adapter.h"
 #include "adapters/stm32_system_reset_adapter.h"
 #include "adapters/uart_log_adapter.h"
 #include "application/application.h"
 #include "application/application_config.h"
 #include "bsp/bsp_eeprom.h"
 #include "bsp/bsp_external_flash.h"
+#include "bsp/bsp_stm32_rom_boot.h"
 #include "checksum/crc32_iso_hdlc.h"
+#include "composition/composition_config.h"
 #include "crypto/sha256.h"
 #include "firmware/async_block_device.h"
 #include "firmware/hash.h"
@@ -41,6 +45,7 @@
 #include "services/capability/vector_validation.h"
 #include "services/use_case/active_validation_service.h"
 #include "services/use_case/launch_service.h"
+#include "services/use_case/secondary_mcu_update_service.h"
 #include "services/use_case/update_service.h"
 
 /** Update 与 Active Validation 单步复用的 I/O 缓冲区容量，单位为字节。 */
@@ -68,8 +73,12 @@ static update_request_service_t update_request_service;
 static fatfs_release_volume_context_t release_volume;
 /** 向 Service 暴露固定发布文件访问能力的 Package Source Adapter。 */
 static fatfs_package_source_adapter_t package_source_adapter;
+/** 将当前已经打开的发布文件转换为外部 MCU 镜像 Source。 */
+static package_image_source_adapter_t secondary_mcu_image_source_adapter;
 /** 向 Application 暴露 Trusted Request 加载和清除能力的 Adapter。 */
 static fatfs_update_request_store_adapter_t request_store_adapter;
+/** 将从 MCU System Memory Bootloader 转换为通用 Programmer。 */
+static stm32_rom_boot_programmer_adapter_t secondary_mcu_programmer_adapter;
 /** 管理 QSPI indirect 与 memory-mapped 模式切换的 XIP Adapter。 */
 static stm32_qspi_xip_adapter_t xip_adapter;
 /** 执行 Cortex-M VTOR、MSP 和 Reset Handler 交接的 Adapter。 */
@@ -84,6 +93,8 @@ static active_validation_service_t active_validation_service;
 static launch_service_t launch_service;
 /** 准备发布包并安装固定 APP/GUI Runtime 的 Service。 */
 static update_service_t update_service;
+/** 分块擦写并逐块回读校验从 MCU 固件的 Service。 */
+static secondary_mcu_update_service_t secondary_mcu_update_service;
 
 /*
  * Service 工作区具有静态生命周期。放置到 D2 可将大 Buffer 移出主 SRAM，
@@ -94,6 +105,11 @@ static uint8_t manifest_buffer[UPDATE_SERVICE_MANIFEST_MAX_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
 /** Update 与 Active Validation 分时复用的块 I/O 工作区。 */
 static uint8_t service_io_buffer[SERVICE_IO_BUFFER_SIZE]
+    __attribute__((section(".ram_d2"), aligned(32)));
+/** 外部 MCU Source 数据与目标回读必须使用互不重叠的缓冲区。 */
+static uint8_t secondary_mcu_write_buffer[COMPOSITION_SECONDARY_MCU_IO_BUFFER_SIZE]
+    __attribute__((section(".ram_d2"), aligned(32)));
+static uint8_t secondary_mcu_readback_buffer[COMPOSITION_SECONDARY_MCU_IO_BUFFER_SIZE]
     __attribute__((section(".ram_d2"), aligned(32)));
 
 /*
@@ -177,6 +193,7 @@ firmware_status_t Composition_Init(void)
     async_block_device_info_t external_flash_info;
     active_validation_service_dependencies_t validation_dependencies;
     launch_service_dependencies_t launch_dependencies;
+    secondary_mcu_update_service_dependencies_t secondary_mcu_dependencies;
     update_service_dependencies_t update_dependencies;
 
     /* 装配过程不可回滚，禁止在同一 Boot 中对已发布对象重复初始化。 */
@@ -197,6 +214,36 @@ firmware_status_t Composition_Init(void)
         return status;
     }
     LOG_DEBUG("composition", "logger dependencies bound");
+
+    /*
+     * The board policy freezes the expected Get-ID before the ROM driver may
+     * enter a programming session.  This init only binds pins/UART and leaves
+     * the secondary controller in its normal application boot condition.
+     */
+    {
+        const bsp_stm32_rom_boot_config_t rom_boot_config = {
+            COMPOSITION_SECONDARY_MCU_DEVICE_ID,
+#if COMPOSITION_SECONDARY_MCU_USE_EXTENDED_ERASE
+            BSP_STM32_ROM_BOOT_ERASE_EXTENDED,
+#else
+            BSP_STM32_ROM_BOOT_ERASE_STANDARD,
+#endif
+        };
+
+        status = BSP_Stm32RomBootInit(&rom_boot_config);
+    }
+    if (!FirmwareStatus_IsOk(status))
+    {
+        LOG_ERROR("composition", "secondary MCU BSP init failed: %d", (int) status);
+        return status;
+    }
+    status = Stm32RomBootProgrammerAdapter_Init(&secondary_mcu_programmer_adapter,
+                                                BSP_Stm32RomBootDevice());
+    if (!FirmwareStatus_IsOk(status))
+    {
+        LOG_ERROR("composition", "secondary MCU programmer init failed: %d", (int) status);
+        return status;
+    }
 
     /* 外部 Flash Adapter 是安装、校验和启动三个流程共享的唯一块设备入口。 */
     status = SpiNorBlockAdapter_Init(&external_flash_adapter, BSP_ExternalFlashDevice());
@@ -247,7 +294,7 @@ firmware_status_t Composition_Init(void)
         status = UpdateRequestService_Init(&update_request_service, &request_dependencies);
         if (!FirmwareStatus_IsOk(status))
         {
-            LOG_ERROR("composition", "Update request service init failed: %d", (int)status);
+            LOG_ERROR("composition", "Update request service init failed: %d", (int) status);
             return status;
         }
     }
@@ -280,6 +327,13 @@ firmware_status_t Composition_Init(void)
         return status;
     }
     status = FatFsPackageSourceAdapter_Init(&package_source_adapter, &release_volume);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status = PackageImageSourceAdapter_Init(
+        &secondary_mcu_image_source_adapter,
+        FatFsPackageSourceAdapter_Interface(&package_source_adapter));
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -337,19 +391,18 @@ firmware_status_t Composition_Init(void)
     }
 
     /* Update 汇合发布卷、解析、Flash、XIP、布局和工作区，是依赖最多的 Service。 */
-    update_dependencies.package_source       =
+    update_dependencies.package_source =
         FatFsPackageSourceAdapter_Interface(&package_source_adapter);
-    update_dependencies.manifest_service     = &manifest_service;
+    update_dependencies.manifest_service       = &manifest_service;
     update_dependencies.update_request_service = &update_request_service;
-    update_dependencies.hash                 = &manifest_hash_interface;
-    update_dependencies.clock                = STM32ClockAdapter_Interface(&clock_adapter);
-    update_dependencies.storage              = external_flash;
+    update_dependencies.hash                   = &manifest_hash_interface;
+    update_dependencies.clock                  = STM32ClockAdapter_Interface(&clock_adapter);
+    update_dependencies.storage                = external_flash;
     /*
      * 安装期间由 Update Service 独占 XIP 状态切换，并必须在首次 Runtime
      * 擦除前肯定确认已处于 indirect mode。
      */
-    update_dependencies.xip_controller       =
-        Stm32QspiXipAdapter_Interface(&xip_adapter);
+    update_dependencies.xip_controller       = Stm32QspiXipAdapter_Interface(&xip_adapter);
     update_dependencies.runtime_layout       = BootRuntimeLayout_Get();
     update_dependencies.manifest_buffer      = manifest_buffer;
     update_dependencies.manifest_buffer_size = sizeof(manifest_buffer);
@@ -361,19 +414,50 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
+    /*
+     * The image adapter observes whichever package file Application has
+     * explicitly opened.  File selection, target layout and invocation policy
+     * remain top-level decisions; Composition only owns the reusable objects.
+     */
+    secondary_mcu_dependencies.source =
+        PackageImageSourceAdapter_Interface(&secondary_mcu_image_source_adapter);
+    secondary_mcu_dependencies.programmer =
+        Stm32RomBootProgrammerAdapter_Interface(&secondary_mcu_programmer_adapter);
+    secondary_mcu_dependencies.hash            = &manifest_hash_interface;
+    secondary_mcu_dependencies.write_buffer    = secondary_mcu_write_buffer;
+    secondary_mcu_dependencies.readback_buffer = secondary_mcu_readback_buffer;
+    secondary_mcu_dependencies.buffer_size     = sizeof(secondary_mcu_write_buffer);
+    status =
+        SecondaryMcuUpdateService_Init(&secondary_mcu_update_service, &secondary_mcu_dependencies);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        LOG_ERROR("composition", "secondary MCU service init failed: %d", (int) status);
+        return status;
+    }
+
     {
         /* 最后才发布顶层依赖，确保 Application 永远看不到半初始化对象图。 */
         const application_dependencies_t application_dependencies = {
-            .boot_control       = &boot_control_service,
-            .update             = &update_service,
-            .validation         = &active_validation_service,
-            .launch             = &launch_service,
-            .package_source     = FatFsPackageSourceAdapter_Interface(&package_source_adapter),
+            .boot_control         = &boot_control_service,
+            .update               = &update_service,
+            .validation           = &active_validation_service,
+            .launch               = &launch_service,
+            .secondary_mcu_update = &secondary_mcu_update_service,
+            .secondary_mcu_target =
+                {
+                    COMPOSITION_THERAPY_TARGET_ADDRESS,
+                    COMPOSITION_THERAPY_TARGET_CAPACITY,
+                    COMPOSITION_THERAPY_ERASE_PAGE_START,
+                    COMPOSITION_THERAPY_ERASE_PAGE_COUNT,
+                    0U,
+                    {0U},
+                },
+            .package_source = FatFsPackageSourceAdapter_Interface(&package_source_adapter),
             .update_request_store =
                 FatFsUpdateRequestStoreAdapter_Interface(&request_store_adapter),
             .update_request_service = &update_request_service,
-            .system_reset       = Stm32SystemResetAdapter_Interface(&system_reset_adapter),
-            .bootloader_version = {1U, 0U, 0U},
+            .system_reset           = Stm32SystemResetAdapter_Interface(&system_reset_adapter),
+            .bootloader_version     = {1U, 0U, 0U},
         };
 
         status = Application_Configure(&application_dependencies);
@@ -398,4 +482,23 @@ int Composition_IsInitialized(void)
 {
     /* 失败路径从不置位，调用者不能把部分初始化的私有对象误判为可用依赖图。 */
     return composition_initialized;
+}
+
+struct secondary_mcu_update_service *Composition_GetSecondaryMcuUpdateService(void)
+{
+    return (composition_initialized != 0) ? &secondary_mcu_update_service : NULL;
+}
+
+const firmware_image_source_t *Composition_GetSecondaryMcuImageSource(void)
+{
+    return (composition_initialized != 0)
+               ? PackageImageSourceAdapter_Interface(&secondary_mcu_image_source_adapter)
+               : NULL;
+}
+
+const mcu_programmer_t *Composition_GetSecondaryMcuProgrammer(void)
+{
+    return (composition_initialized != 0)
+               ? Stm32RomBootProgrammerAdapter_Interface(&secondary_mcu_programmer_adapter)
+               : NULL;
 }

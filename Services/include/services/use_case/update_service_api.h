@@ -26,12 +26,22 @@ firmware_status_t UpdateService_PrepareStart(
     const update_request_t *request);
 
 /**
- * @brief 将已准备的发布包安装到固定 APP 与 GUI Runtime 区域。
+ * @brief 将请求选择的 APP/GUI 组件安装到固定 Runtime 区域。
  *
  * 仅当 Prepare 成功且版本策略已由 Application 接受时调用；安装过程可能擦除
- * Runtime，调用者须依据 RuntimeMayBeModified 决定后续恢复策略。
+ * 选中 Runtime，调用者须依据 RuntimeMayBeModified 决定后续恢复策略。
  */
 firmware_status_t UpdateService_InstallStart(struct update_service *service);
+
+/**
+ * @brief 以当前 Active Record 为基底启动一次可选组件安装。
+ *
+ * 单独更新 APP 或 GUI 时 current_record 必须非 NULL，以便保留未选组件元数据；
+ * APP+GUI 首次安装允许传入 NULL。
+ */
+firmware_status_t UpdateService_InstallStartWithRecord(
+    struct update_service *service,
+    const boot_active_record_t *current_record);
 
 /** @brief 推进一步有界的读取、哈希、Flash 异步轮询或状态转换。 */
 void UpdateService_Process(struct update_service *service);
@@ -63,7 +73,7 @@ const boot_active_record_t *UpdateService_GetCandidate(
 
 /**
  * 返回本次安装是否可能已经修改 Runtime。
- * 首次 APP 擦除开始时该值变为真，并保持到下次 Prepare 重新初始化为止。
+ * 首次 APP 或 GUI 擦除开始时该值变为真，并保持到下次 Prepare 重新初始化为止。
  */
 int UpdateService_RuntimeMayBeModified(
     const struct update_service *service);

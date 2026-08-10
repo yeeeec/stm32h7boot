@@ -17,6 +17,12 @@
 /** Manifest SHA-256 摘要长度，单位为字节。 */
 #define UPDATE_REQUEST_MANIFEST_HASH_SIZE  32U
 
+/** Upgrade-request component selection bits. */
+#define UPDATE_COMPONENT_APP     (1U << 0)
+#define UPDATE_COMPONENT_GUI     (1U << 1)
+#define UPDATE_COMPONENT_THERAPY (1U << 2)
+#define UPDATE_COMPONENT_ALL     (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI | UPDATE_COMPONENT_THERAPY)
+
 /** 严格解析且语义校验通过的升级请求。 */
 typedef struct
 {
@@ -24,6 +30,8 @@ typedef struct
     uint32_t format_version;
     /** 非零表示请求安装指定 package_id。 */
     uint8_t requested;
+    /** 本次请求选择的一个或多个 @ref UPDATE_COMPONENT_APP 组件位。 */
+    uint32_t component_mask;
     /** 目标发布包标识，包含结尾 NUL。 */
     char package_id[UPDATE_REQUEST_PACKAGE_ID_MAX_SIZE + 1U];
     /** 调用者期望的 Manifest 摘要，用于防止包与请求错配。 */

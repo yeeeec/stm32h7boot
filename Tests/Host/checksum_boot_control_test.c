@@ -348,6 +348,44 @@ static int TestSequenceWraparound(void)
     return 0;
 }
 
+static int TestTherapyV3RoundTrip(void)
+{
+    fake_store_t store;
+    boot_control_service_t service;
+    crc32_iso_hdlc_t crc;
+    boot_active_record_t record = ActiveRecord(7U);
+    boot_active_record_t loaded;
+    uint32_t index;
+
+    record.format_version = BOOT_ACTIVE_RECORD_FORMAT_V3;
+    record.component_mask = UPDATE_COMPONENT_ALL;
+    record.therapy_size = BOOT_CONTROL_THERAPY_MAX_SIZE;
+    record.therapy_version.major = 3U;
+    record.therapy_version.minor = 2U;
+    record.therapy_version.patch = 1U;
+    for (index = 0U; index < sizeof(record.therapy_sha256); ++index)
+    {
+        record.therapy_sha256[index] = (uint8_t)(0xC0U + index);
+    }
+    StoreInit(&store);
+    TEST_ASSERT(ServiceInit(&service, &crc, &store) == 0);
+    TEST_ASSERT(CommitActive(&service, &record) == 0);
+    TEST_ASSERT(ReadU16(&store.bytes[ACTIVE_A_ADDRESS + 0x04U]) ==
+                BOOT_ACTIVE_RECORD_FORMAT_V3);
+    TEST_ASSERT(store.bytes[ACTIVE_A_ADDRESS + 0x94U] == UPDATE_COMPONENT_ALL);
+    TEST_ASSERT(ReadU32(&store.bytes[ACTIVE_A_ADDRESS + 0x98U]) ==
+                BOOT_CONTROL_THERAPY_MAX_SIZE);
+    TEST_ASSERT(BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
+    TEST_ASSERT((loaded.component_mask == UPDATE_COMPONENT_ALL) &&
+                (loaded.therapy_size == BOOT_CONTROL_THERAPY_MAX_SIZE) &&
+                (loaded.therapy_version.major == 3U) &&
+                (loaded.therapy_version.minor == 2U) &&
+                (loaded.therapy_version.patch == 1U));
+    TEST_ASSERT(memcmp(loaded.therapy_sha256, record.therapy_sha256,
+                       sizeof(loaded.therapy_sha256)) == 0);
+    return 0;
+}
+
 static int TestEqualSequenceRecords(void)
 {
     fake_store_t store;
@@ -594,6 +632,7 @@ int main(void)
     TEST_ASSERT(TestWriteFailureInjection() == 0);
     TEST_ASSERT(TestChecksumFailurePropagation() == 0);
     TEST_ASSERT(TestV1Unsupported() == 0);
+    TEST_ASSERT(TestTherapyV3RoundTrip() == 0);
     printf("checksum_boot_control_test: PASS\n");
     return 0;
 }

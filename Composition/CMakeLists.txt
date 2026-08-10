@@ -7,13 +7,14 @@ target_include_directories(firmware_composition PUBLIC
 )
 
 target_include_directories(firmware_composition PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/internal
     ${CMAKE_CURRENT_SOURCE_DIR}/../Utilities/Logger/internal
     ${CMAKE_CURRENT_SOURCE_DIR}/../Services/internal
     ${CMAKE_CURRENT_SOURCE_DIR}/../Application/internal
 )
 
 target_link_libraries(firmware_composition
-    PUBLIC firmware_types
+    PUBLIC firmware_types firmware_interfaces
     PRIVATE
         firmware_application
         firmware_services

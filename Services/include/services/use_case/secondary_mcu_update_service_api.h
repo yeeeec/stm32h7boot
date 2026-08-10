@@ -10,6 +10,7 @@
 
 #include <stdint.h>
 
+#include "firmware/hash.h"
 #include "services/common/service_result.h"
 
 struct secondary_mcu_update_service;
@@ -27,6 +28,8 @@ typedef struct
     uint32_t erase_page_count;
     /** 镜像必须匹配的精确字节数。 */
     uint32_t image_size_bytes;
+    /** 源镜像必须匹配的 SHA-256 摘要。 */
+    uint8_t sha256[FIRMWARE_SHA256_DIGEST_SIZE];
 } secondary_mcu_update_request_t;
 
 /**

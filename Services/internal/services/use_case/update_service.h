@@ -1,6 +1,6 @@
 /**
  * @file update_service.h
- * @brief 固定 APP/GUI Runtime 安装器的内部状态和依赖。
+ * @brief 可选 APP/GUI Runtime 安装器的内部状态和依赖。
  *
  * 该对象由 Composition 静态分配。它持有一次 Prepare/Install 所有中间状态，
  * 每次 Process 最多推进一个有界 I/O、哈希、异步轮询或状态转换。
@@ -190,6 +190,10 @@ typedef struct update_service
     int manifest_ready;
     /** Install 成功后等待 EEPROM 提交的候选记录。 */
     boot_active_record_t candidate_record;
+    /** 部分更新开始时复制的当前 Active Record。 */
+    boot_active_record_t base_record;
+    /** base_record 是否由 Application 提供。 */
+    int base_record_valid;
     /** 最近计算的源文件 SHA-256。 */
     uint8_t source_digest[FIRMWARE_SHA256_DIGEST_SIZE];
     /** 最近计算的目标 Runtime SHA-256。 */
@@ -237,7 +241,7 @@ typedef struct update_service
     int source_file_open;
     /** candidate_record 是否已构建完成。 */
     int candidate_ready;
-    /** 首次 APP 擦除开始后置位，表示 Runtime 可能部分改变。 */
+    /** 首次 APP 或 GUI 擦除开始后置位，表示 Runtime 可能部分改变。 */
     int runtime_may_be_modified;
     /** 当前 XIP 间接模式确认成功后是否应直接进入首次 APP 擦除。 */
     int xip_check_before_runtime_mutation;

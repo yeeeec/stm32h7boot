@@ -13,13 +13,15 @@ Composition -> Application + Services + Adapters
 
 量产服务集合：
 
-- `boot_control_service`：EEPROM A/B Active Record V2 的读取和原子提交。
+- `boot_control_service`：EEPROM A/B Active Record V2/V3 的读取和原子提交，V3
+  持久化 therapy 版本、大小和摘要。
 - `manifest_service`：冻结 schema 的 Manifest 严格解析、字段校验和摘要生成。
 - `update_request_service`：受信升级请求的严格解析及其与 Manifest 的绑定。
-- `update_service`：源文件校验、固定 APP/GUI Runtime 安装及候选 Active Record
-  生成。
+- `update_service`：按请求掩码校验并安装选中的 APP/GUI Runtime，保留未选组件并
+  生成候选 Active Record。
 - `secondary_mcu_update_service`：通过注入的镜像 Source 和 MCU Programmer，
-  按页擦除、分块写入并逐块回读校验外部 MCU 固件；它不绑定具体 ROM 协议。
+  先做 SHA-256 源完整性校验，再按页擦除、分块写入并逐块回读校验外部 MCU
+  固件；它不绑定具体 ROM 协议。
 - `active_validation_service`：已安装 APP/GUI 的 SHA-256 与 APP 向量表校验。
 - `launch_service`：固定 Runtime 的 XIP 建立、Cache 失效和 Application 交接。
 - `runtime_layout`、`vector_validation`、`version_policy` 和 checked arithmetic：

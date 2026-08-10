@@ -247,14 +247,17 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
                                                         const uint8_t *data, uint32_t size,
                                                         update_request_t *request)
 {
-    static const char *const members[] = {"format_version", "requested", "package_id",
-                                          "manifest_sha256"};
+    static const char *const legacy_members[] = {"format_version", "requested", "package_id",
+                                                 "manifest_sha256"};
+    static const char *const selected_members[] = {"format_version", "requested", "package_id",
+                                                   "manifest_sha256", "component_mask"};
     update_request_service_t *implementation = (update_request_service_t *)service;
     update_request_t parsed;
     json_document_t document;
     uint32_t requested;
     uint32_t package_id;
     uint32_t manifest_sha256;
+    uint32_t member_count;
     int requested_value;
     firmware_status_t status;
 
@@ -277,7 +280,30 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
     /* 格式版本、触发标志、包身份和摘要必须全部通过后才发布解析结果。 */
     if (FirmwareStatus_IsOk(status))
     {
-        status = ValidateObjectMembers(&document, 0U, members, 4U);
+        member_count = document.tokens[0U].child_count;
+        if (member_count == 4U)
+        {
+            status = ValidateObjectMembers(&document, 0U, legacy_members, 4U);
+            parsed.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+        }
+        else if (member_count == 5U)
+        {
+            status = ValidateObjectMembers(&document, 0U, selected_members, 5U);
+            if (FirmwareStatus_IsOk(status))
+            {
+                status = RequireU32(&document, 0U, "component_mask", &parsed.component_mask);
+            }
+        }
+        else
+        {
+            status = FIRMWARE_STATUS_INVALID_STATE;
+        }
+    }
+    if (FirmwareStatus_IsOk(status) &&
+        ((parsed.component_mask == 0U) ||
+         ((parsed.component_mask & ~UPDATE_COMPONENT_ALL) != 0U)))
+    {
+        status = FIRMWARE_STATUS_INVALID_STATE;
     }
     if (FirmwareStatus_IsOk(status))
     {
@@ -362,7 +388,8 @@ firmware_status_t UpdateRequestService_ValidateManifestBinding(
         return FIRMWARE_STATUS_INVALID_STATE;
     }
     if ((request->format_version != UPDATE_REQUEST_FORMAT_VERSION) || (request->requested == 0U) ||
-        (manifest_size == 0U))
+        (request->component_mask == 0U) ||
+        ((request->component_mask & ~UPDATE_COMPONENT_ALL) != 0U) || (manifest_size == 0U))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -374,7 +401,8 @@ firmware_status_t UpdateRequestService_ValidateManifestBinding(
     }
     if ((memcmp(request->manifest_sha256, raw_manifest_sha256, sizeof(raw_manifest_sha256)) != 0) ||
         (memcmp(manifest->manifest_sha256, raw_manifest_sha256, sizeof(raw_manifest_sha256)) != 0) ||
-        (strcmp(request->package_id, manifest->package_id) != 0))
+        (strcmp(request->package_id, manifest->package_id) != 0) ||
+        ((manifest->component_mask & request->component_mask) != request->component_mask))
     {
         /* 请求、原始字节和结构化 Manifest 必须指向同一个不可歧义的发布包。 */
         return FIRMWARE_STATUS_INVALID_STATE;

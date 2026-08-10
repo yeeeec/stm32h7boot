@@ -101,7 +101,9 @@ SecondaryMcuUpdateService_Init(secondary_mcu_update_service_t *service,
         (dependencies->programmer == NULL) || (dependencies->programmer->begin == NULL) ||
         (dependencies->programmer->erase == NULL) || (dependencies->programmer->write == NULL) ||
         (dependencies->programmer->read == NULL) || (dependencies->programmer->end == NULL) ||
-        (dependencies->programmer->abort == NULL) || (dependencies->write_buffer == NULL) ||
+        (dependencies->programmer->abort == NULL) || (dependencies->hash == NULL) ||
+        (dependencies->hash->reset == NULL) || (dependencies->hash->update == NULL) ||
+        (dependencies->hash->finish == NULL) || (dependencies->write_buffer == NULL) ||
         (dependencies->readback_buffer == NULL) ||
         (dependencies->write_buffer == dependencies->readback_buffer) ||
         (dependencies->buffer_size < SECONDARY_MCU_UPDATE_SERVICE_MIN_BUFFER_SIZE))
@@ -116,6 +118,7 @@ SecondaryMcuUpdateService_Init(secondary_mcu_update_service_t *service,
     memset(service, 0, sizeof(*service));
     service->source          = dependencies->source;
     service->programmer      = dependencies->programmer;
+    service->hash            = dependencies->hash;
     service->write_buffer    = dependencies->write_buffer;
     service->readback_buffer = dependencies->readback_buffer;
     service->buffer_size     = dependencies->buffer_size;
@@ -140,7 +143,9 @@ firmware_status_t SecondaryMcuUpdateService_Start(struct secondary_mcu_update_se
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    if ((request->image_size_bytes == 0U) || (request->target_capacity_bytes == 0U) ||
+    if ((request->image_size_bytes == 0U) ||
+        (request->image_size_bytes > (512UL * 1024UL)) ||
+        (request->target_capacity_bytes == 0U) ||
         (request->image_size_bytes > request->target_capacity_bytes) ||
         (request->erase_page_count == 0U) ||
         (request->target_address > (UINT32_MAX - request->image_size_bytes)) ||
@@ -197,6 +202,59 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
                              BOOT_ERROR_SECONDARY_MCU_SOURCE);
                 break;
             }
+            implementation->source_offset = 0U;
+            implementation->stage = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_RESET;
+            break;
+
+        case SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_RESET:
+            status = implementation->hash->reset(implementation->hash->context);
+            if (!FirmwareStatus_IsOk(status))
+            {
+                BeginFailure(implementation, status, BOOT_ERROR_SECONDARY_MCU_SOURCE);
+                break;
+            }
+            implementation->source_offset = 0U;
+            implementation->stage = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_READ;
+            break;
+
+        case SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_READ:
+            remaining = implementation->request.image_size_bytes - implementation->source_offset;
+            if (remaining == 0U)
+            {
+                implementation->stage = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_FINISH;
+                break;
+            }
+            chunk = MinU32(remaining, implementation->buffer_size);
+            status = implementation->source->read(implementation->source->context,
+                                                  implementation->source_offset,
+                                                  implementation->write_buffer, chunk);
+            if (FirmwareStatus_IsOk(status))
+            {
+                status = implementation->hash->update(implementation->hash->context,
+                                                      implementation->write_buffer, chunk);
+            }
+            if (!FirmwareStatus_IsOk(status))
+            {
+                BeginFailure(implementation, status, BOOT_ERROR_SECONDARY_MCU_SOURCE);
+                break;
+            }
+            implementation->source_offset += chunk;
+            break;
+
+        case SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_FINISH:
+            status = implementation->hash->finish(implementation->hash->context,
+                                                  implementation->source_digest);
+            if (!FirmwareStatus_IsOk(status) ||
+                (memcmp(implementation->source_digest, implementation->request.sha256,
+                        FIRMWARE_SHA256_DIGEST_SIZE) != 0))
+            {
+                BeginFailure(implementation,
+                             FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
+                             BOOT_ERROR_SECONDARY_MCU_SOURCE);
+                break;
+            }
+            /* Hashing consumed the source stream; programming always restarts at byte zero. */
+            implementation->source_offset = 0U;
             implementation->stage = SECONDARY_MCU_UPDATE_STAGE_BEGIN;
             break;
 

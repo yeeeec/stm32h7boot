@@ -14,7 +14,9 @@ typedef enum
 {
     PACKAGE_FILE_MANIFEST = 0,
     PACKAGE_FILE_APP,
-    PACKAGE_FILE_GUI
+    PACKAGE_FILE_GUI,
+    /** Optional third-party MCU image reserved for serial programming. */
+    PACKAGE_FILE_THERAPY_APP
 } package_file_id_t;
 
 /** 查询介质是否存在，不取得已打开文件的 Ownership。 */
@@ -44,7 +46,7 @@ typedef firmware_status_t (*package_source_read_at_fn)(
     uint32_t *bytes_read);
 
 /**
- * @brief 对一个 Volume 中三个固定 Release 文件的只读访问。
+ * @brief 对一个 Volume 中固定 Release 文件的只读访问。
  *
  * 该接口有意不提供 pathname、exists 或 remove 操作。Provider 持有已挂载
  * Volume；调用者负责当前文件的 Open/Close 生命周期，并必须在卸载前成功 close。

@@ -1,9 +1,9 @@
 /**
  * @file update_service.c
- * @brief 固定 APP/GUI Runtime 的增量安装器。
+ * @brief 按请求选择安装 APP/GUI Runtime 的增量安装器。
  *
- * 安装遵循“先验证全部源文件、后首次擦除”的原则：Manifest、APP 和 GUI 都完成
- * 长度及 SHA-256 校验后，才允许修改外部 Flash。每个 Process 调用只推进一次
+ * 安装遵循“先验证全部选中源文件、后首次擦除”的原则：Manifest 和请求选择的
+ * APP/GUI 都完成长度及 SHA-256 校验后，才允许修改外部 Flash。每个 Process 调用只推进一次
  * 有界读写、哈希、异步轮询或状态转换，以便由 Application 主循环安全驱动。
  */
 #include "services/use_case/update_service.h"
@@ -463,11 +463,15 @@ static void ContinueAfterIndirectConfirmation(update_service_t *service)
     if (service->xip_check_before_runtime_mutation != 0)
     {
         service->xip_check_before_runtime_mutation = 0;
-        service->stage                             = UPDATE_STAGE_APP_ERASE;
+        service->stage = ((service->request.component_mask & UPDATE_COMPONENT_APP) != 0U)
+                             ? UPDATE_STAGE_APP_ERASE
+                             : UPDATE_STAGE_GUI_ERASE;
     }
     else
     {
-        service->stage = UPDATE_STAGE_SOURCE_APP_OPEN;
+        service->stage = ((service->request.component_mask & UPDATE_COMPONENT_APP) != 0U)
+                             ? UPDATE_STAGE_SOURCE_APP_OPEN
+                             : UPDATE_STAGE_SOURCE_GUI_OPEN;
     }
 }
 
@@ -712,6 +716,11 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service,
     }
     /* 复制请求和清空上次输出，防止上一次安装残留影响本次策略。 */
     implementation->request = *request;
+    if (implementation->request.component_mask == 0U)
+    {
+        /* Compatibility for in-process V1 callers predating explicit selection. */
+        implementation->request.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+    }
     memset(&implementation->manifest, 0, sizeof(implementation->manifest));
     memset(&implementation->candidate_record, 0, sizeof(implementation->candidate_record));
     implementation->manifest_ready                    = 0;
@@ -738,9 +747,12 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service,
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t UpdateService_InstallStart(struct update_service *service)
+firmware_status_t UpdateService_InstallStartWithRecord(
+    struct update_service *service,
+    const boot_active_record_t *current_record)
 {
     update_service_t *implementation = (update_service_t *) service;
+    uint32_t host_mask;
 
     if (implementation == NULL)
     {
@@ -752,6 +764,29 @@ firmware_status_t UpdateService_InstallStart(struct update_service *service)
         (implementation->stage != UPDATE_STAGE_PREPARED) || (implementation->manifest_ready == 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    host_mask = implementation->request.component_mask &
+                (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI);
+    if ((host_mask == 0U) ||
+        ((host_mask != (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI)) &&
+         (current_record == NULL)))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if (current_record != NULL)
+    {
+        implementation->base_record = *current_record;
+        if (implementation->base_record.component_mask == 0U)
+        {
+            implementation->base_record.component_mask =
+                UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+        }
+        implementation->base_record_valid = 1;
+    }
+    else
+    {
+        memset(&implementation->base_record, 0, sizeof(implementation->base_record));
+        implementation->base_record_valid = 0;
     }
     implementation->candidate_ready         = 0;
     implementation->runtime_may_be_modified = 0;
@@ -770,6 +805,11 @@ firmware_status_t UpdateService_InstallStart(struct update_service *service)
     implementation->stage                             = UPDATE_STAGE_XIP_CHECK_INDIRECT;
     implementation->state                             = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t UpdateService_InstallStart(struct update_service *service)
+{
+    return UpdateService_InstallStartWithRecord(service, NULL);
 }
 
 static void ProcessPrepare(update_service_t *service)
@@ -869,7 +909,7 @@ static void ProcessPrepare(update_service_t *service)
  * @brief 对 APP 或 GUI 源文件执行安装前的完整性预检。
  *
  * 同一状态机实现复用 APP/GUI 两种组件：先打开并确认精确长度，再流式计算摘要，
- * 校验通过后关闭文件。只有 GUI 也通过预检，流程才会进入 APP 首次擦除。
+ * 校验通过后关闭文件。所有被请求选择的组件通过预检后，流程才进入首次擦除。
  */
 static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
                               const manifest_app_component_t *component, uint32_t maximum_size,
@@ -965,10 +1005,12 @@ static void ProcessSourceHash(update_service_t *service, package_file_id_t file,
                 Fail(service, status, hash_error);
                 break;
             }
-            /* APP 校验完后继续预检 GUI；GUI 校验完后才允许破坏性操作。 */
-            service->stage = (file == PACKAGE_FILE_APP) ? UPDATE_STAGE_SOURCE_GUI_OPEN
-                                                        : UPDATE_STAGE_XIP_CHECK_INDIRECT;
-            if (file == PACKAGE_FILE_GUI)
+            /* 只预检请求选择的文件；最后一个源通过后才允许进入破坏性操作。 */
+            service->stage = ((file == PACKAGE_FILE_APP) &&
+                              ((service->request.component_mask & UPDATE_COMPONENT_GUI) != 0U))
+                                 ? UPDATE_STAGE_SOURCE_GUI_OPEN
+                                 : UPDATE_STAGE_XIP_CHECK_INDIRECT;
+            if (service->stage == UPDATE_STAGE_XIP_CHECK_INDIRECT)
             {
                 /* 预检可能持续较久，真正首个擦除前必须再次确认 XIP 后置状态。 */
                 service->xip_check_before_runtime_mutation = 1;
@@ -1188,11 +1230,8 @@ static void ProcessErase(update_service_t *service, int app)
             service->stage = next_stage;
             return;
         }
-        if (app != 0)
-        {
-            /* 从此刻起任何失败都可能留下不完整 APP Runtime，标志必须粘滞。 */
-            service->runtime_may_be_modified = 1;
-        }
+        /* 从此刻起任何失败都可能留下不完整 Runtime，标志必须粘滞。 */
+        service->runtime_may_be_modified = 1;
         status = StartErase(service, base, size, service->erase_offset);
         if (!FirmwareStatus_IsOk(status))
         {
@@ -1390,8 +1429,8 @@ static void ProcessProgram(update_service_t *service, int app)
 /**
  * @brief 分块回读 APP 或 GUI Runtime，并验证其最终 SHA-256。
  *
- * 此步骤验证的是实际写入 Flash 的字节，而非仍在 SD/eMMC 上的源文件；只有两个
- * 组件都通过回读校验，才能创建候选 Active Record。
+ * 此步骤验证的是实际写入 Flash 的字节，而非仍在 SD/eMMC 上的源文件；每个被选择
+ * 的组件都通过回读校验后，才能创建候选 Active Record。
  */
 static void ProcessTarget(update_service_t *service, int app)
 {
@@ -1445,8 +1484,11 @@ static void ProcessTarget(update_service_t *service, int app)
              hash_error);
         return;
     }
-    /* APP 验证后进入 GUI 擦除；GUI 验证后才生成候选控制记录。 */
-    service->stage        = app != 0 ? UPDATE_STAGE_GUI_ERASE : UPDATE_STAGE_BUILD_RECORD_CANDIDATE;
+    /* APP 验证后仅在 GUI 被选择时继续，否则直接生成候选记录。 */
+    service->stage = (app != 0) &&
+                             ((service->request.component_mask & UPDATE_COMPONENT_GUI) != 0U)
+                         ? UPDATE_STAGE_GUI_ERASE
+                         : UPDATE_STAGE_BUILD_RECORD_CANDIDATE;
     service->erase_offset = 0U;
 }
 
@@ -1559,24 +1601,53 @@ void UpdateService_Process(struct update_service *service)
     }
     if (implementation->stage == UPDATE_STAGE_BUILD_RECORD_CANDIDATE)
     {
-        /* 候选记录只复制已验证字段；真正的 EEPROM 原子提交由 Application 触发。 */
-        memset(&implementation->candidate_record, 0, sizeof(implementation->candidate_record));
-        implementation->candidate_record.format_version  = BOOT_ACTIVE_RECORD_FORMAT_V2;
+        uint32_t selected = implementation->request.component_mask;
+
+        /* 以当前记录为基底，只覆盖本次确实安装并回读校验通过的组件。 */
+        if (implementation->base_record_valid != 0)
+        {
+            implementation->candidate_record = implementation->base_record;
+        }
+        else
+        {
+            memset(&implementation->candidate_record, 0,
+                   sizeof(implementation->candidate_record));
+        }
+        implementation->candidate_record.component_mask |=
+            selected & (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI);
+        if ((implementation->candidate_record.component_mask &
+             (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI)) == 0U)
+        {
+            implementation->candidate_record.component_mask =
+                UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+        }
+        implementation->candidate_record.format_version =
+            ((implementation->candidate_record.component_mask & UPDATE_COMPONENT_THERAPY) != 0U)
+                ? BOOT_ACTIVE_RECORD_FORMAT_V3
+                : BOOT_ACTIVE_RECORD_FORMAT_V2;
         implementation->candidate_record.state           = BOOT_ACTIVE_RECORD_STATE_VALID;
         implementation->candidate_record.release_version = implementation->manifest.release_version;
         implementation->candidate_record.build_number    = implementation->manifest.build_number;
-        implementation->candidate_record.app_size        = implementation->manifest.app.size_bytes;
-        implementation->candidate_record.gui_size        = implementation->manifest.gui.size_bytes;
         memcpy(implementation->candidate_record.package_id_hash,
                implementation->manifest.package_id_hash128,
                sizeof(implementation->candidate_record.package_id_hash));
         memcpy(implementation->candidate_record.manifest_sha256,
                implementation->manifest.manifest_sha256,
                sizeof(implementation->candidate_record.manifest_sha256));
-        memcpy(implementation->candidate_record.app_sha256, implementation->manifest.app.sha256,
-               sizeof(implementation->candidate_record.app_sha256));
-        memcpy(implementation->candidate_record.gui_sha256, implementation->manifest.gui.sha256,
-               sizeof(implementation->candidate_record.gui_sha256));
+        if ((selected & UPDATE_COMPONENT_APP) != 0U)
+        {
+            implementation->candidate_record.app_size = implementation->manifest.app.size_bytes;
+            memcpy(implementation->candidate_record.app_sha256,
+                   implementation->manifest.app.sha256,
+                   sizeof(implementation->candidate_record.app_sha256));
+        }
+        if ((selected & UPDATE_COMPONENT_GUI) != 0U)
+        {
+            implementation->candidate_record.gui_size = implementation->manifest.gui.size_bytes;
+            memcpy(implementation->candidate_record.gui_sha256,
+                   implementation->manifest.gui.sha256,
+                   sizeof(implementation->candidate_record.gui_sha256));
+        }
         /* Install 成功并不代表激活完成，等待 BootControlService 的后续提交。 */
         implementation->candidate_ready = 1;
         implementation->state           = SERVICE_RUN_STATE_SUCCEEDED;
@@ -1663,7 +1734,7 @@ const boot_active_record_t *UpdateService_GetCandidate(const struct update_servi
 {
     const update_service_t *implementation = (const update_service_t *) service;
 
-    /* 只有 APP 与 GUI 目标回读均成功后，候选记录才可交给 EEPROM 提交服务。 */
+    /* 只有所有选中 Runtime 目标回读均成功后，候选记录才可交给 EEPROM 提交服务。 */
     return (implementation == NULL) || (implementation->candidate_ready == 0)
                ? NULL
                : &implementation->candidate_record;

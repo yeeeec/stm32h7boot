@@ -79,6 +79,26 @@ endif()
 add_test(NAME secondary_mcu_update_service_test
          COMMAND secondary_mcu_update_service_test)
 
+add_executable(package_image_source_adapter_test
+    package_image_source_adapter_test.c
+    ../../Adapters/src/package_image_source_adapter.c
+)
+
+target_include_directories(package_image_source_adapter_test PRIVATE
+    ../../Adapters/include
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(package_image_source_adapter_test PRIVATE
+        -Wall -Wextra -Werror
+    )
+endif()
+
+add_test(NAME package_image_source_adapter_test
+         COMMAND package_image_source_adapter_test)
+
 add_executable(stm32_rom_boot_programmer_adapter_test
     stm32_rom_boot_programmer_adapter_test.c
     ../../Adapters/src/stm32_rom_boot_programmer_adapter.c
@@ -503,6 +523,8 @@ endfunction()
 
 add_application_formal_test(application_invalid_request_test TEST_INVALID_REQUEST=1)
 add_application_formal_test(application_version_reject_test TEST_VERSION_REJECT=1)
+add_application_formal_test(application_therapy_only_test TEST_THERAPY_ONLY=1)
+add_application_formal_test(application_therapy_downgrade_test TEST_THERAPY_DOWNGRADE=1)
 add_application_formal_test(application_stale_valid_test TEST_STALE_VALID=1)
 add_application_formal_test(application_stale_invalid_test TEST_STALE_INVALID=1)
 add_application_formal_test(application_commit_failure_test TEST_COMMIT_FAILURE=1)

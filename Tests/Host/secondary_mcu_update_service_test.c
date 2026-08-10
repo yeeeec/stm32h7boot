@@ -37,6 +37,48 @@ typedef struct
     int corrupt_readback;
 } programmer_fixture_t;
 
+typedef struct
+{
+    uint32_t value;
+} hash_fixture_t;
+
+static firmware_status_t HashReset(void *context)
+{
+    ((hash_fixture_t *)context)->value = 2166136261UL;
+    return FIRMWARE_STATUS_OK;
+}
+
+static firmware_status_t HashUpdate(void *context, const void *data, size_t size)
+{
+    hash_fixture_t *hash = (hash_fixture_t *)context;
+    const uint8_t *bytes = (const uint8_t *)data;
+
+    while (size-- != 0U)
+    {
+        hash->value = (hash->value ^ *bytes++) * 16777619UL;
+    }
+    return FIRMWARE_STATUS_OK;
+}
+
+static firmware_status_t HashFinish(void *context,
+                                    uint8_t digest[FIRMWARE_SHA256_DIGEST_SIZE])
+{
+    const hash_fixture_t *hash = (const hash_fixture_t *)context;
+    uint32_t index;
+
+    for (index = 0U; index < FIRMWARE_SHA256_DIGEST_SIZE; ++index)
+    {
+        digest[index] = (uint8_t)(hash->value >> ((index & 3U) * 8U));
+    }
+    return FIRMWARE_STATUS_OK;
+}
+
+static hash_provider_t MakeHash(hash_fixture_t *fixture)
+{
+    hash_provider_t hash = {fixture, HashReset, HashUpdate, HashFinish};
+    return hash;
+}
+
 static firmware_status_t SourceGetInfo(
     void *context,
     firmware_image_info_t *info)
@@ -237,7 +279,19 @@ static secondary_mcu_update_request_t DefaultRequest(void)
         0U,
         5U,
         IMAGE_SIZE,
+        {0U},
     };
+    hash_fixture_t hash;
+    uint8_t bytes[IMAGE_SIZE];
+    uint32_t index;
+
+    for (index = 0U; index < IMAGE_SIZE; ++index)
+    {
+        bytes[index] = (uint8_t)(index * 13U + 7U);
+    }
+    (void)HashReset(&hash);
+    (void)HashUpdate(&hash, bytes, sizeof(bytes));
+    (void)HashFinish(&hash, request.sha256);
     return request;
 }
 
@@ -252,10 +306,13 @@ static void TestInstallAndReadback(void)
     uint8_t readback_buffer[256];
     secondary_mcu_update_service_dependencies_t dependencies;
     secondary_mcu_update_request_t request;
+    hash_fixture_t hash_fixture;
+    hash_provider_t hash = MakeHash(&hash_fixture);
 
     FillFixture(&source, &programmer, &image, &target);
     dependencies.source = &image;
     dependencies.programmer = &target;
+    dependencies.hash = &hash;
     dependencies.write_buffer = write_buffer;
     dependencies.readback_buffer = readback_buffer;
     dependencies.buffer_size = sizeof(write_buffer);
@@ -287,15 +344,18 @@ static void TestReadbackFailureAborts(void)
     uint8_t write_buffer[256];
     uint8_t readback_buffer[256];
     secondary_mcu_update_service_dependencies_t dependencies;
+    hash_fixture_t hash_fixture;
+    hash_provider_t hash = MakeHash(&hash_fixture);
 
     FillFixture(&source, &programmer, &image, &target);
     programmer.corrupt_readback = 1;
     dependencies = (secondary_mcu_update_service_dependencies_t) {
-        &image,
-        &target,
-        write_buffer,
-        readback_buffer,
-        sizeof(write_buffer),
+        .source = &image,
+        .programmer = &target,
+        .hash = &hash,
+        .write_buffer = write_buffer,
+        .readback_buffer = readback_buffer,
+        .buffer_size = sizeof(write_buffer),
     };
     assert(SecondaryMcuUpdateService_Init(&service, &dependencies) ==
            FIRMWARE_STATUS_OK);
@@ -324,14 +384,17 @@ static void TestSourceSizeMismatch(void)
     uint8_t readback_buffer[256];
     secondary_mcu_update_service_dependencies_t dependencies;
     secondary_mcu_update_request_t request;
+    hash_fixture_t hash_fixture;
+    hash_provider_t hash = MakeHash(&hash_fixture);
 
     FillFixture(&source, &programmer, &image, &target);
     dependencies = (secondary_mcu_update_service_dependencies_t) {
-        &image,
-        &target,
-        write_buffer,
-        readback_buffer,
-        sizeof(write_buffer),
+        .source = &image,
+        .programmer = &target,
+        .hash = &hash,
+        .write_buffer = write_buffer,
+        .readback_buffer = readback_buffer,
+        .buffer_size = sizeof(write_buffer),
     };
     request = DefaultRequest();
     request.image_size_bytes = IMAGE_SIZE - 1U;
@@ -347,6 +410,43 @@ static void TestSourceSizeMismatch(void)
     assert(programmer.begin_count == 0U);
 }
 
+static void TestSourceHashMismatchBeforeErase(void)
+{
+    source_fixture_t source;
+    programmer_fixture_t programmer;
+    firmware_image_source_t image = {0};
+    mcu_programmer_t target = {0};
+    secondary_mcu_update_service_t service = {0};
+    uint8_t write_buffer[256];
+    uint8_t readback_buffer[256];
+    hash_fixture_t hash_fixture;
+    hash_provider_t hash = MakeHash(&hash_fixture);
+    secondary_mcu_update_service_dependencies_t dependencies = {
+        .source = &image,
+        .programmer = &target,
+        .hash = &hash,
+        .write_buffer = write_buffer,
+        .readback_buffer = readback_buffer,
+        .buffer_size = sizeof(write_buffer),
+    };
+    secondary_mcu_update_request_t request = DefaultRequest();
+
+    FillFixture(&source, &programmer, &image, &target);
+    request.sha256[0] ^= 0x01U;
+    assert(SecondaryMcuUpdateService_Init(&service, &dependencies) ==
+           FIRMWARE_STATUS_OK);
+    assert(SecondaryMcuUpdateService_Start(&service, &request) ==
+           FIRMWARE_STATUS_OK);
+    RunToTerminal(&service);
+    assert(SecondaryMcuUpdateService_GetState(&service) ==
+           SERVICE_RUN_STATE_FAILED);
+    assert(SecondaryMcuUpdateService_GetResult(&service)->error ==
+           BOOT_ERROR_SECONDARY_MCU_SOURCE);
+    assert(programmer.begin_count == 0U);
+    assert(programmer.erase_count == 0U);
+    assert(SecondaryMcuUpdateService_TargetMayBeModified(&service) == 0);
+}
+
 static void TestCancelBeforeBegin(void)
 {
     source_fixture_t source;
@@ -358,14 +458,17 @@ static void TestCancelBeforeBegin(void)
     uint8_t readback_buffer[256];
     secondary_mcu_update_service_dependencies_t dependencies;
     secondary_mcu_update_request_t request;
+    hash_fixture_t hash_fixture;
+    hash_provider_t hash = MakeHash(&hash_fixture);
 
     FillFixture(&source, &programmer, &image, &target);
     dependencies = (secondary_mcu_update_service_dependencies_t) {
-        &image,
-        &target,
-        write_buffer,
-        readback_buffer,
-        sizeof(write_buffer),
+        .source = &image,
+        .programmer = &target,
+        .hash = &hash,
+        .write_buffer = write_buffer,
+        .readback_buffer = readback_buffer,
+        .buffer_size = sizeof(write_buffer),
     };
     request = DefaultRequest();
     assert(SecondaryMcuUpdateService_Init(&service, &dependencies) ==
@@ -383,6 +486,7 @@ int main(void)
     TestInstallAndReadback();
     TestReadbackFailureAborts();
     TestSourceSizeMismatch();
+    TestSourceHashMismatchBeforeErase();
     TestCancelBeforeBegin();
     return 0;
 }

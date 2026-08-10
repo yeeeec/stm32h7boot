@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include "firmware/image_source.h"
+#include "firmware/hash.h"
 #include "firmware/mcu_programmer.h"
 #include "services/use_case/secondary_mcu_update_service_api.h"
 
@@ -21,6 +22,8 @@ typedef struct
     const firmware_image_source_t *source;
     /** 已绑定 BSP/Adapter 的目标 MCU 编程器。 */
     const mcu_programmer_t *programmer;
+    /** 用于安装前源镜像完整性校验的 SHA-256 Provider。 */
+    const hash_provider_t *hash;
     /** 保存 Source 原文的一块工作缓冲区。 */
     uint8_t *write_buffer;
     /** 保存目标回读数据的一块工作缓冲区。 */
@@ -34,6 +37,9 @@ typedef enum
 {
     SECONDARY_MCU_UPDATE_STAGE_IDLE = 0,
     SECONDARY_MCU_UPDATE_STAGE_SOURCE_INFO,
+    SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_RESET,
+    SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_READ,
+    SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_FINISH,
     SECONDARY_MCU_UPDATE_STAGE_BEGIN,
     SECONDARY_MCU_UPDATE_STAGE_ERASE,
     SECONDARY_MCU_UPDATE_STAGE_READ_SOURCE,
@@ -48,6 +54,7 @@ typedef struct secondary_mcu_update_service
 {
     const firmware_image_source_t *source;
     const mcu_programmer_t *programmer;
+    const hash_provider_t *hash;
     uint8_t *write_buffer;
     uint8_t *readback_buffer;
     uint32_t buffer_size;
@@ -61,6 +68,7 @@ typedef struct secondary_mcu_update_service
     firmware_status_t failure_status;
     boot_error_t failure_error;
     uint32_t source_offset;
+    uint8_t source_digest[FIRMWARE_SHA256_DIGEST_SIZE];
     uint32_t erase_page_offset;
     uint32_t pending_size;
     int session_active;

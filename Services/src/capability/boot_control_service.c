@@ -18,7 +18,7 @@
 #define ACTIVE_RECORD_A_ADDRESS  0x0000U
 /** EEPROM 中 B 槽位的固定起始地址，与 A 槽位保持一个完整记录间隔。 */
 #define ACTIVE_RECORD_B_ADDRESS  0x0100U
-/** Active Record V2 的固定序列化字节数。 */
+/** Active Record V2/V3 的固定序列化字节数。 */
 #define ACTIVE_RECORD_SIZE       BOOT_ACTIVE_RECORD_SIZE
 /** CRC 覆盖区之后存放 CRC-32 的记录内偏移。 */
 #define ACTIVE_RECORD_CRC_OFFSET 0x00F8U
@@ -33,8 +33,10 @@
 #define INVALID_MARKER       0xFFFFFFFFUL
 /** 历史 V1 记录格式，仅用于明确拒绝而不进行兼容解释。 */
 #define RECORD_FORMAT_V1     1U
-/** 当前可读写的 Active Record V2 格式版本。 */
+/** 兼容读取的 Active Record V2 格式版本。 */
 #define RECORD_FORMAT_V2     BOOT_ACTIVE_RECORD_FORMAT_V2
+/** 保存 Therapy MCU 元数据的 Active Record V3。 */
+#define RECORD_FORMAT_V3     BOOT_ACTIVE_RECORD_FORMAT_V3
 /** V2 记录中表示已激活的 state 字节值。 */
 #define ACTIVE_VALID_STATE   1U
 /** A/B 均不可用时的内部槽位选择结果。 */
@@ -228,7 +230,7 @@ static int IsRecordUnavailable(firmware_status_t status)
  * 校验并反序列化一份 Active Record V2 缓冲区。
  *
  * 校验顺序为 magic、版本、长度、状态、保留字节、提交 marker、未使用填充值、CRC
- * 以及运行时 APP/GUI 分区大小。V1 的字段语义与 V2 不兼容，明确返回不支持而不是
+ * 以及运行时 APP/GUI 分区大小。V1 的字段语义与 V2/V3 不兼容，明确返回不支持而不是
  * 冒险按 V2 解释。所有检查通过后才填充 record。
  *
  * @param service 已初始化的服务，用于 CRC 和运行时布局检查。
@@ -242,6 +244,7 @@ static firmware_status_t ValidateActiveBuffer(boot_control_service_t *service,
     uint32_t expected_crc;
     uint32_t actual_crc;
     uint32_t index;
+    uint16_t format;
     firmware_status_t status;
     const boot_runtime_layout_t *layout = BootRuntimeLayout_Get();
 
@@ -254,17 +257,44 @@ static firmware_status_t ValidateActiveBuffer(boot_control_service_t *service,
         /* V1 的槽位身份和 CRC 字段语义不同，绝不可按 V2 重解释。 */
         return FIRMWARE_STATUS_NOT_SUPPORTED;
     }
-    if ((ReadU16(&buffer[0x04U]) != RECORD_FORMAT_V2) ||
+    format = ReadU16(&buffer[0x04U]);
+    if (((format != RECORD_FORMAT_V2) && (format != RECORD_FORMAT_V3)) ||
         (ReadU16(&buffer[0x06U]) != ACTIVE_RECORD_SIZE) || (buffer[0x0CU] != ACTIVE_VALID_STATE) ||
         (ReadU16(&buffer[0x0EU]) != 0U) || (ReadU16(&buffer[0x16U]) != 0U) ||
         (ReadU32(&buffer[ACTIVE_RECORD_MARKER]) != COMMIT_MARKER))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    for (index = 0x94U; index < ACTIVE_RECORD_CRC_OFFSET; ++index)
+    if (format == RECORD_FORMAT_V2)
     {
-        /* 保留区域必须保持擦除态，防止未知扩展字段绕过当前 schema。 */
-        if (buffer[index] != 0xFFU)
+        for (index = 0x94U; index < ACTIVE_RECORD_CRC_OFFSET; ++index)
+        {
+            /* V2 保留区域必须保持擦除态，防止未知字段绕过当前 schema。 */
+            if (buffer[index] != 0xFFU)
+            {
+                return FIRMWARE_STATUS_INVALID_STATE;
+            }
+        }
+    }
+    else
+    {
+        for (index = 0x95U; index < 0x98U; ++index)
+        {
+            if (buffer[index] != 0xFFU)
+            {
+                return FIRMWARE_STATUS_INVALID_STATE;
+            }
+        }
+        for (index = 0xC4U; index < ACTIVE_RECORD_CRC_OFFSET; ++index)
+        {
+            if (buffer[index] != 0xFFU)
+            {
+                return FIRMWARE_STATUS_INVALID_STATE;
+            }
+        }
+        if ((buffer[0x94U] != UPDATE_COMPONENT_ALL) || (ReadU16(&buffer[0xA2U]) != 0U) ||
+            (ReadU32(&buffer[0x98U]) == 0U) ||
+            (ReadU32(&buffer[0x98U]) > BOOT_CONTROL_THERAPY_MAX_SIZE))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
@@ -281,7 +311,8 @@ static firmware_status_t ValidateActiveBuffer(boot_control_service_t *service,
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    record->format_version        = ReadU16(&buffer[0x04U]);
+    memset(record, 0, sizeof(*record));
+    record->format_version        = format;
     record->sequence              = ReadU32(&buffer[0x08U]);
     record->state                 = buffer[0x0CU];
     record->flags                 = buffer[0x0DU];
@@ -300,6 +331,16 @@ static firmware_status_t ValidateActiveBuffer(boot_control_service_t *service,
     memcpy(record->manifest_sha256, &buffer[0x34U], BOOT_CONTROL_MANIFEST_HASH_SIZE);
     memcpy(record->app_sha256, &buffer[0x54U], BOOT_CONTROL_IMAGE_HASH_SIZE);
     memcpy(record->gui_sha256, &buffer[0x74U], BOOT_CONTROL_IMAGE_HASH_SIZE);
+    record->component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+    if (format == RECORD_FORMAT_V3)
+    {
+        record->component_mask          = buffer[0x94U];
+        record->therapy_size            = ReadU32(&buffer[0x98U]);
+        record->therapy_version.major   = ReadU16(&buffer[0x9CU]);
+        record->therapy_version.minor   = ReadU16(&buffer[0x9EU]);
+        record->therapy_version.patch   = ReadU16(&buffer[0xA0U]);
+        memcpy(record->therapy_sha256, &buffer[0xA4U], BOOT_CONTROL_IMAGE_HASH_SIZE);
+    }
     return FIRMWARE_STATUS_OK;
 }
 
@@ -422,7 +463,7 @@ static firmware_status_t ReadAndSelect(boot_control_service_t *service, int *sel
 }
 
 /**
- * 将内存中的 Active Record 编码为待提交的 V2 EEPROM 镜像。
+ * 将内存中的 Active Record 编码为待提交的 V2/V3 EEPROM 镜像。
  *
  * 正文先填充为擦除态，再写入固定字段、摘要和 CRC。提交 marker 刻意保持无效；只有
  * Process 状态机在完成正文回读验证后才会写入有效 marker。
@@ -436,11 +477,18 @@ static firmware_status_t EncodeActive(boot_control_service_t *service,
                                       const boot_active_record_t *record, uint32_t sequence)
 {
     uint32_t crc;
+    uint16_t format;
     const boot_runtime_layout_t *layout = BootRuntimeLayout_Get();
     firmware_status_t status;
 
-    if ((record->format_version != 0U) &&
-        (record->format_version != RECORD_FORMAT_V2))
+    format = record->format_version;
+    if (format == 0U)
+    {
+        format = ((record->component_mask & UPDATE_COMPONENT_THERAPY) != 0U)
+                     ? RECORD_FORMAT_V3
+                     : RECORD_FORMAT_V2;
+    }
+    if ((format != RECORD_FORMAT_V2) && (format != RECORD_FORMAT_V3))
     {
         return FIRMWARE_STATUS_NOT_SUPPORTED;
     }
@@ -453,10 +501,16 @@ static firmware_status_t EncodeActive(boot_control_service_t *service,
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
+    if ((format == RECORD_FORMAT_V3) &&
+        ((record->component_mask != UPDATE_COMPONENT_ALL) || (record->therapy_size == 0U) ||
+         (record->therapy_size > BOOT_CONTROL_THERAPY_MAX_SIZE)))
+    {
+        return FIRMWARE_STATUS_OUT_OF_RANGE;
+    }
 
     memset(service->write_buffer, 0xFF, ACTIVE_RECORD_SIZE);
     WriteU32(&service->write_buffer[0x00U], ACTIVE_RECORD_MAGIC);
-    WriteU16(&service->write_buffer[0x04U], RECORD_FORMAT_V2);
+    WriteU16(&service->write_buffer[0x04U], format);
     WriteU16(&service->write_buffer[0x06U], ACTIVE_RECORD_SIZE);
     WriteU32(&service->write_buffer[0x08U], sequence);
     service->write_buffer[0x0CU] = ACTIVE_VALID_STATE;
@@ -474,6 +528,17 @@ static firmware_status_t EncodeActive(boot_control_service_t *service,
     memcpy(&service->write_buffer[0x34U], record->manifest_sha256, BOOT_CONTROL_MANIFEST_HASH_SIZE);
     memcpy(&service->write_buffer[0x54U], record->app_sha256, BOOT_CONTROL_IMAGE_HASH_SIZE);
     memcpy(&service->write_buffer[0x74U], record->gui_sha256, BOOT_CONTROL_IMAGE_HASH_SIZE);
+    if (format == RECORD_FORMAT_V3)
+    {
+        service->write_buffer[0x94U] = (uint8_t)record->component_mask;
+        WriteU32(&service->write_buffer[0x98U], record->therapy_size);
+        WriteU16(&service->write_buffer[0x9CU], record->therapy_version.major);
+        WriteU16(&service->write_buffer[0x9EU], record->therapy_version.minor);
+        WriteU16(&service->write_buffer[0xA0U], record->therapy_version.patch);
+        WriteU16(&service->write_buffer[0xA2U], 0U);
+        memcpy(&service->write_buffer[0xA4U], record->therapy_sha256,
+               BOOT_CONTROL_IMAGE_HASH_SIZE);
+    }
     status = CalculateCrc(service, service->write_buffer, ACTIVE_RECORD_CRC_OFFSET, &crc);
     if (!FirmwareStatus_IsOk(status))
     {

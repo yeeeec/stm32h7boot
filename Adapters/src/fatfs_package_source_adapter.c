@@ -118,6 +118,8 @@ static const char *PackageFilePath(package_file_id_t file)
             return "/firmware/hmi.app.bin";
         case PACKAGE_FILE_GUI:
             return "/firmware/hmi.gui.bin";
+        case PACKAGE_FILE_THERAPY_APP:
+            return "/firmware/therapy.app.bin";
         default:
             return NULL;
     }

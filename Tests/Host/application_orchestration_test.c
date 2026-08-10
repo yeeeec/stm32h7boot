@@ -17,14 +17,17 @@ struct update_service { int unused; };
 struct active_validation_service { int unused; };
 struct launch_service { int unused; };
 struct update_request_service { int unused; };
+struct secondary_mcu_update_service { int unused; };
 
 static struct boot_control_service boot_control;
 static struct update_service update;
 static struct active_validation_service validation;
 static struct launch_service launch;
 static struct update_request_service request_parser;
+static struct secondary_mcu_update_service secondary_update;
 static boot_active_record_t active_record;
 static boot_active_record_t candidate_record;
+static boot_active_record_t committed_record;
 static validated_manifest_t manifest;
 static service_result_t update_result;
 static service_run_state_t update_state;
@@ -52,6 +55,8 @@ static uint32_t validation_count;
 static uint32_t launch_count;
 static uint32_t reset_count;
 static uint32_t recovery_count;
+static uint32_t secondary_start_count;
+static service_run_state_t secondary_state;
 static jmp_buf reset_jump;
 
 static firmware_status_t SourcePresent(void *context, int *present)
@@ -166,6 +171,11 @@ firmware_status_t UpdateRequestService_ParseAndValidate(
     memset(request, 0, sizeof(*request));
     request->format_version = UPDATE_REQUEST_FORMAT_VERSION;
     request->requested = 1U;
+#if defined(TEST_THERAPY_ONLY) || defined(TEST_THERAPY_DOWNGRADE)
+    request->component_mask = UPDATE_COMPONENT_THERAPY;
+#else
+    request->component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+#endif
     (void)strcpy(request->package_id, "test-package");
     return FIRMWARE_STATUS_OK;
 }
@@ -187,7 +197,7 @@ firmware_status_t BootControlService_CommitActiveStart(
     struct boot_control_service *service, const boot_active_record_t *record)
 {
     (void)service;
-    (void)record;
+    committed_record = *record;
     ++commit_count;
     if (commit_status != FIRMWARE_STATUS_OK)
     {
@@ -239,6 +249,13 @@ firmware_status_t UpdateService_InstallStart(struct update_service *service)
     runtime_modified = 0;
     update_state = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t UpdateService_InstallStartWithRecord(
+    struct update_service *service, const boot_active_record_t *record)
+{
+    (void)record;
+    return UpdateService_InstallStart(service);
 }
 
 void UpdateService_Process(struct update_service *service)
@@ -306,6 +323,37 @@ int UpdateService_RuntimeMayBeModified(const struct update_service *service)
 {
     (void)service;
     return runtime_modified;
+}
+
+firmware_status_t SecondaryMcuUpdateService_Start(
+    struct secondary_mcu_update_service *service,
+    const secondary_mcu_update_request_t *request)
+{
+    (void)service;
+    assert(request != NULL);
+    ++secondary_start_count;
+    secondary_state = SERVICE_RUN_STATE_RUNNING;
+    return FIRMWARE_STATUS_OK;
+}
+
+void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *service)
+{
+    (void)service;
+    secondary_state = SERVICE_RUN_STATE_SUCCEEDED;
+}
+
+service_run_state_t SecondaryMcuUpdateService_GetState(
+    const struct secondary_mcu_update_service *service)
+{
+    (void)service;
+    return secondary_state;
+}
+
+int SecondaryMcuUpdateService_TargetMayBeModified(
+    const struct secondary_mcu_update_service *service)
+{
+    (void)service;
+    return 0;
 }
 
 firmware_status_t ActiveValidationService_Start(struct active_validation_service *service,
@@ -384,15 +432,27 @@ int main(void)
     reset.request = Reset;
     manifest.minimum_bootloader_version.major = 1U;
     manifest.release_version.major = 2U;
+    manifest.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+    manifest.app.size_bytes = 1U;
+    manifest.gui.size_bytes = 1U;
+    manifest.therapy.size_bytes = 1U;
+    manifest.therapy.sha256[0] = 0x5AU;
 #if !defined(TEST_INITIAL_INSTALL) || defined(TEST_MEDIA_REMOVAL)
     active_record.release_version.major = 1U;
     active_record.app_size = 1U;
     active_record.gui_size = 1U;
+    active_record.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
     active_record.package_id_hash[0] = 0xA5U;
 #endif
 #if defined(TEST_STALE_VALID) || defined(TEST_STALE_INVALID)
     memset(active_record.package_id_hash, 0, sizeof(active_record.package_id_hash));
     memset(active_record.manifest_sha256, 0, sizeof(active_record.manifest_sha256));
+#endif
+#if defined(TEST_THERAPY_DOWNGRADE)
+    active_record.format_version = BOOT_ACTIVE_RECORD_FORMAT_V3;
+    active_record.component_mask = UPDATE_COMPONENT_ALL;
+    active_record.therapy_size = 1U;
+    active_record.therapy_version.major = 3U;
 #endif
 
 #if defined(TEST_MEDIA_REMOVAL)
@@ -428,6 +488,12 @@ int main(void)
     dependencies.update = &update;
     dependencies.validation = &validation;
     dependencies.launch = &launch;
+#if defined(TEST_THERAPY_ONLY) || defined(TEST_THERAPY_DOWNGRADE)
+    dependencies.secondary_mcu_update = &secondary_update;
+    dependencies.secondary_mcu_target.target_address = 0x08000000UL;
+    dependencies.secondary_mcu_target.target_capacity_bytes = MANIFEST_THERAPY_MAX_SIZE;
+    dependencies.secondary_mcu_target.erase_page_count = 4U;
+#endif
     dependencies.package_source = &source;
     dependencies.update_request_store = &store;
     dependencies.update_request_service = &request_parser;
@@ -472,11 +538,27 @@ int main(void)
     assert(install_count == 0U);
     assert(commit_count == 0U);
     assert(launch_count == 1U);
-#elif defined(TEST_INVALID_REQUEST) || defined(TEST_VERSION_REJECT)
+#elif defined(TEST_INVALID_REQUEST) || defined(TEST_VERSION_REJECT) || \
+    defined(TEST_THERAPY_DOWNGRADE)
     assert(install_count == 0U);
     assert(commit_count == 0U);
     assert(clear_count == 0U);
     assert(launch_count == 1U);
+#if defined(TEST_THERAPY_DOWNGRADE)
+    assert(secondary_start_count == 0U);
+#endif
+#elif defined(TEST_THERAPY_ONLY)
+    assert(install_count == 0U);
+    assert(secondary_start_count == 1U);
+    assert(commit_count == 1U);
+    assert(committed_record.format_version == BOOT_ACTIVE_RECORD_FORMAT_V3);
+    assert(committed_record.component_mask == UPDATE_COMPONENT_ALL);
+    assert(committed_record.therapy_size == manifest.therapy.size_bytes);
+    assert(committed_record.therapy_version.major == manifest.release_version.major);
+    assert(memcmp(committed_record.therapy_sha256, manifest.therapy.sha256,
+                  sizeof(committed_record.therapy_sha256)) == 0);
+    assert(clear_count == 1U);
+    assert(reset_count == 1U);
 #elif defined(TEST_STALE_VALID)
     assert(install_count == 0U);
     assert(commit_count == 0U);

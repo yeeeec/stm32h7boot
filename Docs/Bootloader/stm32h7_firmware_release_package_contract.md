@@ -16,8 +16,12 @@
 └── firmware/
     ├── manifest.json
     ├── hmi.app.bin
-    └── hmi.gui.bin
+    ├── hmi.gui.bin
+    └── therapy.app.bin
 ```
+
+三个 payload 都是可选的，但每个包至少包含一个被请求选择的组件。
+`therapy.app.bin` 是供第三方 MCU 串口升级使用的无头 RAW 镜像；打包工具暂不负责生成它。
 
 规则：
 
@@ -151,7 +155,7 @@ Post-build 工具必须：
 
 ## 6. Manifest 最小 Schema
 
-推荐 V1：
+推荐 V1（`components` 可包含 APP、GUI、therapy 的任意非空子集）：
 
 ```json
 {
@@ -180,6 +184,12 @@ Post-build 工具必须：
       "format": "raw-bin-v1",
       "size": 4194304,
       "sha256": "..."
+    },
+    "therapy": {
+      "file": "therapy.app.bin",
+      "format": "raw-bin-v1",
+      "size": 262144,
+      "sha256": "..."
     }
   }
 }
@@ -190,7 +200,11 @@ Bootloader 固定识别：
 ```text
 components.app.file == "hmi.app.bin"
 components.gui.file == "hmi.gui.bin"
+components.therapy.file == "therapy.app.bin"
 ```
+
+therapy payload 最大 512 KiB，版本使用 Manifest 的 `release` 三元组，升级时不得低于
+已持久化的 therapy 版本；不执行额外兼容性策略。
 
 Manifest 不提供：
 
@@ -234,6 +248,7 @@ jump address
   "format_version": 1,
   "requested": true,
   "package_id": "hmi-1.2.3-20260807",
+  "component_mask": 5,
   "manifest_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }
 ```
@@ -243,6 +258,8 @@ jump address
 - `format_version == 1`；
 - `requested == true`；
 - `package_id` 长度、字符集有固定上限；
+- `component_mask` 必须为 `1..7` 的非零位掩码：APP=`1`、GUI=`2`、therapy=`4`；
+- 省略 `component_mask` 的历史 V1 请求按 APP+GUI（掩码 `3`）解释；
 - `manifest_sha256` 必须为 64 个小写 hex；
 - 不允许未知字段；
 - 不允许目标地址；
@@ -315,11 +332,11 @@ mount
 -> strict parse Manifest
 -> compare package_id
 -> policy checks
--> verify complete APP SHA256
--> verify complete GUI SHA256
--> install
--> readback verify APP SHA256
--> readback verify GUI SHA256
+-> policy checks for each selected component
+-> verify complete SHA256 for each selected source
+-> install selected APP/GUI components
+-> readback verify selected APP/GUI components
+-> hash-check and serial-program selected therapy image
 -> commit Active Record
 -> clear request
 -> unmount
@@ -357,7 +374,7 @@ request clear 前掉电
 
 ## 13. Source Integrity
 
-APP/GUI 必须使用 SHA-256。
+APP/GUI/therapy 必须使用 SHA-256。
 
 第一次 Runtime 擦除前必须验证完整文件，而不是边读边写后才发现末尾损坏。
 
@@ -422,8 +439,7 @@ Manifest 最大长度应有固定上限，例如 16 KiB；具体 token workspace
 只能在：
 
 ```text
-APP target verified
-AND GUI target verified
+all selected targets verified
 AND Active Record atomic commit succeeded
 ```
 

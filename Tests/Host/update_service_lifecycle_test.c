@@ -138,7 +138,7 @@ static firmware_status_t SourceOpen(void *context, package_file_id_t file)
     {
         return FIRMWARE_STATUS_IO_ERROR;
     }
-    if ((file < PACKAGE_FILE_MANIFEST) || (file > PACKAGE_FILE_GUI))
+    if (file > PACKAGE_FILE_GUI)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -563,6 +563,7 @@ static update_request_t MakeRequest(void)
     memset(&request, 0, sizeof(request));
     request.format_version = UPDATE_REQUEST_FORMAT_VERSION;
     request.requested = 1U;
+    request.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
     strcpy(request.package_id, "package-42");
     return request;
 }
@@ -586,6 +587,16 @@ static void Prepare(void)
 {
     update_request_t request = MakeRequest();
 
+    source_fixture.mounted = 1;
+    assert(UpdateService_PrepareStart(&update_service, &request) == FIRMWARE_STATUS_OK);
+    RunToTerminal();
+}
+
+static void PrepareMask(uint32_t component_mask)
+{
+    update_request_t request = MakeRequest();
+
+    request.component_mask = component_mask;
     source_fixture.mounted = 1;
     assert(UpdateService_PrepareStart(&update_service, &request) == FIRMWARE_STATUS_OK);
     RunToTerminal();
@@ -651,6 +662,62 @@ static void TestAlignedEraseRange(void)
     assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_SUCCEEDED);
     assert(storage_fixture.app_erase_bytes == 4096U);
     assert(storage_fixture.gui_erase_bytes == 8192U);
+}
+
+static boot_active_record_t MakeBaseRecord(void)
+{
+    boot_active_record_t record;
+
+    memset(&record, 0, sizeof(record));
+    record.format_version = BOOT_ACTIVE_RECORD_FORMAT_V3;
+    record.state = BOOT_ACTIVE_RECORD_STATE_VALID;
+    record.component_mask = UPDATE_COMPONENT_ALL;
+    record.release_version.major = 1U;
+    record.app_size = 321U;
+    record.gui_size = 654U;
+    memset(record.app_sha256, 0xA1, sizeof(record.app_sha256));
+    memset(record.gui_sha256, 0xB2, sizeof(record.gui_sha256));
+    record.therapy_size = 1000U;
+    record.therapy_version.major = 5U;
+    memset(record.therapy_sha256, 0xC3, sizeof(record.therapy_sha256));
+    return record;
+}
+
+static void TestPartialInstallPreservesUnselectedMetadata(void)
+{
+    boot_active_record_t base;
+    const boot_active_record_t *candidate;
+
+    ResetFixture();
+    base = MakeBaseRecord();
+    PrepareMask(UPDATE_COMPONENT_APP);
+    assert(UpdateService_InstallStartWithRecord(&update_service, &base) == FIRMWARE_STATUS_OK);
+    RunToTerminal();
+    candidate = UpdateService_GetCandidate(&update_service);
+    assert(candidate != NULL);
+    assert(candidate->app_size == manifest_fixture.app.size_bytes);
+    assert(candidate->gui_size == base.gui_size);
+    assert(memcmp(candidate->gui_sha256, base.gui_sha256, sizeof(base.gui_sha256)) == 0);
+    assert(candidate->therapy_size == base.therapy_size);
+    assert(candidate->therapy_version.major == base.therapy_version.major);
+    assert(memcmp(candidate->therapy_sha256, base.therapy_sha256,
+                  sizeof(base.therapy_sha256)) == 0);
+    assert(storage_fixture.app_erase_bytes != 0U);
+    assert(storage_fixture.gui_erase_bytes == 0U);
+
+    ResetFixture();
+    base = MakeBaseRecord();
+    PrepareMask(UPDATE_COMPONENT_GUI);
+    assert(UpdateService_InstallStartWithRecord(&update_service, &base) == FIRMWARE_STATUS_OK);
+    RunToTerminal();
+    candidate = UpdateService_GetCandidate(&update_service);
+    assert(candidate != NULL);
+    assert(candidate->app_size == base.app_size);
+    assert(candidate->gui_size == manifest_fixture.gui.size_bytes);
+    assert(memcmp(candidate->app_sha256, base.app_sha256, sizeof(base.app_sha256)) == 0);
+    assert(storage_fixture.app_erase_bytes == 0U);
+    assert(storage_fixture.gui_erase_bytes != 0U);
+    assert(UpdateService_RuntimeMayBeModified(&update_service) != 0);
 }
 
 static void TestProgressLogRateLimit(void)
@@ -994,6 +1061,7 @@ int main(void)
 {
     TestSuccessAndCandidate();
     TestAlignedEraseRange();
+    TestPartialInstallPreservesUnselectedMetadata();
     TestProgressLogRateLimit();
     TestStateGuardsAndLegacy();
     TestSourceFailuresDoNotErase();

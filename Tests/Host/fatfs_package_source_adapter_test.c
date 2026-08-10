@@ -48,6 +48,10 @@ static void TestFixedFileMappingAndRead(void)
     assert(source->open(source->context, PACKAGE_FILE_GUI) == FIRMWARE_STATUS_OK);
     assert(strcmp(fatfs_test_state.last_path, "0:firmware/hmi.gui.bin") == 0);
     assert(source->close(source->context) == FIRMWARE_STATUS_OK);
+    assert(source->open(source->context, PACKAGE_FILE_THERAPY_APP) ==
+           FIRMWARE_STATUS_OK);
+    assert(strcmp(fatfs_test_state.last_path, "0:firmware/therapy.app.bin") == 0);
+    assert(source->close(source->context) == FIRMWARE_STATUS_OK);
     assert(source->unmount(source->context) == FIRMWARE_STATUS_OK);
 }
 

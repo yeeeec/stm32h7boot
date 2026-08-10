@@ -415,23 +415,57 @@ static firmware_status_t ParseComponent(const json_document_t *document, uint32_
 static firmware_status_t ParseComponents(const json_document_t *document, uint32_t root,
                                          validated_manifest_t *manifest)
 {
-    static const char *const members[] = {"app", "gui"};
     uint32_t components;
-    uint32_t app;
-    uint32_t gui;
+    uint32_t component;
+    uint32_t member_count;
+    uint32_t recognized_count = 0U;
 
     if (!FirmwareStatus_IsOk(FindMember(document, root, "components", &components)) ||
-        !FirmwareStatus_IsOk(ValidateObjectMembers(document, components, members, 2U)) ||
-        !FirmwareStatus_IsOk(FindMember(document, components, "app", &app)) ||
-        !FirmwareStatus_IsOk(FindMember(document, components, "gui", &gui)) ||
-        !FirmwareStatus_IsOk(ParseComponent(document, app, "hmi.app.bin", APP_MAXIMUM_IMAGE_SIZE,
-                                             &manifest->app)) ||
-        !FirmwareStatus_IsOk(ParseComponent(document, gui, "hmi.gui.bin", GUI_MAXIMUM_IMAGE_SIZE,
-                                             &manifest->gui)))
+        (document->tokens[components].type != JSON_TOKEN_OBJECT))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    return FIRMWARE_STATUS_OK;
+    member_count = document->tokens[components].child_count;
+    if ((member_count == 0U) || (member_count > 3U))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+
+    if (FirmwareStatus_IsOk(FindMember(document, components, "app", &component)))
+    {
+        if (!FirmwareStatus_IsOk(ParseComponent(document, component, "hmi.app.bin",
+                                                 APP_MAXIMUM_IMAGE_SIZE, &manifest->app)))
+        {
+            return FIRMWARE_STATUS_INVALID_STATE;
+        }
+        manifest->component_mask |= UPDATE_COMPONENT_APP;
+        ++recognized_count;
+    }
+    if (FirmwareStatus_IsOk(FindMember(document, components, "gui", &component)))
+    {
+        if (!FirmwareStatus_IsOk(ParseComponent(document, component, "hmi.gui.bin",
+                                                 GUI_MAXIMUM_IMAGE_SIZE, &manifest->gui)))
+        {
+            return FIRMWARE_STATUS_INVALID_STATE;
+        }
+        manifest->component_mask |= UPDATE_COMPONENT_GUI;
+        ++recognized_count;
+    }
+    if (FirmwareStatus_IsOk(FindMember(document, components, "therapy", &component)))
+    {
+        if (!FirmwareStatus_IsOk(ParseComponent(document, component, "therapy.app.bin",
+                                                 MANIFEST_THERAPY_MAX_SIZE,
+                                                 &manifest->therapy)))
+        {
+            return FIRMWARE_STATUS_INVALID_STATE;
+        }
+        manifest->component_mask |= UPDATE_COMPONENT_THERAPY;
+        ++recognized_count;
+    }
+
+    /* Unknown or duplicate member names make child_count differ from recognized_count. */
+    return (recognized_count == member_count) ? FIRMWARE_STATUS_OK
+                                               : FIRMWARE_STATUS_INVALID_STATE;
 }
 
 /**

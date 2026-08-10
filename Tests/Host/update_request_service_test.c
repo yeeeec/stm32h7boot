@@ -141,10 +141,50 @@ int main(void)
                     &request) == FIRMWARE_STATUS_OK);
     ASSERT_TRUE((request.format_version == UPDATE_REQUEST_FORMAT_VERSION) &&
                 (request.requested == 1U) &&
+                (request.component_mask == (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI)) &&
                 (strcmp(request.package_id, manifest.package_id) == 0));
     ASSERT_TRUE(UpdateRequestService_ValidateManifestBinding(
                     &request_service, &request, (const uint8_t *)manifest_bytes,
                     (uint32_t)strlen(manifest_bytes), &manifest) == FIRMWARE_STATUS_OK);
+
+    /* Explicit masks accept every non-empty selection, while the legacy Manifest
+     * correctly rejects a request for a component it does not declare. */
+    {
+        uint32_t mask;
+        for (mask = UPDATE_COMPONENT_APP; mask <= UPDATE_COMPONENT_ALL; ++mask)
+        {
+            written = snprintf(request_json, sizeof(request_json),
+                               "{\"format_version\":1,\"requested\":true,"
+                               "\"package_id\":\"hmi-app-gui-1.2.3+42\","
+                               "\"manifest_sha256\":\"%s\",\"component_mask\":%lu}",
+                               manifest_hex, (unsigned long)mask);
+            ASSERT_TRUE((written > 0) && ((size_t)written < sizeof(request_json)));
+            ASSERT_TRUE(UpdateRequestService_ParseAndValidate(
+                            &request_service, (const uint8_t *)request_json,
+                            (uint32_t)written, &request) == FIRMWARE_STATUS_OK);
+            ASSERT_TRUE(request.component_mask == mask);
+        }
+        written = snprintf(invalid_request, sizeof(invalid_request),
+                           "{\"format_version\":1,\"requested\":true,"
+                           "\"package_id\":\"hmi-app-gui-1.2.3+42\","
+                           "\"manifest_sha256\":\"%s\",\"component_mask\":0}",
+                           manifest_hex);
+        ASSERT_TRUE(UpdateRequestService_ParseAndValidate(
+                        &request_service, (const uint8_t *)invalid_request,
+                        (uint32_t)written, &request) != FIRMWARE_STATUS_OK);
+        written = snprintf(invalid_request, sizeof(invalid_request),
+                           "{\"format_version\":1,\"requested\":true,"
+                           "\"package_id\":\"hmi-app-gui-1.2.3+42\","
+                           "\"manifest_sha256\":\"%s\",\"component_mask\":8}",
+                           manifest_hex);
+        ASSERT_TRUE(UpdateRequestService_ParseAndValidate(
+                        &request_service, (const uint8_t *)invalid_request,
+                        (uint32_t)written, &request) != FIRMWARE_STATUS_OK);
+        request.component_mask = UPDATE_COMPONENT_THERAPY;
+        ASSERT_TRUE(UpdateRequestService_ValidateManifestBinding(
+                        &request_service, &request, (const uint8_t *)manifest_bytes,
+                        (uint32_t)strlen(manifest_bytes), &manifest) != FIRMWARE_STATUS_OK);
+    }
 
     request.manifest_sha256[0] ^= 0x01U;
     ASSERT_TRUE(UpdateRequestService_ValidateManifestBinding(

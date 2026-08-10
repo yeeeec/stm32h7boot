@@ -13,10 +13,12 @@
 #include "firmware/system_reset.h"
 #include "firmware/update_request_store.h"
 #include "services/common/boot_types.h"
+#include "services/use_case/secondary_mcu_update_service_api.h"
 
 struct active_validation_service;
 struct boot_control_service;
 struct launch_service;
+struct secondary_mcu_update_service;
 struct update_service;
 struct update_request_service;
 
@@ -31,6 +33,10 @@ typedef struct
     struct active_validation_service *validation;
     /** 完成 XIP 配置和最终 APP 跳转的 Launch Service。 */
     struct launch_service *launch;
+    /** Composition-prepared external MCU update Service used for therapy.app.bin. */
+    struct secondary_mcu_update_service *secondary_mcu_update;
+    /** Therapy MCU ROM 烧录目标布局；镜像大小和摘要由 Application 注入。 */
+    secondary_mcu_update_request_t secondary_mcu_target;
     /** 查询、挂载和卸载固定发布卷的只读 Source 接口。 */
     const package_source_t *package_source;
     /** 加载并清除 Trusted Request 原始文档的存储接口。 */

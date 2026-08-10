@@ -17,6 +17,7 @@
 #include "services/capability/version_policy.h"
 #include "services/use_case/active_validation_service_api.h"
 #include "services/use_case/launch_service_api.h"
+#include "services/use_case/secondary_mcu_update_service_api.h"
 #include "services/use_case/update_service_api.h"
 
 /** 清理发布卷时允许的最大卸载尝试次数。 */
@@ -43,10 +44,18 @@ typedef enum
     APPLICATION_STAGE_STALE_VALIDATE_START,
     /** 增量驱动重复请求场景下的当前 Runtime 校验。 */
     APPLICATION_STAGE_STALE_VALIDATE_PROCESS,
-    /** 启动 APP/GUI Runtime 安装生命周期。 */
+    /** 启动请求选择的 APP/GUI Runtime 安装生命周期。 */
     APPLICATION_STAGE_INSTALL_START,
     /** 增量驱动 Runtime 擦除、写入和回读校验。 */
     APPLICATION_STAGE_INSTALL_PROCESS,
+    /** 打开 therapy.app.bin，Application 取得文件所有权。 */
+    APPLICATION_STAGE_THERAPY_OPEN,
+    /** 以 Manifest 尺寸与摘要启动 Therapy MCU 更新。 */
+    APPLICATION_STAGE_THERAPY_START,
+    /** 增量驱动 Therapy MCU 擦写与回读状态机。 */
+    APPLICATION_STAGE_THERAPY_PROCESS,
+    /** 关闭 therapy.app.bin 并进入提交或失败恢复。 */
+    APPLICATION_STAGE_THERAPY_CLOSE,
     /** 启动候选 Active Record 原子提交。 */
     APPLICATION_STAGE_COMMIT_START,
     /** 增量驱动候选 Active Record 提交。 */
@@ -99,6 +108,12 @@ static int application_has_active_record;
 static int application_stale_request;
 /** 执行 Trusted Request 清理步骤后是否必须通过复位启用新 Runtime。 */
 static int application_reset_after_cleanup;
+/** therapy.app.bin 当前是否由 Application 打开。 */
+static int application_therapy_file_open;
+/** therapy 文件关闭成功后进入的顶层阶段。 */
+static application_stage_t application_after_therapy_close;
+/** therapy 文件关闭的有限重试次数。 */
+static uint32_t application_therapy_close_attempts;
 /** 当前阶段是否已经输出过入口日志。 */
 static int application_stage_logged;
 /** 最近一次输出入口日志的阶段。 */
@@ -112,13 +127,32 @@ static application_stage_t application_logged_stage;
  */
 static const char *ApplicationStageName(application_stage_t stage)
 {
-    static const char *const names[] = {
-        "startup", "update-check", "mount", "request-load", "prepare-start",
-        "prepare-process", "policy", "stale-validate-start", "stale-validate-process",
-        "install-start", "install-process", "commit-start", "commit-process", "cleanup",
-        "unmount", "validate-start", "validate-process", "launch", "reset",
-        "recovery-reset", "failed"};
-    return ((unsigned int)stage < (sizeof(names) / sizeof(names[0]))) ? names[stage] : "unknown";
+    static const char *const names[] = {"startup",
+                                        "update-check",
+                                        "mount",
+                                        "request-load",
+                                        "prepare-start",
+                                        "prepare-process",
+                                        "policy",
+                                        "stale-validate-start",
+                                        "stale-validate-process",
+                                        "install-start",
+                                        "install-process",
+                                        "therapy-open",
+                                        "therapy-start",
+                                        "therapy-process",
+                                        "therapy-close",
+                                        "commit-start",
+                                        "commit-process",
+                                        "cleanup",
+                                        "unmount",
+                                        "validate-start",
+                                        "validate-process",
+                                        "launch",
+                                        "reset",
+                                        "recovery-reset",
+                                        "failed"};
+    return ((unsigned int) stage < (sizeof(names) / sizeof(names[0]))) ? names[stage] : "unknown";
 }
 
 /** @brief 每个阶段首次被处理时输出一次入口日志。 */
@@ -138,6 +172,62 @@ static int HasActiveRecord(void)
     return application_has_active_record != 0;
 }
 
+static void BeginUnmount(application_stage_t next);
+
+/** @brief 返回本次请求是否选择给定组件位。 */
+static int ComponentSelected(uint32_t component)
+{
+    return (application_request.component_mask & component) != 0U;
+}
+
+/** @brief 返回当前记录是否已持久化 Therapy MCU 版本。 */
+static int HasTherapyRecord(void)
+{
+    return HasActiveRecord() &&
+           ((application_active_record.component_mask & UPDATE_COMPONENT_THERAPY) != 0U) &&
+           (application_active_record.therapy_size != 0U);
+}
+
+/** @brief 判断 Composition 是否提供了完整的 Therapy MCU 更新能力。 */
+static int TherapyDependenciesReady(void)
+{
+    const package_source_t *source               = application_dependencies.package_source;
+    const secondary_mcu_update_request_t *target = &application_dependencies.secondary_mcu_target;
+
+    return (application_dependencies.secondary_mcu_update != NULL) && (source != NULL) &&
+           (source->open != NULL) && (source->close != NULL) &&
+           (target->target_capacity_bytes == MANIFEST_THERAPY_MAX_SIZE) &&
+           (target->erase_page_count != 0U);
+}
+
+/** @brief 为 therapy-only 请求从当前记录构造待更新候选记录。 */
+static void PrepareTherapyOnlyCandidate(const validated_manifest_t *manifest)
+{
+    application_candidate_record       = application_active_record;
+    application_candidate_record.state = BOOT_ACTIVE_RECORD_STATE_VALID;
+    if (application_candidate_record.component_mask == 0U)
+    {
+        application_candidate_record.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+    }
+    memcpy(application_candidate_record.package_id_hash, manifest->package_id_hash128,
+           sizeof(application_candidate_record.package_id_hash));
+    memcpy(application_candidate_record.manifest_sha256, manifest->manifest_sha256,
+           sizeof(application_candidate_record.manifest_sha256));
+}
+
+/** @brief 关闭 therapy 文件后，按目标阶段选择继续提交或先卸载恢复。 */
+static void FinishTherapyClose(void)
+{
+    if (application_after_therapy_close == APPLICATION_STAGE_COMMIT_START)
+    {
+        application_stage = APPLICATION_STAGE_COMMIT_START;
+    }
+    else
+    {
+        BeginUnmount(application_after_therapy_close);
+    }
+}
+
 /**
  * @brief 在必要时先卸载发布卷，再进入指定的后续阶段。
  *
@@ -150,7 +240,7 @@ static void BeginUnmount(application_stage_t next)
     {
         /* 每次进入卸载恢复都从零开始计数，但不伪造当前介质状态。 */
         application_unmount_attempts = 0U;
-        application_stage = APPLICATION_STAGE_UNMOUNT;
+        application_stage            = APPLICATION_STAGE_UNMOUNT;
     }
     else
     {
@@ -176,7 +266,7 @@ static void ContinueCurrentRuntime(void)
  * @param[in] manifest Update Service 完成绑定校验后的 Manifest，允许为 NULL。
  * @return 非零表示 Package ID 和 Manifest 摘要均与 Active Record 相同。
  */
-static int IsSamePackage(const validated_manifest_t *manifest)
+static int IsSameManifestIdentity(const validated_manifest_t *manifest)
 {
     return HasActiveRecord() && (manifest != NULL) &&
            (memcmp(application_active_record.package_id_hash, manifest->package_id_hash128,
@@ -185,11 +275,42 @@ static int IsSamePackage(const validated_manifest_t *manifest)
                    sizeof(application_active_record.manifest_sha256)) == 0);
 }
 
+static int IsSamePackage(const validated_manifest_t *manifest)
+{
+    if (!IsSameManifestIdentity(manifest))
+    {
+        return 0;
+    }
+    if (ComponentSelected(UPDATE_COMPONENT_APP) &&
+        ((application_active_record.app_size != manifest->app.size_bytes) ||
+         (memcmp(application_active_record.app_sha256, manifest->app.sha256,
+                 sizeof(application_active_record.app_sha256)) != 0)))
+    {
+        return 0;
+    }
+    if (ComponentSelected(UPDATE_COMPONENT_GUI) &&
+        ((application_active_record.gui_size != manifest->gui.size_bytes) ||
+         (memcmp(application_active_record.gui_sha256, manifest->gui.sha256,
+                 sizeof(application_active_record.gui_sha256)) != 0)))
+    {
+        return 0;
+    }
+    if (ComponentSelected(UPDATE_COMPONENT_THERAPY) &&
+        (!HasTherapyRecord() ||
+         (application_active_record.therapy_size != manifest->therapy.size_bytes) ||
+         (memcmp(application_active_record.therapy_sha256, manifest->therapy.sha256,
+                 sizeof(application_active_record.therapy_sha256)) != 0)))
+    {
+        return 0;
+    }
+    return 1;
+}
+
 /** @brief 有 Active Record 时进入校验，否则直接进入 fail-closed 终态。 */
 static void StartValidationOrFault(void)
 {
-    application_stage = HasActiveRecord() ? APPLICATION_STAGE_VALIDATE_START
-                                           : APPLICATION_STAGE_FAILED;
+    application_stage =
+        HasActiveRecord() ? APPLICATION_STAGE_VALIDATE_START : APPLICATION_STAGE_FAILED;
 }
 
 firmware_status_t Application_Configure(const application_dependencies_t *dependencies)
@@ -202,7 +323,7 @@ firmware_status_t Application_Configure(const application_dependencies_t *depend
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     source = dependencies->package_source;
-    store = dependencies->update_request_store;
+    store  = dependencies->update_request_store;
     /* 顶层状态机只接收可完整执行更新、清理、复位和启动路径的依赖组合。 */
     if ((dependencies->boot_control == NULL) || (dependencies->update == NULL) ||
         (dependencies->validation == NULL) || (dependencies->launch == NULL) ||
@@ -220,7 +341,7 @@ firmware_status_t Application_Configure(const application_dependencies_t *depend
     }
     /* 这里只复制借用指针；Composition 必须让所有依赖对象保持静态生命周期。 */
     application_dependencies = *dependencies;
-    application_configured = 1;
+    application_configured   = 1;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -234,7 +355,7 @@ firmware_status_t Application_Init(void)
     }
     /* Active Record 是现有 Runtime 获得校验和启动资格的唯一持久化依据。 */
     status = BootControlService_LoadActive(application_dependencies.boot_control,
-                                            &application_active_record);
+                                           &application_active_record);
     /* 无有效记录是允许进入恢复更新的启动状态，底层 I/O 错误则必须立即失败。 */
     if (!FirmwareStatus_IsOk(status) && (status != FIRMWARE_STATUS_INVALID_STATE) &&
         (status != FIRMWARE_STATUS_OUT_OF_RANGE) && (status != FIRMWARE_STATUS_NOT_FOUND))
@@ -243,15 +364,17 @@ firmware_status_t Application_Init(void)
         return status;
     }
     /* 每次 Boot 都重建易失编排状态，不沿用上一轮未完成流程的内存标志。 */
-    application_has_active_record = FirmwareStatus_IsOk(status) ? 1 : 0;
-    application_media_mounted = 0;
-    application_unmount_attempts = 0U;
-    application_stale_request = 0;
-    application_reset_after_cleanup = 0;
-    application_request_raw_size = 0U;
-    application_stage = APPLICATION_STAGE_STARTUP;
-    application_stage_logged = 0;
-    application_initialized = 1;
+    application_has_active_record      = FirmwareStatus_IsOk(status) ? 1 : 0;
+    application_media_mounted          = 0;
+    application_unmount_attempts       = 0U;
+    application_stale_request          = 0;
+    application_reset_after_cleanup    = 0;
+    application_therapy_file_open      = 0;
+    application_therapy_close_attempts = 0U;
+    application_request_raw_size       = 0U;
+    application_stage                  = APPLICATION_STAGE_STARTUP;
+    application_stage_logged           = 0;
+    application_initialized            = 1;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -301,7 +424,7 @@ firmware_status_t Application_Process(void)
             if (FirmwareStatus_IsOk(status))
             {
                 application_media_mounted = 1;
-                application_stage = APPLICATION_STAGE_REQUEST_LOAD;
+                application_stage         = APPLICATION_STAGE_REQUEST_LOAD;
             }
             else
             {
@@ -312,18 +435,17 @@ firmware_status_t Application_Process(void)
         case APPLICATION_STAGE_REQUEST_LOAD:
             /* 先加载有界原始字节，信任和 schema 决策统一留给请求解析 Service。 */
             application_request_raw_size = 0U;
-            status = application_dependencies.update_request_store->load_raw(
-                application_dependencies.update_request_store->context,
-                application_request_raw, sizeof(application_request_raw),
-                &application_request_raw_size);
+            status                       = application_dependencies.update_request_store->load_raw(
+                application_dependencies.update_request_store->context, application_request_raw,
+                sizeof(application_request_raw), &application_request_raw_size);
             if (status == FIRMWARE_STATUS_NOT_FOUND)
             {
-                LOG_WARN("app", "trusted request not found: status=%d", (int)status);
+                LOG_WARN("app", "trusted request not found: status=%d", (int) status);
                 ContinueCurrentRuntime();
             }
             else if (!FirmwareStatus_IsOk(status))
             {
-                LOG_WARN("app", "trusted request load failed: status=%d", (int)status);
+                LOG_WARN("app", "trusted request load failed: status=%d", (int) status);
                 ContinueCurrentRuntime();
             }
             else
@@ -343,6 +465,12 @@ firmware_status_t Application_Process(void)
             }
             else
             {
+                if (application_request.component_mask == 0U)
+                {
+                    /* Legacy in-process V1 callers select the historical APP+GUI pair. */
+                    application_request.component_mask =
+                        UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+                }
                 status = UpdateService_PrepareStart(application_dependencies.update,
                                                     &application_request);
                 if (FirmwareStatus_IsOk(status))
@@ -375,6 +503,8 @@ firmware_status_t Application_Process(void)
         {
             const validated_manifest_t *manifest =
                 UpdateService_GetManifest(application_dependencies.update);
+            uint32_t host_mask =
+                application_request.component_mask & (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI);
 
             /* 只有完成请求、Manifest 和源文件绑定校验的对象才能参与版本决策。 */
             if (manifest == NULL)
@@ -389,18 +519,49 @@ firmware_status_t Application_Process(void)
                 ContinueCurrentRuntime();
                 break;
             }
+            if (ComponentSelected(UPDATE_COMPONENT_THERAPY) && !TherapyDependenciesReady())
+            {
+                ContinueCurrentRuntime();
+                break;
+            }
             /* 重复请求先验证现有 Runtime；仅在现有内容损坏时重新安装同一包。 */
             application_stale_request = IsSamePackage(manifest);
             if (application_stale_request != 0)
             {
                 application_stage = APPLICATION_STAGE_STALE_VALIDATE_START;
             }
-            else if (HasActiveRecord() &&
+            else if ((host_mask != 0U) && HasActiveRecord() &&
                      !VersionPolicy_IsUpgrade(&application_active_record.release_version,
-                                              &manifest->release_version))
+                                              &manifest->release_version) &&
+                     !((VersionPolicy_Compare(&application_active_record.release_version,
+                                              &manifest->release_version) == 0) &&
+                       IsSameManifestIdentity(manifest)))
             {
                 /* 不同包必须严格升级，禁止降级或相同 Release Version 的替换。 */
                 ContinueCurrentRuntime();
+            }
+            else if ((host_mask != 0U) && !HasActiveRecord() &&
+                     (host_mask != (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI)))
+            {
+                /* 无 Active Record 时，单独 APP 或 GUI 无法构造可启动的完整 Runtime。 */
+                ContinueCurrentRuntime();
+            }
+            else if (ComponentSelected(UPDATE_COMPONENT_THERAPY) && HasTherapyRecord() &&
+                     (VersionPolicy_Compare(&manifest->release_version,
+                                            &application_active_record.therapy_version) < 0))
+            {
+                /* Therapy 版本独立持久化，只拒绝低版本升级。 */
+                ContinueCurrentRuntime();
+            }
+            else if ((host_mask == 0U) && !HasActiveRecord())
+            {
+                /* therapy-only 不能替代承载启动所需的 APP/GUI Active Record。 */
+                ContinueCurrentRuntime();
+            }
+            else if (host_mask == 0U)
+            {
+                PrepareTherapyOnlyCandidate(manifest);
+                application_stage = APPLICATION_STAGE_THERAPY_OPEN;
             }
             else
             {
@@ -430,7 +591,7 @@ firmware_status_t Application_Process(void)
                 SERVICE_RUN_STATE_SUCCEEDED)
             {
                 application_reset_after_cleanup = 0;
-                application_stage = APPLICATION_STAGE_CLEANUP;
+                application_stage               = APPLICATION_STAGE_CLEANUP;
             }
             else if (ActiveValidationService_GetState(application_dependencies.validation) ==
                      SERVICE_RUN_STATE_FAILED)
@@ -441,7 +602,9 @@ firmware_status_t Application_Process(void)
 
         case APPLICATION_STAGE_INSTALL_START:
             /* 版本策略接受后才允许 Update Service 进入可能擦除 Runtime 的阶段。 */
-            status = UpdateService_InstallStart(application_dependencies.update);
+            status = UpdateService_InstallStartWithRecord(
+                application_dependencies.update,
+                HasActiveRecord() ? &application_active_record : NULL);
             if (FirmwareStatus_IsOk(status))
             {
                 application_stage = APPLICATION_STAGE_INSTALL_PROCESS;
@@ -466,9 +629,11 @@ firmware_status_t Application_Process(void)
                 }
                 else
                 {
-                    application_candidate_record = *candidate;
+                    application_candidate_record    = *candidate;
                     application_reset_after_cleanup = 1;
-                    application_stage = APPLICATION_STAGE_COMMIT_START;
+                    application_stage               = ComponentSelected(UPDATE_COMPONENT_THERAPY)
+                                                          ? APPLICATION_STAGE_THERAPY_OPEN
+                                                          : APPLICATION_STAGE_COMMIT_START;
                 }
             }
             else if (UpdateService_GetState(application_dependencies.update) ==
@@ -478,8 +643,7 @@ firmware_status_t Application_Process(void)
                     UpdateService_GetResult(application_dependencies.update);
                 /* 任何可能留下半写 Runtime 或异常 XIP 状态的失败都只能复位恢复。 */
                 if ((UpdateService_RuntimeMayBeModified(application_dependencies.update) != 0) ||
-                    ((update_result != NULL) &&
-                     (update_result->error == BOOT_ERROR_XIP_SETUP)))
+                    ((update_result != NULL) && (update_result->error == BOOT_ERROR_XIP_SETUP)))
                 {
                     /* Runtime 可能已损坏，或 QSPI 仍处于无法安全复用的状态；清理后
                      * 复位，让下一轮从 trusted request 重新走恢复安装。 */
@@ -492,17 +656,133 @@ firmware_status_t Application_Process(void)
             }
             break;
 
+        case APPLICATION_STAGE_THERAPY_OPEN:
+            status = application_dependencies.package_source->open(
+                application_dependencies.package_source->context, PACKAGE_FILE_THERAPY_APP);
+            if (!FirmwareStatus_IsOk(status))
+            {
+                if (UpdateService_RuntimeMayBeModified(application_dependencies.update) != 0)
+                {
+                    BeginUnmount(APPLICATION_STAGE_RECOVERY_RESET);
+                }
+                else
+                {
+                    ContinueCurrentRuntime();
+                }
+            }
+            else
+            {
+                application_therapy_file_open = 1;
+                application_stage             = APPLICATION_STAGE_THERAPY_START;
+            }
+            break;
+
+        case APPLICATION_STAGE_THERAPY_START:
+        {
+            const validated_manifest_t *manifest =
+                UpdateService_GetManifest(application_dependencies.update);
+            secondary_mcu_update_request_t request = application_dependencies.secondary_mcu_target;
+
+            if (manifest == NULL)
+            {
+                application_after_therapy_close = APPLICATION_STAGE_RECOVERY_RESET;
+                application_stage               = APPLICATION_STAGE_THERAPY_CLOSE;
+                break;
+            }
+            request.image_size_bytes = manifest->therapy.size_bytes;
+            memcpy(request.sha256, manifest->therapy.sha256, sizeof(request.sha256));
+            status = SecondaryMcuUpdateService_Start(application_dependencies.secondary_mcu_update,
+                                                     &request);
+            if (FirmwareStatus_IsOk(status))
+            {
+                application_stage = APPLICATION_STAGE_THERAPY_PROCESS;
+            }
+            else
+            {
+                application_after_therapy_close =
+                    (UpdateService_RuntimeMayBeModified(application_dependencies.update) != 0)
+                        ? APPLICATION_STAGE_RECOVERY_RESET
+                        : APPLICATION_STAGE_VALIDATE_START;
+                application_stage = APPLICATION_STAGE_THERAPY_CLOSE;
+            }
+            break;
+        }
+
+        case APPLICATION_STAGE_THERAPY_PROCESS:
+            SecondaryMcuUpdateService_Process(application_dependencies.secondary_mcu_update);
+            if (SecondaryMcuUpdateService_GetState(application_dependencies.secondary_mcu_update) ==
+                SERVICE_RUN_STATE_SUCCEEDED)
+            {
+                const validated_manifest_t *manifest =
+                    UpdateService_GetManifest(application_dependencies.update);
+
+                if (manifest == NULL)
+                {
+                    application_after_therapy_close = APPLICATION_STAGE_RECOVERY_RESET;
+                }
+                else
+                {
+                    application_candidate_record.format_version  = BOOT_ACTIVE_RECORD_FORMAT_V3;
+                    application_candidate_record.component_mask  = UPDATE_COMPONENT_ALL;
+                    application_candidate_record.therapy_size    = manifest->therapy.size_bytes;
+                    application_candidate_record.therapy_version = manifest->release_version;
+                    memcpy(application_candidate_record.therapy_sha256, manifest->therapy.sha256,
+                           sizeof(application_candidate_record.therapy_sha256));
+                    application_reset_after_cleanup = 1;
+                    application_after_therapy_close = APPLICATION_STAGE_COMMIT_START;
+                }
+                application_stage = APPLICATION_STAGE_THERAPY_CLOSE;
+            }
+            else if (SecondaryMcuUpdateService_GetState(
+                         application_dependencies.secondary_mcu_update) == SERVICE_RUN_STATE_FAILED)
+            {
+                application_after_therapy_close =
+                    (SecondaryMcuUpdateService_TargetMayBeModified(
+                         application_dependencies.secondary_mcu_update) != 0) ||
+                            (UpdateService_RuntimeMayBeModified(application_dependencies.update) !=
+                             0)
+                        ? APPLICATION_STAGE_RECOVERY_RESET
+                        : APPLICATION_STAGE_VALIDATE_START;
+                application_stage = APPLICATION_STAGE_THERAPY_CLOSE;
+            }
+            break;
+
+        case APPLICATION_STAGE_THERAPY_CLOSE:
+            status = application_dependencies.package_source->close(
+                application_dependencies.package_source->context);
+            if (FirmwareStatus_IsOk(status))
+            {
+                application_therapy_file_open      = 0;
+                application_therapy_close_attempts = 0U;
+                FinishTherapyClose();
+            }
+            else
+            {
+                ++application_therapy_close_attempts;
+                if (application_therapy_close_attempts >= APPLICATION_UNMOUNT_RETRY_LIMIT)
+                {
+                    FailClosed();
+                }
+            }
+            break;
+
         case APPLICATION_STAGE_COMMIT_START:
-            /* 只有 APP/GUI 写入和目标回读均成功后，才开始发布候选 Active Record。 */
+            /* 所有选中组件完成验证后，才开始发布候选 Active Record。 */
             status = BootControlService_CommitActiveStart(application_dependencies.boot_control,
-                                                           &application_candidate_record);
+                                                          &application_candidate_record);
             if (FirmwareStatus_IsOk(status))
             {
                 application_stage = APPLICATION_STAGE_COMMIT_PROCESS;
             }
             else
             {
-                BeginUnmount(APPLICATION_STAGE_FAILED);
+                BeginUnmount((ComponentSelected(UPDATE_COMPONENT_THERAPY) &&
+                              SecondaryMcuUpdateService_TargetMayBeModified(
+                                  application_dependencies.secondary_mcu_update)) ||
+                             (UpdateService_RuntimeMayBeModified(application_dependencies.update) !=
+                              0)
+                                 ? APPLICATION_STAGE_RECOVERY_RESET
+                                 : APPLICATION_STAGE_FAILED);
             }
             break;
 
@@ -512,14 +792,20 @@ firmware_status_t Application_Process(void)
             if (BootControlService_GetState(application_dependencies.boot_control) ==
                 SERVICE_RUN_STATE_SUCCEEDED)
             {
-                application_active_record = application_candidate_record;
+                application_active_record     = application_candidate_record;
                 application_has_active_record = 1;
-                application_stage = APPLICATION_STAGE_CLEANUP;
+                application_stage             = APPLICATION_STAGE_CLEANUP;
             }
             else if (BootControlService_GetState(application_dependencies.boot_control) ==
                      SERVICE_RUN_STATE_FAILED)
             {
-                BeginUnmount(APPLICATION_STAGE_FAILED);
+                BeginUnmount((ComponentSelected(UPDATE_COMPONENT_THERAPY) &&
+                              SecondaryMcuUpdateService_TargetMayBeModified(
+                                  application_dependencies.secondary_mcu_update)) ||
+                             (UpdateService_RuntimeMayBeModified(application_dependencies.update) !=
+                              0)
+                                 ? APPLICATION_STAGE_RECOVERY_RESET
+                                 : APPLICATION_STAGE_FAILED);
             }
             break;
 
@@ -529,10 +815,10 @@ firmware_status_t Application_Process(void)
                 application_dependencies.update_request_store->context);
             if (!FirmwareStatus_IsOk(status))
             {
-                LOG_WARN("app", "request clear failed: status=%d", (int)status);
+                LOG_WARN("app", "request clear failed: status=%d", (int) status);
             }
             BeginUnmount(application_reset_after_cleanup != 0 ? APPLICATION_STAGE_RESET
-                                                               : APPLICATION_STAGE_VALIDATE_START);
+                                                              : APPLICATION_STAGE_VALIDATE_START);
             break;
 
         case APPLICATION_STAGE_UNMOUNT:
@@ -542,16 +828,16 @@ firmware_status_t Application_Process(void)
             if (FirmwareStatus_IsOk(status))
             {
                 /* 只有 Adapter 确认卸载成功，Application 才能释放 mounted 所有权。 */
-                application_media_mounted = 0;
+                application_media_mounted    = 0;
                 application_unmount_attempts = 0U;
-                application_stage = application_after_unmount;
+                application_stage            = application_after_unmount;
             }
             else
             {
                 ++application_unmount_attempts;
                 LOG_WARN("app", "media unmount retry %lu/%u failed: status=%d",
-                         (unsigned long)application_unmount_attempts,
-                         (unsigned)APPLICATION_UNMOUNT_RETRY_LIMIT, (int)status);
+                         (unsigned long) application_unmount_attempts,
+                         (unsigned) APPLICATION_UNMOUNT_RETRY_LIMIT, (int) status);
                 if (application_unmount_attempts >= APPLICATION_UNMOUNT_RETRY_LIMIT)
                 {
                     /* 实际卷状态仍为 mounted，继续启动或跳转不安全，必须停在 FAULT。 */
@@ -568,11 +854,10 @@ firmware_status_t Application_Process(void)
                 FailClosed();
                 break;
             }
-            status = ActiveValidationService_Start(application_dependencies.validation,
-                                                   &application_active_record);
-            application_stage = FirmwareStatus_IsOk(status)
-                                    ? APPLICATION_STAGE_VALIDATE_PROCESS
-                                    : APPLICATION_STAGE_FAILED;
+            status            = ActiveValidationService_Start(application_dependencies.validation,
+                                                              &application_active_record);
+            application_stage = FirmwareStatus_IsOk(status) ? APPLICATION_STAGE_VALIDATE_PROCESS
+                                                            : APPLICATION_STAGE_FAILED;
             break;
 
         case APPLICATION_STAGE_VALIDATE_PROCESS:
@@ -592,8 +877,8 @@ firmware_status_t Application_Process(void)
 
         case APPLICATION_STAGE_LAUNCH:
             /* 成功交接不会返回；任何返回错误都意味着本轮必须 fail-closed。 */
-            status = LaunchService_Execute(application_dependencies.launch,
-                                           &application_active_record);
+            status =
+                LaunchService_Execute(application_dependencies.launch, &application_active_record);
             if (!FirmwareStatus_IsOk(status))
             {
                 FailClosed();

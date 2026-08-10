@@ -98,6 +98,102 @@ static int TestValidManifest(fake_hash_t *fake, manifest_service_t *service,
     return 0;
 }
 
+static int TestComponentCombinations(fake_hash_t *fake, manifest_service_t *service)
+{
+    static const char app_json[] =
+        "\"app\":{\"file\":\"hmi.app.bin\",\"format\":\"raw-bin-v1\","
+        "\"size\":64,\"sha256\":\"0000000000000000000000000000000000000000000000000000000000000000\"}";
+    static const char gui_json[] =
+        "\"gui\":{\"file\":\"hmi.gui.bin\",\"format\":\"raw-bin-v1\","
+        "\"size\":128,\"sha256\":\"1111111111111111111111111111111111111111111111111111111111111111\"}";
+    static const char therapy_json[] =
+        "\"therapy\":{\"file\":\"therapy.app.bin\",\"format\":\"raw-bin-v1\","
+        "\"size\":256,\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"}";
+    char components[2048];
+    char document[4096];
+    uint32_t mask;
+    int written;
+
+    for (mask = UPDATE_COMPONENT_APP; mask <= UPDATE_COMPONENT_ALL; ++mask)
+    {
+        size_t offset = 0U;
+        int first = 1;
+
+        components[offset++] = '{';
+        if ((mask & UPDATE_COMPONENT_APP) != 0U)
+        {
+            written = snprintf(&components[offset], sizeof(components) - offset, "%s%s",
+                               first ? "" : ",", app_json);
+            ASSERT_TRUE((written > 0) && ((size_t)written < sizeof(components) - offset));
+            offset += (size_t)written;
+            first = 0;
+        }
+        if ((mask & UPDATE_COMPONENT_GUI) != 0U)
+        {
+            written = snprintf(&components[offset], sizeof(components) - offset, "%s%s",
+                               first ? "" : ",", gui_json);
+            ASSERT_TRUE((written > 0) && ((size_t)written < sizeof(components) - offset));
+            offset += (size_t)written;
+            first = 0;
+        }
+        if ((mask & UPDATE_COMPONENT_THERAPY) != 0U)
+        {
+            written = snprintf(&components[offset], sizeof(components) - offset, "%s%s",
+                               first ? "" : ",", therapy_json);
+            ASSERT_TRUE((written > 0) && ((size_t)written < sizeof(components) - offset));
+            offset += (size_t)written;
+        }
+        written = snprintf(&components[offset], sizeof(components) - offset, "}");
+        ASSERT_TRUE((written > 0) && ((size_t)written < sizeof(components) - offset));
+        written = snprintf(document, sizeof(document),
+                           "{\"format_version\":1,\"package_id\":\"combo-%lu\","
+                           "\"release\":{\"major\":1,\"minor\":0,\"patch\":0,\"build\":1},"
+                           "\"target\":{\"product\":\"HMI\",\"hardware\":\"STM32H743-W25Q256\","
+                           "\"minimum_bootloader_version\":\"1.0.0\"},\"components\":%s}",
+                           (unsigned long)mask, components);
+        ASSERT_TRUE((written > 0) && ((size_t)written < sizeof(document)));
+        {
+            validated_manifest_t parsed;
+            ASSERT_TRUE(ManifestService_ParseAndValidate(
+                            service, (const uint8_t *)document, (uint32_t)written,
+                            &parsed) == FIRMWARE_STATUS_OK);
+            ASSERT_TRUE(parsed.component_mask == mask);
+        }
+    }
+    (void)fake;
+    return 0;
+}
+
+static int TestTherapySizeLimit(fake_hash_t *fake, manifest_service_t *service)
+{
+    char document[2048];
+    validated_manifest_t parsed;
+    int written;
+
+    written = snprintf(document, sizeof(document),
+                       "{\"format_version\":1,\"package_id\":\"therapy-limit\","
+                       "\"release\":{\"major\":1,\"minor\":0,\"patch\":0,\"build\":1},"
+                       "\"target\":{\"product\":\"HMI\",\"hardware\":\"STM32H743-W25Q256\","
+                       "\"minimum_bootloader_version\":\"1.0.0\"},\"components\":{"
+                       "\"therapy\":{\"file\":\"therapy.app.bin\",\"format\":\"raw-bin-v1\","
+                       "\"size\":%lu,\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"}}}",
+                       (unsigned long)MANIFEST_THERAPY_MAX_SIZE);
+    ASSERT_TRUE((written > 0) && ((size_t)written < sizeof(document)));
+    ASSERT_TRUE(ManifestService_ParseAndValidate(service, (const uint8_t *)document,
+                                                 (uint32_t)written, &parsed) == FIRMWARE_STATUS_OK);
+    /* Build the same document with one byte beyond the upper bound. */
+    {
+        char *size_field = strstr(document, "\"size\":524288");
+        ASSERT_TRUE(size_field != NULL);
+        size_field[strlen("\"size\":52428")] = '9';
+        ASSERT_TRUE(ManifestService_ParseAndValidate(service, (const uint8_t *)document,
+                                                     (uint32_t)strlen(document), &parsed) !=
+                    FIRMWARE_STATUS_OK);
+    }
+    (void)fake;
+    return 0;
+}
+
 int main(void)
 {
     fake_hash_t fake;
@@ -109,6 +205,8 @@ int main(void)
 
     FakeHash_Init(&fake);
     ASSERT_TRUE(TestValidManifest(&fake, &service, &manifest) == 0);
+    ASSERT_TRUE(TestComponentCombinations(&fake, &service) == 0);
+    ASSERT_TRUE(TestTherapySizeLimit(&fake, &service) == 0);
 
     /* V1 is a distinct contract and rejects unsupported legacy members. */
     memcpy(invalid_manifest, valid_manifest, sizeof(valid_manifest));
