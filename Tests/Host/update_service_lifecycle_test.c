@@ -612,13 +612,32 @@ static void TestSuccessAndCandidate(void)
                   sizeof(candidate->app_sha256)) == 0);
     assert(memcmp(candidate->gui_sha256, manifest_fixture.gui.sha256,
                   sizeof(candidate->gui_sha256)) == 0);
-    assert(storage_fixture.app_erase_bytes == BOOT_APP_RUNTIME_SIZE);
-    assert(storage_fixture.gui_erase_bytes == BOOT_GUI_RUNTIME_SIZE);
+    /* 513-byte APP and 8193-byte GUI payloads erase only rounded sectors. */
+    assert(storage_fixture.app_erase_bytes == 4096U);
+    assert(storage_fixture.gui_erase_bytes == 12288U);
     assert(storage_fixture.program_bytes == manifest_fixture.app.size_bytes +
                                               manifest_fixture.gui.size_bytes);
     assert(storage_fixture.source_erased_before_gui_hash == 0);
     assert(storage_fixture.invalid_program_address == 0);
     assert(UpdateService_RuntimeMayBeModified(&update_service) != 0);
+}
+
+static void TestAlignedEraseRange(void)
+{
+    ResetFixture();
+    source_fixture.sizes[PACKAGE_FILE_APP] = 4096U;
+    source_fixture.sizes[PACKAGE_FILE_GUI] = 8192U;
+    manifest_fixture.app.size_bytes = source_fixture.sizes[PACKAGE_FILE_APP];
+    manifest_fixture.gui.size_bytes = source_fixture.sizes[PACKAGE_FILE_GUI];
+    DigestBytes(PACKAGE_FILE_APP, manifest_fixture.app.size_bytes, manifest_fixture.app.sha256);
+    DigestBytes(PACKAGE_FILE_GUI, manifest_fixture.gui.size_bytes, manifest_fixture.gui.sha256);
+
+    Prepare();
+    Install();
+
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_SUCCEEDED);
+    assert(storage_fixture.app_erase_bytes == 4096U);
+    assert(storage_fixture.gui_erase_bytes == 8192U);
 }
 
 static void TestStateGuardsAndLegacy(void)
@@ -672,7 +691,7 @@ static void TestTargetFailures(void)
     Prepare();
     Install();
     assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_FAILED);
-    assert(storage_fixture.app_erase_bytes == BOOT_APP_RUNTIME_SIZE);
+    assert(storage_fixture.app_erase_bytes == 4096U);
     assert(storage_fixture.gui_erase_bytes == 0U);
 
     ResetFixture();
@@ -918,6 +937,7 @@ static void TestCancelRecovery(void)
 int main(void)
 {
     TestSuccessAndCandidate();
+    TestAlignedEraseRange();
     TestStateGuardsAndLegacy();
     TestSourceFailuresDoNotErase();
     TestTargetFailures();
