@@ -2,6 +2,7 @@ add_library(firmware_services STATIC
     # 先列出用例层对象，再列出其能力层依赖，保证静态库消费者无需链接组也能
     # 正确拉取一个完整用例所需的对象文件。
     src/use_case/update_service.c
+    src/use_case/secondary_mcu_update_service.c
     src/use_case/active_validation_service.c
     src/use_case/launch_service.c
     src/capability/checked_arithmetic.c

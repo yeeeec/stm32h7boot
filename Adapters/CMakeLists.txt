@@ -5,6 +5,7 @@ add_library(firmware_adapters STATIC
     src/fatfs_package_source_adapter.c
     src/fatfs_update_request_store_adapter.c
     src/spi_nor_block_adapter.c
+    src/stm32_rom_boot_programmer_adapter.c
     src/stm32_clock_adapter.c
     src/stm32_qspi_xip_adapter.c
     src/stm32_system_reset_adapter.c
@@ -26,5 +27,6 @@ target_link_libraries(firmware_adapters
         board_bsp
         driver_at24
         driver_spi_nor
+        driver_stm32_rom_boot
         firmware_logger
 )

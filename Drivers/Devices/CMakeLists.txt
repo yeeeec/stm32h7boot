@@ -33,3 +33,15 @@ target_include_directories(driver_spi_nor PUBLIC
 )
 
 target_link_libraries(driver_spi_nor PUBLIC firmware_types)
+
+# STM32 ROM Bootloader 只实现 AN3155 UART 协议；UART、BOOT0 和 NRST 的
+# 具体板级绑定由 BSP/Adapter 注入，因此该目标不依赖 HAL 或 CubeMX。
+add_library(driver_stm32_rom_boot STATIC
+    Stm32RomBoot/stm32_rom_boot.c
+)
+
+target_include_directories(driver_stm32_rom_boot PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/Stm32RomBoot
+)
+
+target_link_libraries(driver_stm32_rom_boot PUBLIC firmware_types)

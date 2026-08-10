@@ -60,6 +60,10 @@ void Error_Handler(void);
 #define LCD_WITH 800
 #define LCD_HIGH 480
 #define SDRAM_ADDR 0xC0000000
+#define SECONDARY_MCU_BOOT_Pin GPIO_PIN_7
+#define SECONDARY_MCU_BOOT_GPIO_Port GPIOC
+#define SECONDARY_MCU_RST_Pin GPIO_PIN_14
+#define SECONDARY_MCU_RST_GPIO_Port GPIOG
 
 /* USER CODE BEGIN Private defines */
 

@@ -5,6 +5,7 @@ add_library(board_bsp STATIC
     src/bsp_eeprom.c
     src/bsp_external_flash.c
     src/bsp_sdram.c
+    src/bsp_stm32_rom_boot.c
 )
 
 target_include_directories(board_bsp PUBLIC
@@ -18,4 +19,5 @@ target_link_libraries(board_bsp
         driver_at24
         driver_sdram
         driver_spi_nor
+        driver_stm32_rom_boot
 )

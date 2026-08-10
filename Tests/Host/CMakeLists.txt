@@ -42,6 +42,64 @@ endif()
 
 add_test(NAME spi_nor_test COMMAND spi_nor_test)
 
+add_executable(stm32_rom_boot_test
+    stm32_rom_boot_test.c
+    ../../Drivers/Devices/Stm32RomBoot/stm32_rom_boot.c
+)
+
+target_include_directories(stm32_rom_boot_test PRIVATE
+    ../../Drivers/Devices/Stm32RomBoot
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(stm32_rom_boot_test PRIVATE -Wall -Wextra -Werror)
+endif()
+
+add_test(NAME stm32_rom_boot_test COMMAND stm32_rom_boot_test)
+
+add_executable(secondary_mcu_update_service_test
+    secondary_mcu_update_service_test.c
+    ../../Services/src/use_case/secondary_mcu_update_service.c
+)
+
+target_include_directories(secondary_mcu_update_service_test PRIVATE
+    ../../Services/include
+    ../../Services/internal
+    ../../Interfaces/include
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(secondary_mcu_update_service_test PRIVATE
+        -Wall -Wextra -Werror
+    )
+endif()
+
+add_test(NAME secondary_mcu_update_service_test
+         COMMAND secondary_mcu_update_service_test)
+
+add_executable(stm32_rom_boot_programmer_adapter_test
+    stm32_rom_boot_programmer_adapter_test.c
+    ../../Adapters/src/stm32_rom_boot_programmer_adapter.c
+)
+
+target_include_directories(stm32_rom_boot_programmer_adapter_test PRIVATE
+    ../../Adapters/include
+    ../../Interfaces/include
+    ../../Drivers/Devices/Stm32RomBoot
+    ../../Shared/include
+)
+
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(stm32_rom_boot_programmer_adapter_test PRIVATE
+        -Wall -Wextra -Werror
+    )
+endif()
+
+add_test(NAME stm32_rom_boot_programmer_adapter_test
+         COMMAND stm32_rom_boot_programmer_adapter_test)
+
 add_executable(sdram_test
     sdram_test.c
     ../../Drivers/Devices/Sdram/sdram.c

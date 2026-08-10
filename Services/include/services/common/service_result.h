@@ -84,7 +84,21 @@ typedef enum
     /** 生命周期调用顺序或对象状态非法。 */
     BOOT_ERROR_INVALID_STATE,
     /** Runtime 地址、长度或分区边界非法。 */
-    BOOT_ERROR_RUNTIME_BOUNDS
+    BOOT_ERROR_RUNTIME_BOUNDS,
+    /** 外部 MCU 镜像 Source 不可用、尺寸不符或读取失败。 */
+    BOOT_ERROR_SECONDARY_MCU_SOURCE,
+    /** 外部 MCU 目标地址、容量、擦除页或 ROM 能力不满足请求。 */
+    BOOT_ERROR_SECONDARY_MCU_TARGET,
+    /** 进入外部 MCU System Memory Bootloader 或设备探测失败。 */
+    BOOT_ERROR_SECONDARY_MCU_ENTER,
+    /** 外部 MCU Flash 页擦除失败。 */
+    BOOT_ERROR_SECONDARY_MCU_ERASE,
+    /** 外部 MCU Flash 写入失败。 */
+    BOOT_ERROR_SECONDARY_MCU_PROGRAM,
+    /** 外部 MCU Flash 回读失败或内容与 Source 不一致。 */
+    BOOT_ERROR_SECONDARY_MCU_VERIFY,
+    /** 外部 MCU 退出 ROM、恢复 BOOT/RST/UART 条件失败。 */
+    BOOT_ERROR_SECONDARY_MCU_EXIT
 } boot_error_t;
 
 /** 某次服务操作的最终或进行中结果快照。 */

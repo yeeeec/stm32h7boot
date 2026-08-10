@@ -15,6 +15,9 @@
  *
  * 按 SDRAM、外部 QSPI Flash、配置的 AT24C128 EEPROM 顺序初始化。生成的
  * UART、FMC、QSPI 和 I2C Handle 必须已经由 CubeMX 启动代码初始化。
+ * 从 MCU 的 System Memory Bootloader 不在此处自动初始化；调用者应在本函数
+ * 成功后，使用已确认的 Device ID 调用 BSP_Stm32RomBootInit()，避免无目标型号
+ * 校验地进入升级流程。
  *
  * 初始化没有 rollback。任何失败都是当前 Boot 的终态；调用者不得使用 BSP
  * 设备，也不得在系统 Reset 前重试。
