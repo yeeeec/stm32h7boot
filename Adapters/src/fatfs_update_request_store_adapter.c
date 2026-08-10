@@ -13,9 +13,12 @@
 
 #include "fatfs.h"
 
+/** trusted request 路径转换所需的临时缓冲区大小。 */
 #define FATFS_REQUEST_PATH_BUFFER_SIZE (_MAX_LFN + 16U)
+/** 卷内固定 trusted request 文件的逻辑路径。 */
 #define FATFS_REQUEST_PATH "/boot_update_request.json"
 
+/** 将 request 文件相关的 FatFs 返回码映射为固件层状态。 */
 static firmware_status_t FatFsRequestStatus(FRESULT result)
 {
     if (result == FR_OK)
@@ -38,6 +41,7 @@ static firmware_status_t FatFsRequestStatus(FRESULT result)
     return FIRMWARE_STATUS_IO_ERROR;
 }
 
+/** 拼接共享卷中的固定 trusted request 文件路径。 */
 static firmware_status_t BuildRequestPath(char *full_path, size_t full_path_size)
 {
     const size_t volume_path_length = strlen(SDPath);
@@ -82,6 +86,7 @@ static firmware_status_t CloseRequestFile(fatfs_update_request_store_adapter_t *
     return close_status;
 }
 
+/** 读取完整 trusted request 文件，并在返回前关闭共享文件句柄。 */
 static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capacity,
                                  uint32_t *size)
 {
@@ -107,6 +112,7 @@ static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capaci
     {
         return status;
     }
+    /* request 文件与发布包文件串行复用同一个 CubeMX SDFile。 */
     result = f_open(&SDFile, full_path, FA_READ | FA_OPEN_EXISTING);
     status = FatFsRequestStatus(result);
     if (!FirmwareStatus_IsOk(status))
@@ -140,6 +146,7 @@ static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capaci
     return CloseRequestFile(adapter, status);
 }
 
+/** 删除 trusted request 文件；调用前必须没有其他文件处于打开状态。 */
 static firmware_status_t Clear(void *context)
 {
     fatfs_update_request_store_adapter_t *adapter =
@@ -172,6 +179,7 @@ firmware_status_t FatFsUpdateRequestStoreAdapter_Init(
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    /* 保存共享卷引用，所有权仍由调用者管理。 */
     adapter->volume = volume;
     adapter->interface.context = adapter;
     adapter->interface.load_raw = LoadRaw;
@@ -182,5 +190,6 @@ firmware_status_t FatFsUpdateRequestStoreAdapter_Init(
 const update_request_store_t *FatFsUpdateRequestStoreAdapter_Interface(
     const fatfs_update_request_store_adapter_t *adapter)
 {
+    /* 返回适配器内嵌的 request 存储接口。 */
     return (adapter == NULL) ? NULL : &adapter->interface;
 }

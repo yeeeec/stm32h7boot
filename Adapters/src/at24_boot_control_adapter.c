@@ -1,6 +1,6 @@
 /**
  * @file at24_boot_control_adapter.c
- * @brief Boot Control storage operations backed by an AT24 driver.
+ * @brief 基于 AT24 驱动实现 Boot Control 存储操作。
  */
 #include "adapters/at24_boot_control_adapter.h"
 
@@ -8,6 +8,7 @@
 
 #include "at24.h"
 
+/** 将 AT24 容量和页大小转换为 Boot Control 存储信息。 */
 static firmware_status_t GetInfo(void *context, boot_control_store_info_t *info)
 {
     at24_info_t device_info;
@@ -27,16 +28,19 @@ static firmware_status_t GetInfo(void *context, boot_control_store_info_t *info)
     return FIRMWARE_STATUS_OK;
 }
 
+/** 从 AT24 读取指定地址范围的数据。 */
 static firmware_status_t Read(void *context, uint32_t address, void *data, uint32_t size)
 {
     return At24_Read((at24_t *) context, address, data, size);
 }
 
+/** 启动一次符合 EEPROM 页边界的异步分页写入。 */
 static firmware_status_t WritePage(void *context, uint32_t address, const void *data, uint32_t size)
 {
     return At24_WritePageStart((at24_t *) context, address, data, size);
 }
 
+/** 轮询 AT24 写操作，并将驱动状态转换为 ready 标志。 */
 static firmware_status_t IsReady(void *context, int *ready)
 {
     at24_operation_result_t result;
@@ -46,6 +50,7 @@ static firmware_status_t IsReady(void *context, int *ready)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    /* 先推进底层状态机，再读取本次操作的最终状态。 */
     status = At24_OperationPoll((at24_t *) context);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -74,6 +79,7 @@ firmware_status_t At24BootControlAdapter_Init(at24_boot_control_adapter_t *adapt
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    /* 查询设备可用性，确保适配器不会绑定未初始化的驱动对象。 */
     status = At24_GetInfo((const at24_t *) device, &info);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -81,6 +87,7 @@ firmware_status_t At24BootControlAdapter_Init(at24_boot_control_adapter_t *adapt
     }
     (void) info;
 
+    /* 回调表只保存设备引用，不接管设备的生命周期。 */
     adapter->device               = device;
     adapter->interface.context    = device;
     adapter->interface.get_info   = GetInfo;
@@ -93,5 +100,6 @@ firmware_status_t At24BootControlAdapter_Init(at24_boot_control_adapter_t *adapt
 const boot_control_store_t *
 At24BootControlAdapter_Interface(const at24_boot_control_adapter_t *adapter)
 {
+    /* 接口内嵌在适配器中，生命周期与适配器一致。 */
     return (adapter == NULL) ? NULL : &adapter->interface;
 }

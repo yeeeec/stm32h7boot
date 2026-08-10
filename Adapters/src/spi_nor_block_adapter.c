@@ -1,6 +1,6 @@
 /**
  * @file spi_nor_block_adapter.c
- * @brief Generic block-device operations backed by an SPI NOR device.
+ * @brief 基于 SPI NOR 设备实现通用及异步块设备操作。
  */
 #include "adapters/spi_nor_block_adapter.h"
 
@@ -8,6 +8,7 @@
 
 #include "spi_nor.h"
 
+/** 查询 SPI NOR 参数，并填充同步块设备信息。 */
 static firmware_status_t GetInfo(void *context, block_device_info_t *info)
 {
     spi_nor_info_t device_info;
@@ -30,6 +31,7 @@ static firmware_status_t GetInfo(void *context, block_device_info_t *info)
     return FIRMWARE_STATUS_OK;
 }
 
+/** 将通用读取请求转发给 SPI NOR 驱动。 */
 static firmware_status_t Read(
     void *context,
     uint32_t address,
@@ -39,6 +41,7 @@ static firmware_status_t Read(
     return SpiNor_Read((spi_nor_t *)context, address, data, size);
 }
 
+/** 将同步编程请求转发给 SPI NOR 驱动。 */
 static firmware_status_t Program(
     void *context,
     uint32_t address,
@@ -48,6 +51,7 @@ static firmware_status_t Program(
     return SpiNor_Program((spi_nor_t *)context, address, data, size);
 }
 
+/** 将同步擦除请求转发给 SPI NOR 驱动。 */
 static firmware_status_t Erase(
     void *context,
     uint32_t address,
@@ -56,6 +60,7 @@ static firmware_status_t Erase(
     return SpiNor_Erase((spi_nor_t *)context, address, size);
 }
 
+/** 查询 SPI NOR 参数，并填充异步块设备信息。 */
 static firmware_status_t AsyncGetInfo(
     void *context,
     async_block_device_info_t *info)
@@ -79,6 +84,7 @@ static firmware_status_t AsyncGetInfo(
     return FIRMWARE_STATUS_OK;
 }
 
+/** 启动一次异步擦除操作。 */
 static firmware_status_t EraseStart(
     void *context,
     uint32_t address,
@@ -87,6 +93,7 @@ static firmware_status_t EraseStart(
     return SpiNor_EraseStart((spi_nor_t *)context, address, size);
 }
 
+/** 校验页边界后启动一次异步编程操作。 */
 static firmware_status_t AsyncProgram(
     void *context,
     uint32_t address,
@@ -100,6 +107,7 @@ static firmware_status_t AsyncProgram(
     {
         return status;
     }
+    /* 单次编程不能跨越 SPI NOR 的页边界。 */
     if ((size == 0U) || (size > info.page_size) ||
         ((address % info.page_size) > (info.page_size - size)))
     {
@@ -109,11 +117,13 @@ static firmware_status_t AsyncProgram(
     return SpiNor_ProgramStart((spi_nor_t *)context, address, data, size);
 }
 
+/** 推进 SPI NOR 异步操作状态机。 */
 static firmware_status_t Poll(void *context)
 {
     return SpiNor_OperationPoll((spi_nor_t *)context);
 }
 
+/** 将 SPI NOR 操作状态映射为通用异步块设备状态。 */
 static firmware_status_t GetOperationResult(
     void *context,
     async_block_device_operation_result_t *result)
@@ -159,6 +169,7 @@ firmware_status_t SpiNorBlockAdapter_Init(
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
+    /* 同时初始化同步和异步接口；两个接口共享同一个驱动上下文。 */
     adapter->device = device;
     adapter->interface.context = device;
     adapter->interface.get_info = GetInfo;
@@ -179,11 +190,13 @@ firmware_status_t SpiNorBlockAdapter_Init(
 const async_block_device_t *SpiNorBlockAdapter_AsyncInterface(
     const spi_nor_block_adapter_t *adapter)
 {
+    /* 返回适配器内嵌的异步接口。 */
     return (adapter == NULL) ? NULL : &adapter->async_interface;
 }
 
 const block_device_t *SpiNorBlockAdapter_Interface(
     const spi_nor_block_adapter_t *adapter)
 {
+    /* 返回适配器内嵌的同步接口。 */
     return (adapter == NULL) ? NULL : &adapter->interface;
 }

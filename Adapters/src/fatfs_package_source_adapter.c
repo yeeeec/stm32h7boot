@@ -1,8 +1,8 @@
 /**
  * @file fatfs_package_source_adapter.c
- * @brief 基于 CubeMX SD FatFs 卷的固定发布包访问 Adapter。
+ * @brief 基于 CubeMX SD FatFs 卷的固定发布包访问适配器。
  *
- * 本 Adapter 同时维护发布文件与 trusted request 的共享卷所有权。所有状态标志
+ * 本适配器同时维护发布文件与 trusted request 的共享卷所有权。所有状态标志
  * 都只在对应 FatFs 操作成功后更新，便于 Application 在异常路径重试卸载。
  */
 #include "adapters/fatfs_package_source_adapter.h"
@@ -15,8 +15,10 @@
 #include "fatfs.h"
 #include "logging.h"
 
+/** 逻辑发布文件路径转换为卷路径时使用的临时缓冲区大小。 */
 #define FATFS_PACKAGE_SOURCE_PATH_BUFFER_SIZE (_MAX_LFN + 16U)
 
+/** 将 FatFs 返回码映射为固件层统一状态码。 */
 static firmware_status_t FatFsStatus(FRESULT result)
 {
     if (result == FR_OK)
@@ -62,6 +64,7 @@ static firmware_status_t ClosePendingRequestFile(fatfs_release_volume_context_t 
     return status;
 }
 
+/** 校验逻辑路径并拼接为 FatFs 卷路径，拒绝目录穿越和盘符路径。 */
 static firmware_status_t BuildSdPath(const char *path, char *full_path, size_t full_path_size)
 {
     const char *relative_path;
@@ -104,6 +107,7 @@ static firmware_status_t BuildSdPath(const char *path, char *full_path, size_t f
     return FIRMWARE_STATUS_OK;
 }
 
+/** 将发布包文件枚举转换为卷内固定路径。 */
 static const char *PackageFilePath(package_file_id_t file)
 {
     switch (file)
@@ -119,6 +123,7 @@ static const char *PackageFilePath(package_file_id_t file)
     }
 }
 
+/** 查询 SD 卡是否插入；实际检测由 BSP 提供。 */
 static firmware_status_t IsMediaPresent(void *context, int *present)
 {
     if ((context == NULL) || (present == NULL))
@@ -129,6 +134,7 @@ static firmware_status_t IsMediaPresent(void *context, int *present)
     return FIRMWARE_STATUS_OK;
 }
 
+/** 检测介质并挂载 FatFs 卷，成功后更新共享状态。 */
 static firmware_status_t Mount(void *context)
 {
     fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *)context;
@@ -154,6 +160,7 @@ static firmware_status_t Mount(void *context)
         return FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status;
     }
 
+    /* 只有介质存在且共享状态为空闲时才允许挂载。 */
     status = FatFsStatus(f_mount(&SDFatFS, SDPath, 1U));
     if (!FirmwareStatus_IsOk(status))
     {
@@ -164,6 +171,7 @@ static firmware_status_t Mount(void *context)
     return FIRMWARE_STATUS_OK;
 }
 
+/** 关闭残留 request 文件后卸载 FatFs 卷。 */
 static firmware_status_t Unmount(void *context)
 {
     fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *)context;
@@ -192,6 +200,7 @@ static firmware_status_t Unmount(void *context)
     return status;
 }
 
+/** 打开一个发布包文件，并记录 SDFile 的共享所有权。 */
 static firmware_status_t OpenPath(fatfs_package_source_adapter_t *adapter, const char *path)
 {
     char full_path[FATFS_PACKAGE_SOURCE_PATH_BUFFER_SIZE];
@@ -219,6 +228,7 @@ static firmware_status_t OpenPath(fatfs_package_source_adapter_t *adapter, const
     return status;
 }
 
+/** 打开枚举指定的固定发布包文件。 */
 static firmware_status_t Open(void *context, package_file_id_t file)
 {
     const char *path = PackageFilePath(file);
@@ -227,6 +237,7 @@ static firmware_status_t Open(void *context, package_file_id_t file)
                           : OpenPath((fatfs_package_source_adapter_t *)context, path);
 }
 
+/** 关闭当前发布包文件；仅在 f_close 成功后清除状态标志。 */
 static firmware_status_t Close(void *context)
 {
     fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *)context;
@@ -248,6 +259,7 @@ static firmware_status_t Close(void *context)
     return status;
 }
 
+/** 获取当前发布包文件大小，并检查 32 位范围。 */
 static firmware_status_t GetSize(void *context, uint32_t *size)
 {
     const fatfs_package_source_adapter_t *adapter =
@@ -271,6 +283,7 @@ static firmware_status_t GetSize(void *context, uint32_t *size)
     return FIRMWARE_STATUS_OK;
 }
 
+/** 在指定偏移读取发布包数据，确保请求完全位于文件范围内。 */
 static firmware_status_t ReadAt(void *context, uint32_t offset, void *data, uint32_t size,
                                 uint32_t *bytes_read)
 {
@@ -294,6 +307,7 @@ static firmware_status_t ReadAt(void *context, uint32_t offset, void *data, uint
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
+    /* FatFs 先定位再读取；返回实际读取字节数供上层校验。 */
     result = f_lseek(&SDFile, (FSIZE_t)offset);
     if (result != FR_OK)
     {
@@ -304,6 +318,7 @@ static firmware_status_t ReadAt(void *context, uint32_t offset, void *data, uint
     return FatFsStatus(result);
 }
 
+/** 将 package_source 的字节缓冲区请求转发到通用读取实现。 */
 static firmware_status_t PackageReadAt(void *context, uint32_t offset, uint8_t *data,
                                        uint32_t size, uint32_t *bytes_read)
 {
@@ -316,6 +331,7 @@ firmware_status_t FatFsReleaseVolumeContext_Init(fatfs_release_volume_context_t 
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
+    /* 卷状态由两个适配器共享，初始化时必须全部清空。 */
     volume->mounted = 0;
     volume->package_file_open = 0;
     volume->request_file_open = 0;
@@ -330,6 +346,7 @@ firmware_status_t FatFsPackageSourceAdapter_Init(fatfs_package_source_adapter_t 
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
+    /* Package Source 和 Request Store 共用同一个卷状态及 SDFile。 */
     adapter->volume = volume;
     adapter->interface.context = adapter;
     adapter->interface.is_media_present = IsMediaPresent;
@@ -345,5 +362,6 @@ firmware_status_t FatFsPackageSourceAdapter_Init(fatfs_package_source_adapter_t 
 const package_source_t *FatFsPackageSourceAdapter_Interface(
     const fatfs_package_source_adapter_t *adapter)
 {
+    /* 返回适配器内嵌的发布包接口。 */
     return (adapter == NULL) ? NULL : &adapter->interface;
 }

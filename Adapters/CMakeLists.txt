@@ -1,4 +1,5 @@
 add_library(firmware_adapters STATIC
+    # 按硬件类别列出适配实现，将底层驱动绑定到 Firmware 接口。
     src/at24_boot_control_adapter.c
     src/cortex_m_application_jump_adapter.c
     src/fatfs_package_source_adapter.c
@@ -12,10 +13,12 @@ add_library(firmware_adapters STATIC
 )
 
 target_include_directories(firmware_adapters PUBLIC
+    # 对外公开适配器头文件，供 Composition 注入服务依赖。
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 target_link_libraries(firmware_adapters
+    # 适配器依赖稳定的 Firmware 接口；具体实现链接到 STM32、BSP 和设备驱动。
     PUBLIC firmware_interfaces
     PRIVATE
         stm32cubemx

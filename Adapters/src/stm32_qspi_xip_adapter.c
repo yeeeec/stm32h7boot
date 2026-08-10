@@ -1,6 +1,6 @@
 /**
  * @file stm32_qspi_xip_adapter.c
- * @brief STM32 QSPI memory-mapped execution control implementation.
+ * @brief STM32 QSPI memory-mapped 执行控制实现。
  */
 #include "adapters/stm32_qspi_xip_adapter.h"
 
@@ -11,11 +11,16 @@
 #include "platform/platform_cache.h"
 #include "stm32h7xx_hal.h"
 
+/** memory-mapped 模式使用的单线快速读取指令。 */
 #define QSPI_FAST_READ_INSTRUCTION 0x0BU
+/** 快速读取指令所需的 dummy cycle 数。 */
 #define QSPI_FAST_READ_DUMMY_CYCLES 8U
+/** QSPI memory-mapped 窗口起始地址。 */
 #define QSPI_MAPPED_BASE            0x90000000UL
+/** QSPI memory-mapped 窗口允许的最大范围。 */
 #define QSPI_MAPPED_SIZE            (32UL * 1024UL * 1024UL)
 
+/** 将 HAL 状态码转换为固件层统一状态码。 */
 static firmware_status_t HalStatus(HAL_StatusTypeDef status)
 {
     if (status == HAL_OK)
@@ -65,6 +70,7 @@ static void SynchronizeIndirectHalState(QSPI_HandleTypeDef *handle)
     }
 }
 
+/** 配置并进入 QSPI memory-mapped 读取模式。 */
 static firmware_status_t Enter(void *context)
 {
     stm32_qspi_xip_adapter_t *adapter =
@@ -90,6 +96,7 @@ static firmware_status_t Enter(void *context)
     }
     SynchronizeIndirectHalState(handle);
 
+    /* 使用单线快速读取命令配置 memory-mapped 窗口。 */
     memset(&command, 0, sizeof(command));
     command.InstructionMode = QSPI_INSTRUCTION_1_LINE;
     command.Instruction = QSPI_FAST_READ_INSTRUCTION;
@@ -119,6 +126,7 @@ static firmware_status_t Enter(void *context)
     return status;
 }
 
+/** 退出 QSPI memory-mapped 模式并恢复可执行 indirect 状态。 */
 static firmware_status_t Exit(void *context)
 {
     stm32_qspi_xip_adapter_t *adapter =
@@ -143,7 +151,7 @@ static firmware_status_t Exit(void *context)
     }
     /*
      * 外部调试器或异常复位可能只保留硬件 CCR，未同步 HAL State。让 HAL Abort
-     * 进入正确分支后再执行；本 Adapter 是该 Handle 的唯一模式所有者。
+     * 进入正确分支后再执行；本适配器是该句柄的唯一模式所有者。
      */
     if (HAL_QSPI_GetState(handle) != HAL_QSPI_STATE_BUSY_MEM_MAPPED)
     {
@@ -169,6 +177,7 @@ static firmware_status_t Exit(void *context)
     return status;
 }
 
+/** 读取 QSPI 硬件 FMODE，并同步 HAL 的间接模式状态。 */
 static firmware_status_t IsMapped(void *context, int *mapped)
 {
     stm32_qspi_xip_adapter_t *adapter =
@@ -193,6 +202,7 @@ static firmware_status_t IsMapped(void *context, int *mapped)
     return FIRMWARE_STATUS_OK;
 }
 
+/** 按 D-Cache 行边界失效 XIP 数据缓存和指令缓存。 */
 static firmware_status_t Invalidate(
     void *context,
     uint32_t mapped_address,
@@ -228,6 +238,7 @@ static firmware_status_t Invalidate(
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
 
+    /* Cache 失效范围必须覆盖完整的 D-Cache 行。 */
     aligned_start = mapped_address & ~(PLATFORM_DCACHE_LINE_SIZE - 1U);
     if (range_end > UINT32_MAX - (PLATFORM_DCACHE_LINE_SIZE - 1U))
     {
@@ -255,6 +266,7 @@ firmware_status_t Stm32QspiXipAdapter_Init(
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
+    /* 适配器只保存 HAL 句柄引用，句柄生命周期由 Composition 管理。 */
     adapter->qspi_handle = qspi_handle;
     adapter->mapped = 0;
     adapter->interface.context = adapter;
@@ -268,5 +280,6 @@ firmware_status_t Stm32QspiXipAdapter_Init(
 const xip_controller_t *Stm32QspiXipAdapter_Interface(
     const stm32_qspi_xip_adapter_t *adapter)
 {
+    /* 返回适配器内嵌的 XIP 控制器接口。 */
     return (adapter == NULL) ? NULL : &adapter->interface;
 }
