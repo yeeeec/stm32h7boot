@@ -763,9 +763,38 @@ static void TestProgressLogRateLimit(void)
     RunToTerminal();
 }
 
+static void TestSingleComponentProgress(void)
+{
+    boot_active_record_t base;
+    uint32_t count;
+
+    /* A GUI-only install must report progress against GUI work only.  The
+     * unselected APP component is absent from this Manifest fixture. */
+    ResetFixture();
+    base = MakeBaseRecord();
+    PrepareMask(UPDATE_COMPONENT_GUI);
+    assert(UpdateService_InstallStartWithRecord(&update_service, &base) == FIRMWARE_STATUS_OK);
+    clock_now_ms = UPDATE_SERVICE_PROGRESS_LOG_INTERVAL_MS;
+    for (count = 0U; (count < 100U) && (update_service.progress_last_percent == 0U); ++count)
+    {
+        UpdateService_Process(&update_service);
+    }
+    assert(update_service.progress_last_percent != 0U);
+    RunToTerminal();
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_SUCCEEDED);
+}
+
 static void TestStateGuardsAndLegacy(void)
 {
     update_request_t request;
+
+    ResetFixture();
+    request = MakeRequest();
+    request.component_mask = UPDATE_COMPONENT_ALL + 1U;
+    assert(UpdateService_PrepareStart(&update_service, &request) ==
+           FIRMWARE_STATUS_INVALID_ARGUMENT);
+    assert(UpdateService_GetState(&update_service) == SERVICE_RUN_STATE_IDLE);
+    assert(source_fixture.open_count == 0U);
 
     ResetFixture();
     request = MakeRequest();
@@ -1063,6 +1092,7 @@ int main(void)
     TestAlignedEraseRange();
     TestPartialInstallPreservesUnselectedMetadata();
     TestProgressLogRateLimit();
+    TestSingleComponentProgress();
     TestStateGuardsAndLegacy();
     TestSourceFailuresDoNotErase();
     TestTargetFailures();

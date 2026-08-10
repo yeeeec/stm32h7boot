@@ -714,6 +714,12 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service,
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+    if ((request->component_mask != 0U) &&
+        ((request->component_mask & ~UPDATE_COMPONENT_ALL) != 0U))
+    {
+        /* Reject malformed selection before acquiring any package resource. */
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
     /* 复制请求和清空上次输出，防止上一次安装残留影响本次策略。 */
     implementation->request = *request;
     if (implementation->request.component_mask == 0U)
@@ -1076,6 +1082,7 @@ static firmware_status_t CalculateEraseLength(const update_service_t *service, i
  */
 static int CalculateInstallProgressPercent(const update_service_t *service, uint32_t *percent)
 {
+    uint32_t selected;
     uint32_t app_erase_size;
     uint32_t gui_erase_size;
     uint64_t app_size;
@@ -1083,15 +1090,34 @@ static int CalculateInstallProgressPercent(const update_service_t *service, uint
     uint64_t completed;
     uint64_t total;
 
-    if ((service == NULL) || (percent == NULL) ||
-        !FirmwareStatus_IsOk(CalculateEraseLength(service, 1, &app_erase_size)) ||
-        !FirmwareStatus_IsOk(CalculateEraseLength(service, 0, &gui_erase_size)))
+    if ((service == NULL) || (percent == NULL))
     {
         return 0;
     }
 
-    app_size = service->manifest.app.size_bytes;
-    gui_size = service->manifest.gui.size_bytes;
+    /* Progress is scoped to the components selected by this request.  An
+     * unselected Manifest component is intentionally absent (size == 0), so
+     * asking CalculateEraseLength() for it would make progress unavailable for
+     * GUI-only or APP-only installs. */
+    selected = service->request.component_mask & (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI);
+    if (selected == 0U)
+    {
+        return 0;
+    }
+    app_size = (selected & UPDATE_COMPONENT_APP) != 0U ? service->manifest.app.size_bytes : 0ULL;
+    gui_size = (selected & UPDATE_COMPONENT_GUI) != 0U ? service->manifest.gui.size_bytes : 0ULL;
+    app_erase_size = 0U;
+    gui_erase_size = 0U;
+    if (((selected & UPDATE_COMPONENT_APP) != 0U) &&
+        !FirmwareStatus_IsOk(CalculateEraseLength(service, 1, &app_erase_size)))
+    {
+        return 0;
+    }
+    if (((selected & UPDATE_COMPONENT_GUI) != 0U) &&
+        !FirmwareStatus_IsOk(CalculateEraseLength(service, 0, &gui_erase_size)))
+    {
+        return 0;
+    }
     total = (3ULL * app_size) + (3ULL * gui_size) + app_erase_size + gui_erase_size;
     if (total == 0ULL)
     {

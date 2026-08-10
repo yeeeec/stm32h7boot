@@ -748,6 +748,14 @@ firmware_status_t Application_Process(void)
             break;
 
         case APPLICATION_STAGE_THERAPY_CLOSE:
+            /* Only the stage that successfully opened therapy owns the current
+             * package file.  Keep this guard explicit so a future failure path
+             * cannot call close on an already released file. */
+            if (application_therapy_file_open == 0)
+            {
+                FinishTherapyClose();
+                break;
+            }
             status = application_dependencies.package_source->close(
                 application_dependencies.package_source->context);
             if (FirmwareStatus_IsOk(status))
