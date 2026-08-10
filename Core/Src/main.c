@@ -132,6 +132,7 @@ int main(void)
     MX_USART1_UART_Init();
     MX_IWDG1_Init();
     MX_SDMMC1_SD_Init();
+    MX_USART2_UART_Init();
     /* USER CODE BEGIN 2 */
     if (!FirmwareStatus_IsOk(Platform_Init()))
     {
@@ -164,7 +165,7 @@ int main(void)
 
             if (!FirmwareStatus_IsOk(status))
             {
-                LOG_ERROR("main", "platform process failed: status=%d", (int)status);
+                LOG_ERROR("main", "platform process failed: status=%d", (int) status);
                 Error_Handler();
             }
         }
@@ -173,7 +174,7 @@ int main(void)
 
             if (!FirmwareStatus_IsOk(status))
             {
-                LOG_ERROR("main", "application process failed: status=%d", (int)status);
+                LOG_ERROR("main", "application process failed: status=%d", (int) status);
                 Error_Handler();
             }
         }

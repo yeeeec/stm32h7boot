@@ -30,13 +30,11 @@ IWDG_HandleTypeDef hiwdg1;
 void MX_IWDG1_Init(void)
 {
 
+  /* USER CODE BEGIN IWDG1_Init 0 */
 #if defined(DEBUG)
   /* Keep the independent watchdog stopped during interactive debugging. */
   return;
 #else
-
-  /* USER CODE BEGIN IWDG1_Init 0 */
-
   /* USER CODE END IWDG1_Init 0 */
 
   /* USER CODE BEGIN IWDG1_Init 1 */
@@ -51,9 +49,8 @@ void MX_IWDG1_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN IWDG1_Init 2 */
-
-  /* USER CODE END IWDG1_Init 2 */
 #endif
+  /* USER CODE END IWDG1_Init 2 */
 
 }
 
