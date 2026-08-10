@@ -177,7 +177,7 @@ static int TestTherapySizeLimit(fake_hash_t *fake, manifest_service_t *service)
                        "\"minimum_bootloader_version\":\"1.0.0\"},\"components\":{"
                        "\"therapy\":{\"file\":\"therapy.app.bin\",\"format\":\"raw-bin-v1\","
                        "\"size\":%lu,\"sha256\":\"2222222222222222222222222222222222222222222222222222222222222222\"}}}",
-                       (unsigned long)MANIFEST_THERAPY_MAX_SIZE);
+                       (unsigned long)UPDATE_THERAPY_IMAGE_MAX_SIZE);
     ASSERT_TRUE((written > 0) && ((size_t)written < sizeof(document)));
     ASSERT_TRUE(ManifestService_ParseAndValidate(service, (const uint8_t *)document,
                                                  (uint32_t)written, &parsed) == FIRMWARE_STATUS_OK);

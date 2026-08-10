@@ -1,6 +1,8 @@
 /**
  * @file micro_ecc_authenticator.h
- * @brief secp256r1 SHA-256/ECDSA image authenticator provider.
+ * @brief Host 测试使用的 secp256r1 SHA-256/ECDSA image authenticator provider.
+ *
+ * 签名 Manifest 尚未进入当前生产发布合同，因此本实现不会链接到 firmware_crypto。
  */
 #ifndef CRYPTO_MICRO_ECC_AUTHENTICATOR_H
 #define CRYPTO_MICRO_ECC_AUTHENTICATOR_H

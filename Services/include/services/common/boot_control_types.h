@@ -20,8 +20,6 @@
 #define BOOT_CONTROL_MANIFEST_HASH_SIZE   32U
 /** APP 或 GUI SHA-256 摘要长度，单位为字节。 */
 #define BOOT_CONTROL_IMAGE_HASH_SIZE      32U
-/** Therapy MCU 固件持久化元数据允许的最大镜像大小。 */
-#define BOOT_CONTROL_THERAPY_MAX_SIZE     (512UL * 1024UL)
 /** 当前持久化记录格式版本。 */
 #define BOOT_ACTIVE_RECORD_FORMAT_V2      2U
 /** 增加 Therapy MCU 安装元数据的持久化记录格式。 */

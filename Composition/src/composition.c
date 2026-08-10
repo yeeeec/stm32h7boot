@@ -7,8 +7,8 @@
  * 和不变的 Board Policy；Boot、Update、Validation、Launch 决策仍由所属层负责。
  *
  * 只有所有依赖成功初始化后，才通过 Application_Configure() 发布依赖图。初始化
- * 没有 rollback，因此任何失败都是当前 Boot 的终态，并且必须保持
- * Composition_IsInitialized() 为 false。
+ * 没有 rollback，因此任何失败都是当前 Boot 的终态，调用者不能使用
+ * 未发布的对象图继续启动。
  */
 #include "composition/composition.h"
 
@@ -126,8 +126,8 @@ static const memory_region_t application_sram_regions[] = {
     /* D3 SRAM4，起始地址 0x38000000，容量 64 KiB。 */
     {0x38000000UL, 64UL * 1024UL},
 };
-/** 完整依赖图已经发布给 Application 的就绪标志。 */
-static int composition_initialized;
+/** 一次 Boot 内是否已经尝试过构建依赖图；失败后的部分对象不得再次复用。 */
+static int composition_init_attempted;
 
 /**
  * @brief 重置接口绑定的 SHA-256 Context，开始一次新摘要计算。
@@ -185,53 +185,33 @@ static hash_provider_t active_validation_hash_interface = {
     ManifestHashFinish,
 };
 
-firmware_status_t Composition_Init(void)
+static firmware_status_t InitializeLogging(void)
 {
-    /* 所有局部 Dependencies 只用于初始化；Service 会复制其中的借用指针。 */
     firmware_status_t status;
-    const async_block_device_t *external_flash;
-    async_block_device_info_t external_flash_info;
-    active_validation_service_dependencies_t validation_dependencies;
-    launch_service_dependencies_t launch_dependencies;
-    secondary_mcu_update_service_dependencies_t secondary_mcu_dependencies;
-    update_service_dependencies_t update_dependencies;
 
-    /* 装配过程不可回滚，禁止在同一 Boot 中对已发布对象重复初始化。 */
-    if (composition_initialized != 0)
-    {
-        LOG_WARN("composition", "initialization requested more than once");
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-
-    /* 先配置 Logger，保证后续依赖失败仍可诊断。 */
     STM32ClockAdapter_Init(&clock_adapter);
     UartLogAdapter_Init(&log_adapter);
-
     status = Logging_Configure(UartLogAdapter_Interface(&log_adapter),
                                STM32ClockAdapter_Interface(&clock_adapter));
-    if (!FirmwareStatus_IsOk(status))
+    if (FirmwareStatus_IsOk(status))
     {
-        return status;
+        LOG_DEBUG("composition", "logger dependencies bound");
     }
-    LOG_DEBUG("composition", "logger dependencies bound");
+    return status;
+}
 
-    /*
-     * The board policy freezes the expected Get-ID before the ROM driver may
-     * enter a programming session.  This init only binds pins/UART and leaves
-     * the secondary controller in its normal application boot condition.
-     */
-    {
-        const bsp_stm32_rom_boot_config_t rom_boot_config = {
-            COMPOSITION_SECONDARY_MCU_DEVICE_ID,
+static firmware_status_t InitializeSecondaryMcuProgrammer(void)
+{
+    const bsp_stm32_rom_boot_config_t rom_boot_config = {
+        COMPOSITION_SECONDARY_MCU_DEVICE_ID,
 #if COMPOSITION_SECONDARY_MCU_USE_EXTENDED_ERASE
-            BSP_STM32_ROM_BOOT_ERASE_EXTENDED,
+        BSP_STM32_ROM_BOOT_ERASE_EXTENDED,
 #else
-            BSP_STM32_ROM_BOOT_ERASE_STANDARD,
+        BSP_STM32_ROM_BOOT_ERASE_STANDARD,
 #endif
-        };
+    };
+    firmware_status_t status = BSP_Stm32RomBootInit(&rom_boot_config);
 
-        status = BSP_Stm32RomBootInit(&rom_boot_config);
-    }
     if (!FirmwareStatus_IsOk(status))
     {
         LOG_ERROR("composition", "secondary MCU BSP init failed: %d", (int) status);
@@ -242,86 +222,88 @@ firmware_status_t Composition_Init(void)
     if (!FirmwareStatus_IsOk(status))
     {
         LOG_ERROR("composition", "secondary MCU programmer init failed: %d", (int) status);
-        return status;
     }
+    return status;
+}
 
-    /* 外部 Flash Adapter 是安装、校验和启动三个流程共享的唯一块设备入口。 */
+static firmware_status_t InitializeExternalFlash(const async_block_device_t **external_flash,
+                                                  async_block_device_info_t *info)
+{
+    firmware_status_t status;
+
+    if ((external_flash == NULL) || (info == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
     status = SpiNorBlockAdapter_Init(&external_flash_adapter, BSP_ExternalFlashDevice());
     if (!FirmwareStatus_IsOk(status))
     {
         LOG_ERROR("composition", "external flash adapter init failed: %d", (int) status);
         return status;
     }
-
-    /* 几何参数无效时必须在任何 Service 修改 Runtime 前失败。 */
-    external_flash = SpiNorBlockAdapter_AsyncInterface(&external_flash_adapter);
-    status         = external_flash->get_info(external_flash->context, &external_flash_info);
+    *external_flash = SpiNorBlockAdapter_AsyncInterface(&external_flash_adapter);
+    if ((*external_flash == NULL) || ((*external_flash)->get_info == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    status = (*external_flash)->get_info((*external_flash)->context, info);
     if (!FirmwareStatus_IsOk(status))
     {
         LOG_ERROR("composition", "external flash info failed: %d", (int) status);
         return status;
     }
-    if ((external_flash_info.capacity_bytes == 0U) || (external_flash_info.program_size == 0U) ||
-        (external_flash_info.erase_size == 0U))
+    if ((info->capacity_bytes == 0U) || (info->program_size == 0U) || (info->erase_size == 0U))
     {
         LOG_ERROR("composition", "external flash geometry is invalid");
         return FIRMWARE_STATUS_INVALID_STATE;
     }
+    return FIRMWARE_STATUS_OK;
+}
 
-    /* Boot Control 使用独立 CRC Provider 校验 EEPROM 中的持久化记录。 */
+static firmware_status_t InitializeCapabilityServices(void)
+{
+    firmware_status_t status;
+    manifest_service_dependencies_t manifest_dependencies = {&manifest_hash_interface};
+    update_request_service_dependencies_t request_dependencies = {&manifest_hash_interface};
+    boot_control_service_dependencies_t boot_control_dependencies;
+
     status = Crc32IsoHdlc_Init(&crc32_provider);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
-
+    status = ManifestService_Init(&manifest_service, &manifest_dependencies);
+    if (!FirmwareStatus_IsOk(status))
     {
-        /* Manifest Service 借用共享 Hash 接口，解析期间独占其 Context。 */
-        manifest_service_dependencies_t manifest_dependencies = {&manifest_hash_interface};
-
-        status = ManifestService_Init(&manifest_service, &manifest_dependencies);
-        if (!FirmwareStatus_IsOk(status))
-        {
-            LOG_ERROR("composition", "Manifest service init failed: %d", (int) status);
-            return status;
-        }
+        LOG_ERROR("composition", "Manifest service init failed: %d", (int) status);
+        return status;
     }
-
+    status = UpdateRequestService_Init(&update_request_service, &request_dependencies);
+    if (!FirmwareStatus_IsOk(status))
     {
-        /* Request Service 与 Manifest Service 分时复用同一 Hash Context。 */
-        update_request_service_dependencies_t request_dependencies = {&manifest_hash_interface};
-
-        status = UpdateRequestService_Init(&update_request_service, &request_dependencies);
-        if (!FirmwareStatus_IsOk(status))
-        {
-            LOG_ERROR("composition", "Update request service init failed: %d", (int) status);
-            return status;
-        }
+        LOG_ERROR("composition", "Update request service init failed: %d", (int) status);
+        return status;
     }
-
-    /* EEPROM Adapter 和 CRC Provider 共同构成 Boot Control 的持久化边界。 */
     status = At24BootControlAdapter_Init(&eeprom_adapter, BSP_EepromDevice());
     if (!FirmwareStatus_IsOk(status))
     {
         LOG_ERROR("composition", "EEPROM adapter init failed: %d", (int) status);
         return status;
     }
-    {
-        boot_control_service_dependencies_t boot_control_dependencies = {
-            At24BootControlAdapter_Interface(&eeprom_adapter),
-            Crc32IsoHdlc_Interface(&crc32_provider),
-        };
-
-        status = BootControlService_Init(&boot_control_service, &boot_control_dependencies);
-    }
+    boot_control_dependencies.store = At24BootControlAdapter_Interface(&eeprom_adapter);
+    boot_control_dependencies.checksum = Crc32IsoHdlc_Interface(&crc32_provider);
+    status = BootControlService_Init(&boot_control_service, &boot_control_dependencies);
     if (!FirmwareStatus_IsOk(status))
     {
         LOG_ERROR("composition", "boot control init failed: %d", (int) status);
-        return status;
     }
+    return status;
+}
 
-    /* 两个 FatFs Adapter 共享同一发布卷，Application 统一管理挂载 Ownership。 */
-    status = FatFsReleaseVolumeContext_Init(&release_volume);
+static firmware_status_t InitializePackageAccess(void)
+{
+    firmware_status_t status = FatFsReleaseVolumeContext_Init(&release_volume);
+
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -338,32 +320,33 @@ firmware_status_t Composition_Init(void)
     {
         return status;
     }
-    status = FatFsUpdateRequestStoreAdapter_Init(&request_store_adapter, &release_volume);
+    return FatFsUpdateRequestStoreAdapter_Init(&request_store_adapter, &release_volume);
+}
+
+static firmware_status_t InitializeControlAdapters(void)
+{
+    firmware_status_t status = Stm32QspiXipAdapter_Init(&xip_adapter, &hqspi);
+
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
-
-    /* hqspi 已由 BSP 初始化；此处只建立模式切换与 Cache 控制接口。 */
-    status = Stm32QspiXipAdapter_Init(&xip_adapter, &hqspi);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-
-    /* Jump 与 Reset Adapter 封装最终不可逆的 Platform 控制权交接操作。 */
     status = CortexMApplicationJumpAdapter_Init(&jump_adapter);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
-    status = Stm32SystemResetAdapter_Init(&system_reset_adapter);
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
+    return Stm32SystemResetAdapter_Init(&system_reset_adapter);
+}
 
-    /* Active Validation 独占 Hash Context，但与 Update 分时复用 D2 I/O Buffer。 */
+static firmware_status_t InitializeUpdateServices(const async_block_device_t *external_flash)
+{
+    active_validation_service_dependencies_t validation_dependencies;
+    launch_service_dependencies_t launch_dependencies;
+    secondary_mcu_update_service_dependencies_t secondary_mcu_dependencies;
+    update_service_dependencies_t update_dependencies;
+    firmware_status_t status;
+
     validation_dependencies.storage      = external_flash;
     validation_dependencies.hash         = &active_validation_hash_interface;
     validation_dependencies.buffer       = service_io_buffer;
@@ -377,7 +360,6 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
-    /* Launch 复用同一 Flash/XIP 对象，并以固定 SRAM 表约束向量表初始 MSP。 */
     launch_dependencies.storage          = external_flash;
     launch_dependencies.xip_controller   = Stm32QspiXipAdapter_Interface(&xip_adapter);
     launch_dependencies.application_jump = CortexMApplicationJumpAdapter_Interface(&jump_adapter);
@@ -390,7 +372,6 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
-    /* Update 汇合发布卷、解析、Flash、XIP、布局和工作区，是依赖最多的 Service。 */
     update_dependencies.package_source =
         FatFsPackageSourceAdapter_Interface(&package_source_adapter);
     update_dependencies.manifest_service       = &manifest_service;
@@ -398,10 +379,6 @@ firmware_status_t Composition_Init(void)
     update_dependencies.hash                   = &manifest_hash_interface;
     update_dependencies.clock                  = STM32ClockAdapter_Interface(&clock_adapter);
     update_dependencies.storage                = external_flash;
-    /*
-     * 安装期间由 Update Service 独占 XIP 状态切换，并必须在首次 Runtime
-     * 擦除前肯定确认已处于 indirect mode。
-     */
     update_dependencies.xip_controller       = Stm32QspiXipAdapter_Interface(&xip_adapter);
     update_dependencies.runtime_layout       = BootRuntimeLayout_Get();
     update_dependencies.manifest_buffer      = manifest_buffer;
@@ -414,11 +391,6 @@ firmware_status_t Composition_Init(void)
         return status;
     }
 
-    /*
-     * The image adapter observes whichever package file Application has
-     * explicitly opened.  File selection, target layout and invocation policy
-     * remain top-level decisions; Composition only owns the reusable objects.
-     */
     secondary_mcu_dependencies.source =
         PackageImageSourceAdapter_Interface(&secondary_mcu_image_source_adapter);
     secondary_mcu_dependencies.programmer =
@@ -432,36 +404,86 @@ firmware_status_t Composition_Init(void)
     if (!FirmwareStatus_IsOk(status))
     {
         LOG_ERROR("composition", "secondary MCU service init failed: %d", (int) status);
+    }
+    return status;
+}
+
+static firmware_status_t PublishApplicationDependencies(void)
+{
+    const application_dependencies_t application_dependencies = {
+        .boot_control         = &boot_control_service,
+        .update               = &update_service,
+        .validation           = &active_validation_service,
+        .launch               = &launch_service,
+        .secondary_mcu_update = &secondary_mcu_update_service,
+        .secondary_mcu_target =
+            {
+                COMPOSITION_THERAPY_TARGET_ADDRESS,
+                COMPOSITION_THERAPY_TARGET_CAPACITY,
+                COMPOSITION_THERAPY_ERASE_PAGE_START,
+                COMPOSITION_THERAPY_ERASE_PAGE_COUNT,
+                0U,
+                {0U},
+            },
+        .package_source = FatFsPackageSourceAdapter_Interface(&package_source_adapter),
+        .update_request_store =
+            FatFsUpdateRequestStoreAdapter_Interface(&request_store_adapter),
+        .update_request_service = &update_request_service,
+        .system_reset           = Stm32SystemResetAdapter_Interface(&system_reset_adapter),
+        .bootloader_version     = {1U, 0U, 0U},
+    };
+
+    return Application_Configure(&application_dependencies);
+}
+
+firmware_status_t Composition_Init(void)
+{
+    firmware_status_t status;
+    const async_block_device_t *external_flash;
+    async_block_device_info_t external_flash_info;
+
+    if (composition_init_attempted != 0)
+    {
+        LOG_WARN("composition", "initialization requested more than once");
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    composition_init_attempted = 1;
+    status = InitializeLogging();
+    if (!FirmwareStatus_IsOk(status))
+    {
         return status;
     }
-
+    status = InitializeSecondaryMcuProgrammer();
+    if (!FirmwareStatus_IsOk(status))
     {
-        /* 最后才发布顶层依赖，确保 Application 永远看不到半初始化对象图。 */
-        const application_dependencies_t application_dependencies = {
-            .boot_control         = &boot_control_service,
-            .update               = &update_service,
-            .validation           = &active_validation_service,
-            .launch               = &launch_service,
-            .secondary_mcu_update = &secondary_mcu_update_service,
-            .secondary_mcu_target =
-                {
-                    COMPOSITION_THERAPY_TARGET_ADDRESS,
-                    COMPOSITION_THERAPY_TARGET_CAPACITY,
-                    COMPOSITION_THERAPY_ERASE_PAGE_START,
-                    COMPOSITION_THERAPY_ERASE_PAGE_COUNT,
-                    0U,
-                    {0U},
-                },
-            .package_source = FatFsPackageSourceAdapter_Interface(&package_source_adapter),
-            .update_request_store =
-                FatFsUpdateRequestStoreAdapter_Interface(&request_store_adapter),
-            .update_request_service = &update_request_service,
-            .system_reset           = Stm32SystemResetAdapter_Interface(&system_reset_adapter),
-            .bootloader_version     = {1U, 0U, 0U},
-        };
-
-        status = Application_Configure(&application_dependencies);
+        return status;
     }
+    status = InitializeExternalFlash(&external_flash, &external_flash_info);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status = InitializeCapabilityServices();
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status = InitializePackageAccess();
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status = InitializeControlAdapters();
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status = InitializeUpdateServices(external_flash);
+    if (!FirmwareStatus_IsOk(status))
+    {
+        return status;
+    }
+    status = PublishApplicationDependencies();
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -471,34 +493,6 @@ firmware_status_t Composition_Init(void)
              (unsigned long) external_flash_info.capacity_bytes,
              (unsigned long) external_flash_info.program_size,
              (unsigned long) external_flash_info.erase_size);
-
-    /* 就绪标志必须是整个对象图成功初始化并被 Application 接受后的最后一次写入。 */
-    composition_initialized = 1;
     LOG_INFO("composition", "service dependencies initialized");
     return FIRMWARE_STATUS_OK;
-}
-
-int Composition_IsInitialized(void)
-{
-    /* 失败路径从不置位，调用者不能把部分初始化的私有对象误判为可用依赖图。 */
-    return composition_initialized;
-}
-
-struct secondary_mcu_update_service *Composition_GetSecondaryMcuUpdateService(void)
-{
-    return (composition_initialized != 0) ? &secondary_mcu_update_service : NULL;
-}
-
-const firmware_image_source_t *Composition_GetSecondaryMcuImageSource(void)
-{
-    return (composition_initialized != 0)
-               ? PackageImageSourceAdapter_Interface(&secondary_mcu_image_source_adapter)
-               : NULL;
-}
-
-const mcu_programmer_t *Composition_GetSecondaryMcuProgrammer(void)
-{
-    return (composition_initialized != 0)
-               ? Stm32RomBootProgrammerAdapter_Interface(&secondary_mcu_programmer_adapter)
-               : NULL;
 }

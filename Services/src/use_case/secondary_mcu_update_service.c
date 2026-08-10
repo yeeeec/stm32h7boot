@@ -11,6 +11,8 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "services/common/update_request_types.h"
+
 #define SECONDARY_MCU_REQUIRED_CAPABILITIES                                                        \
     (MCU_PROGRAMMER_CAPABILITY_READ | MCU_PROGRAMMER_CAPABILITY_WRITE |                            \
      MCU_PROGRAMMER_CAPABILITY_ERASE)
@@ -144,7 +146,7 @@ firmware_status_t SecondaryMcuUpdateService_Start(struct secondary_mcu_update_se
         return FIRMWARE_STATUS_INVALID_STATE;
     }
     if ((request->image_size_bytes == 0U) ||
-        (request->image_size_bytes > (512UL * 1024UL)) ||
+        (request->image_size_bytes > UPDATE_THERAPY_IMAGE_MAX_SIZE) ||
         (request->target_capacity_bytes == 0U) ||
         (request->image_size_bytes > request->target_capacity_bytes) ||
         (request->erase_page_count == 0U) ||

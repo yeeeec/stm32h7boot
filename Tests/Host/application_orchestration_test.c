@@ -24,7 +24,9 @@ static struct update_service update;
 static struct active_validation_service validation;
 static struct launch_service launch;
 static struct update_request_service request_parser;
+#if defined(TEST_THERAPY_ONLY) || defined(TEST_THERAPY_DOWNGRADE)
 static struct secondary_mcu_update_service secondary_update;
+#endif
 static boot_active_record_t active_record;
 static boot_active_record_t candidate_record;
 static boot_active_record_t committed_record;
@@ -491,7 +493,7 @@ int main(void)
 #if defined(TEST_THERAPY_ONLY) || defined(TEST_THERAPY_DOWNGRADE)
     dependencies.secondary_mcu_update = &secondary_update;
     dependencies.secondary_mcu_target.target_address = 0x08000000UL;
-    dependencies.secondary_mcu_target.target_capacity_bytes = MANIFEST_THERAPY_MAX_SIZE;
+    dependencies.secondary_mcu_target.target_capacity_bytes = UPDATE_THERAPY_IMAGE_MAX_SIZE;
     dependencies.secondary_mcu_target.erase_page_count = 4U;
 #endif
     dependencies.package_source = &source;

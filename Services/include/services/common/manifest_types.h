@@ -21,9 +21,6 @@
 #define MANIFEST_SHA256_SIZE         32U
 /** package_id 派生哈希的截断长度，单位为字节。 */
 #define MANIFEST_PACKAGE_HASH_SIZE   16U
-/** therapy.app.bin 允许的最大 RAW 镜像大小。 */
-#define MANIFEST_THERAPY_MAX_SIZE    (512UL * 1024UL)
-
 /** 单个 APP 或 GUI payload 在发布包中的受验证描述。 */
 typedef struct
 {

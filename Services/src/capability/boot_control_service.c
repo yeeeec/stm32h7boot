@@ -294,7 +294,7 @@ static firmware_status_t ValidateActiveBuffer(boot_control_service_t *service,
         }
         if ((buffer[0x94U] != UPDATE_COMPONENT_ALL) || (ReadU16(&buffer[0xA2U]) != 0U) ||
             (ReadU32(&buffer[0x98U]) == 0U) ||
-            (ReadU32(&buffer[0x98U]) > BOOT_CONTROL_THERAPY_MAX_SIZE))
+            (ReadU32(&buffer[0x98U]) > UPDATE_THERAPY_IMAGE_MAX_SIZE))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
@@ -503,7 +503,7 @@ static firmware_status_t EncodeActive(boot_control_service_t *service,
     }
     if ((format == RECORD_FORMAT_V3) &&
         ((record->component_mask != UPDATE_COMPONENT_ALL) || (record->therapy_size == 0U) ||
-         (record->therapy_size > BOOT_CONTROL_THERAPY_MAX_SIZE)))
+         (record->therapy_size > UPDATE_THERAPY_IMAGE_MAX_SIZE)))
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }

@@ -105,7 +105,7 @@ BSP 知道板子的引脚、外设句柄、HAL 参数和传输方式，但不应
 - `package_source_t`：挂载发布卷、打开固定文件、读取文件；
 - `xip_controller_t`：进入/退出 QSPI memory-mapped 模式；
 - `application_jump_t`：跳转到已验证的 Application；
-- `system_clock_t`、`watchdog_t`、`log_sink_t`。
+- `system_clock_t`、`log_sink_t`。
 
 一个接口本质上是 C 语言的“对象 + 方法表”：
 
@@ -118,7 +118,7 @@ typedef struct
         uint32_t address,
         void *data,
         uint32_t size);
-} block_device_t;
+} async_block_device_t;
 ```
 
 使用者不关心 `context` 指向什么，只调用方法：
@@ -127,7 +127,7 @@ typedef struct
 status = storage->read(storage->context, address, buffer, size);
 ```
 
-`context` 的作用类似 C++ 对象方法中的 `this`。因此同一份 Service 代码可以使用 SPI NOR、RAM Fake、Host 文件或测试桩。
+`context` 的作用类似 C++ 对象方法中的 `this`。因此同一份 Service 代码可以使用 SPI NOR、RAM Fake、Host 文件或测试桩。当前外部 Flash 只暴露异步 `async_block_device_t`，避免同步擦除/编程绕过主循环的有界执行约束。
 
 ### 3.5 Adapters：把已有实现转换成接口
 

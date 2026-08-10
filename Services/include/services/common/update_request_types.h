@@ -16,6 +16,8 @@
 #define UPDATE_REQUEST_PACKAGE_ID_MAX_SIZE 63U
 /** Manifest SHA-256 摘要长度，单位为字节。 */
 #define UPDATE_REQUEST_MANIFEST_HASH_SIZE  32U
+/** therapy.app.bin 的产品级最大 RAW 镜像大小，单位为字节。 */
+#define UPDATE_THERAPY_IMAGE_MAX_SIZE      (512UL * 1024UL)
 
 /** Upgrade-request component selection bits. */
 #define UPDATE_COMPONENT_APP     (1U << 0)

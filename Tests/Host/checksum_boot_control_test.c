@@ -359,7 +359,7 @@ static int TestTherapyV3RoundTrip(void)
 
     record.format_version = BOOT_ACTIVE_RECORD_FORMAT_V3;
     record.component_mask = UPDATE_COMPONENT_ALL;
-    record.therapy_size = BOOT_CONTROL_THERAPY_MAX_SIZE;
+    record.therapy_size = UPDATE_THERAPY_IMAGE_MAX_SIZE;
     record.therapy_version.major = 3U;
     record.therapy_version.minor = 2U;
     record.therapy_version.patch = 1U;
@@ -374,10 +374,10 @@ static int TestTherapyV3RoundTrip(void)
                 BOOT_ACTIVE_RECORD_FORMAT_V3);
     TEST_ASSERT(store.bytes[ACTIVE_A_ADDRESS + 0x94U] == UPDATE_COMPONENT_ALL);
     TEST_ASSERT(ReadU32(&store.bytes[ACTIVE_A_ADDRESS + 0x98U]) ==
-                BOOT_CONTROL_THERAPY_MAX_SIZE);
+                UPDATE_THERAPY_IMAGE_MAX_SIZE);
     TEST_ASSERT(BootControlService_LoadActive(&service, &loaded) == FIRMWARE_STATUS_OK);
     TEST_ASSERT((loaded.component_mask == UPDATE_COMPONENT_ALL) &&
-                (loaded.therapy_size == BOOT_CONTROL_THERAPY_MAX_SIZE) &&
+                (loaded.therapy_size == UPDATE_THERAPY_IMAGE_MAX_SIZE) &&
                 (loaded.therapy_version.major == 3U) &&
                 (loaded.therapy_version.minor == 2U) &&
                 (loaded.therapy_version.patch == 1U));

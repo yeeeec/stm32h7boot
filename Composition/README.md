@@ -195,9 +195,9 @@ Manifest 的大小和 SHA-256 与 Composition 的固定目标布局组合成
 package_source->open(package_source->context, PACKAGE_FILE_THERAPY_APP);
 ```
 
-该标识对应 `/firmware/therapy.app.bin`。打开成功后，
-`Composition_GetSecondaryMcuImageSource()` 才能读取该文件；文件的关闭和卷的卸载
-仍由 Application 工作流负责。
+该标识对应 `/firmware/therapy.app.bin`。打开成功后，Composition 已注入的
+`PackageImageSourceAdapter` 才能读取该文件；文件的关闭和卷的卸载仍由
+Application 工作流负责。
 
 ## 8. 所有权和生命周期
 

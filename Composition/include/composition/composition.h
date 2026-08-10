@@ -8,11 +8,7 @@
 #ifndef COMPOSITION_H
 #define COMPOSITION_H
 
-#include "firmware/image_source.h"
-#include "firmware/mcu_programmer.h"
 #include "firmware/status.h"
-
-struct secondary_mcu_update_service;
 
 /**
  * @brief 将具体 Platform 与 BSP 实现绑定到 Application Service。
@@ -34,29 +30,5 @@ struct secondary_mcu_update_service;
  * @return 其他依赖失败时返回对应的依赖错误状态。
  */
 firmware_status_t Composition_Init(void);
-
-/**
- * @brief 查询依赖图是否已初始化。
- *
- * @return 仅在 Composition_Init() 完成 Application 配置后返回非零；初始化前
- *         或任意一次失败后返回零。
- */
-int Composition_IsInitialized(void);
-
-/**
- * @brief Return the prepared secondary-MCU update service.
- *
- * The returned object is owned by Composition and remains valid for the
- * lifetime of the firmware.  It is NULL until the complete dependency graph
- * has been published.  The caller still supplies the image selection and
- * target layout to SecondaryMcuUpdateService_Start().
- */
-struct secondary_mcu_update_service *Composition_GetSecondaryMcuUpdateService(void);
-
-/** Return the random-access source bridge for the currently open package file. */
-const firmware_image_source_t *Composition_GetSecondaryMcuImageSource(void);
-
-/** Return the ROM programmer interface owned by Composition. */
-const mcu_programmer_t *Composition_GetSecondaryMcuProgrammer(void);
 
 #endif

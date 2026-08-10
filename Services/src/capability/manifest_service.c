@@ -11,12 +11,10 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "services/common/runtime_layout.h"
+
 /** 当前支持的生产 Manifest schema 版本。 */
 #define MANIFEST_FORMAT_VERSION 1U
-/** Application 原始镜像允许写入 APP 区域的最大字节数。 */
-#define APP_MAXIMUM_IMAGE_SIZE  1048576UL
-/** GUI 原始资源允许写入 GUI 区域的最大字节数。 */
-#define GUI_MAXIMUM_IMAGE_SIZE  8388608UL
 
 /**
  * 查找对象中的一个成员值 token。
@@ -434,7 +432,7 @@ static firmware_status_t ParseComponents(const json_document_t *document, uint32
     if (FirmwareStatus_IsOk(FindMember(document, components, "app", &component)))
     {
         if (!FirmwareStatus_IsOk(ParseComponent(document, component, "hmi.app.bin",
-                                                 APP_MAXIMUM_IMAGE_SIZE, &manifest->app)))
+                                                 BOOT_APP_RUNTIME_SIZE, &manifest->app)))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
@@ -444,7 +442,7 @@ static firmware_status_t ParseComponents(const json_document_t *document, uint32
     if (FirmwareStatus_IsOk(FindMember(document, components, "gui", &component)))
     {
         if (!FirmwareStatus_IsOk(ParseComponent(document, component, "hmi.gui.bin",
-                                                 GUI_MAXIMUM_IMAGE_SIZE, &manifest->gui)))
+                                                 BOOT_GUI_RUNTIME_SIZE, &manifest->gui)))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
@@ -454,7 +452,7 @@ static firmware_status_t ParseComponents(const json_document_t *document, uint32
     if (FirmwareStatus_IsOk(FindMember(document, components, "therapy", &component)))
     {
         if (!FirmwareStatus_IsOk(ParseComponent(document, component, "therapy.app.bin",
-                                                 MANIFEST_THERAPY_MAX_SIZE,
+                                                 UPDATE_THERAPY_IMAGE_MAX_SIZE,
                                                  &manifest->therapy)))
         {
             return FIRMWARE_STATUS_INVALID_STATE;

@@ -618,9 +618,8 @@ hash_provider_t
 xip_controller_t
 application_jump_t
 system_reset_t
-clock_t
-watchdog_t
-logger_t
+system_clock_t
+log_sink_t
 ```
 
 可保留 `checksum_t` 用于 EEPROM record CRC 或其他诊断，但固件内容完整性基线是 SHA-256。
