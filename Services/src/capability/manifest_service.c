@@ -572,17 +572,16 @@ firmware_status_t ManifestService_ParseAndValidate(struct manifest_service *serv
                                                    const uint8_t *data, uint32_t size,
                                                    validated_manifest_t *manifest)
 {
-    manifest_service_t *implementation = (manifest_service_t *)service;
     validated_manifest_t parsed;
     json_document_t document;
     uint8_t package_digest[MANIFEST_SHA256_SIZE];
     firmware_status_t status;
 
-    if ((implementation == NULL) || (data == NULL) || (manifest == NULL))
+    if ((service == NULL) || (data == NULL) || (manifest == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if (implementation->initialized == 0)
+    if (service->initialized == 0)
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -592,7 +591,7 @@ firmware_status_t ManifestService_ParseAndValidate(struct manifest_service *serv
     }
 
     memset(&parsed, 0, sizeof(parsed));
-    status = JsonDocument_Parse(&document, data, size, implementation->tokens,
+    status = JsonDocument_Parse(&document, data, size, service->tokens,
                                 MANIFEST_SERVICE_TOKEN_CAPACITY);
     /* 按冻结 schema 由外到内校验，任何一步失败都阻止后续字段或哈希处理。 */
     if (FirmwareStatus_IsOk(status))
@@ -613,11 +612,11 @@ firmware_status_t ManifestService_ParseAndValidate(struct manifest_service *serv
     }
     if (FirmwareStatus_IsOk(status))
     {
-        status = HashBytes(implementation->hash, data, size, parsed.manifest_sha256);
+        status = HashBytes(service->hash, data, size, parsed.manifest_sha256);
     }
     if (FirmwareStatus_IsOk(status))
     {
-        status = HashBytes(implementation->hash, parsed.package_id, strlen(parsed.package_id),
+        status = HashBytes(service->hash, parsed.package_id, strlen(parsed.package_id),
                            package_digest);
     }
     if (FirmwareStatus_IsOk(status))

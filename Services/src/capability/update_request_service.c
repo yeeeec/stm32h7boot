@@ -251,7 +251,6 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
                                                  "manifest_sha256"};
     static const char *const selected_members[] = {"format_version", "requested", "package_id",
                                                    "manifest_sha256", "component_mask"};
-    update_request_service_t *implementation = (update_request_service_t *)service;
     update_request_t parsed;
     json_document_t document;
     uint32_t requested;
@@ -261,11 +260,11 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
     int requested_value;
     firmware_status_t status;
 
-    if ((implementation == NULL) || (data == NULL) || (request == NULL))
+    if ((service == NULL) || (data == NULL) || (request == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if (implementation->initialized == 0)
+    if (service->initialized == 0)
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -275,7 +274,7 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
     }
 
     memset(&parsed, 0, sizeof(parsed));
-    status = JsonDocument_Parse(&document, data, size, implementation->tokens,
+    status = JsonDocument_Parse(&document, data, size, service->tokens,
                                 UPDATE_REQUEST_SERVICE_TOKEN_CAPACITY);
     /* 格式版本、触发标志、包身份和摘要必须全部通过后才发布解析结果。 */
     if (FirmwareStatus_IsOk(status))
@@ -374,16 +373,15 @@ firmware_status_t UpdateRequestService_ValidateManifestBinding(
     uint32_t manifest_size,
     const validated_manifest_t *manifest)
 {
-    update_request_service_t *implementation = (update_request_service_t *)service;
     uint8_t raw_manifest_sha256[UPDATE_REQUEST_MANIFEST_HASH_SIZE];
     firmware_status_t status;
 
-    if ((implementation == NULL) || (request == NULL) || (manifest_data == NULL) ||
+    if ((service == NULL) || (request == NULL) || (manifest_data == NULL) ||
         (manifest == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if (implementation->initialized == 0)
+    if (service->initialized == 0)
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -394,7 +392,7 @@ firmware_status_t UpdateRequestService_ValidateManifestBinding(
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    status = HashBytes(implementation->hash, manifest_data, manifest_size, raw_manifest_sha256);
+    status = HashBytes(service->hash, manifest_data, manifest_size, raw_manifest_sha256);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;

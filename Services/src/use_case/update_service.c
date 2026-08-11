@@ -702,15 +702,13 @@ firmware_status_t UpdateService_Init(update_service_t *service,
 firmware_status_t UpdateService_PrepareStart(struct update_service *service,
                                              const update_request_t *request)
 {
-    update_service_t *implementation = (update_service_t *) service;
-
-    if ((implementation == NULL) || (request == NULL))
+    if ((service == NULL) || (request == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     /* 同一实例必须完成或被复位后才能接受新的 trusted request。 */
-    if ((implementation->initialized == 0) || (implementation->state != SERVICE_RUN_STATE_IDLE) ||
-        (implementation->source_file_open != 0))
+    if ((service->initialized == 0) || (service->state != SERVICE_RUN_STATE_IDLE) ||
+        (service->source_file_open != 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -721,35 +719,35 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service,
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     /* 复制请求和清空上次输出，防止上一次安装残留影响本次策略。 */
-    implementation->request = *request;
-    if (implementation->request.component_mask == 0U)
+    service->request = *request;
+    if (service->request.component_mask == 0U)
     {
         /* Compatibility for in-process V1 callers predating explicit selection. */
-        implementation->request.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+        service->request.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
     }
-    memset(&implementation->manifest, 0, sizeof(implementation->manifest));
-    memset(&implementation->candidate_record, 0, sizeof(implementation->candidate_record));
-    implementation->manifest_ready                    = 0;
-    implementation->candidate_ready                   = 0;
-    implementation->runtime_may_be_modified           = 0;
-    implementation->failure_status                    = FIRMWARE_STATUS_OK;
-    implementation->failure_error                     = BOOT_ERROR_NONE;
-    implementation->failure_stage                     = UPDATE_STAGE_IDLE;
-    implementation->close_retry_count                 = 0U;
-    implementation->xip_exit_attempts                 = 0U;
-    implementation->xip_check_before_runtime_mutation = 0;
-    implementation->cancel_requires_indirect          = 0;
-    implementation->progress_last_percent             = 0U;
-    implementation->progress_last_log_ms              = 0U;
-    implementation->progress_tracking_started         = 0;
-    implementation->manifest_size                     = 0U;
-    implementation->manifest_offset                   = 0U;
-    implementation->stage                             = UPDATE_STAGE_PREPARE_MANIFEST_OPEN;
-    implementation->state                             = SERVICE_RUN_STATE_RUNNING;
-    implementation->result.status                     = FIRMWARE_STATUS_OK;
-    implementation->result.error                      = BOOT_ERROR_NONE;
-    implementation->result.stage                      = (uint32_t) implementation->stage;
-    implementation->result.native_error               = 0;
+    memset(&service->manifest, 0, sizeof(service->manifest));
+    memset(&service->candidate_record, 0, sizeof(service->candidate_record));
+    service->manifest_ready                    = 0;
+    service->candidate_ready                   = 0;
+    service->runtime_may_be_modified           = 0;
+    service->failure_status                    = FIRMWARE_STATUS_OK;
+    service->failure_error                     = BOOT_ERROR_NONE;
+    service->failure_stage                     = UPDATE_STAGE_IDLE;
+    service->close_retry_count                 = 0U;
+    service->xip_exit_attempts                 = 0U;
+    service->xip_check_before_runtime_mutation = 0;
+    service->cancel_requires_indirect          = 0;
+    service->progress_last_percent             = 0U;
+    service->progress_last_log_ms              = 0U;
+    service->progress_tracking_started         = 0;
+    service->manifest_size                     = 0U;
+    service->manifest_offset                   = 0U;
+    service->stage                             = UPDATE_STAGE_PREPARE_MANIFEST_OPEN;
+    service->state                             = SERVICE_RUN_STATE_RUNNING;
+    service->result.status                     = FIRMWARE_STATUS_OK;
+    service->result.error                      = BOOT_ERROR_NONE;
+    service->result.stage                      = (uint32_t) service->stage;
+    service->result.native_error               = 0;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -757,21 +755,20 @@ firmware_status_t UpdateService_InstallStartWithRecord(
     struct update_service *service,
     const boot_active_record_t *current_record)
 {
-    update_service_t *implementation = (update_service_t *) service;
     uint32_t host_mask;
 
-    if (implementation == NULL)
+    if (service == NULL)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     /* Install 只能消费刚刚成功 Prepare 的 Manifest，不能绕过源校验。 */
-    if ((implementation->initialized == 0) ||
-        (implementation->state != SERVICE_RUN_STATE_SUCCEEDED) ||
-        (implementation->stage != UPDATE_STAGE_PREPARED) || (implementation->manifest_ready == 0))
+    if ((service->initialized == 0) ||
+        (service->state != SERVICE_RUN_STATE_SUCCEEDED) ||
+        (service->stage != UPDATE_STAGE_PREPARED) || (service->manifest_ready == 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    host_mask = implementation->request.component_mask &
+    host_mask = service->request.component_mask &
                 (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI);
     if ((host_mask == 0U) ||
         ((host_mask != (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI)) &&
@@ -781,35 +778,35 @@ firmware_status_t UpdateService_InstallStartWithRecord(
     }
     if (current_record != NULL)
     {
-        implementation->base_record = *current_record;
-        if (implementation->base_record.component_mask == 0U)
+        service->base_record = *current_record;
+        if (service->base_record.component_mask == 0U)
         {
-            implementation->base_record.component_mask =
+            service->base_record.component_mask =
                 UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
         }
-        implementation->base_record_valid = 1;
+        service->base_record_valid = 1;
     }
     else
     {
-        memset(&implementation->base_record, 0, sizeof(implementation->base_record));
-        implementation->base_record_valid = 0;
+        memset(&service->base_record, 0, sizeof(service->base_record));
+        service->base_record_valid = 0;
     }
-    implementation->candidate_ready         = 0;
-    implementation->runtime_may_be_modified = 0;
-    if (implementation->source_file_open != 0)
+    service->candidate_ready         = 0;
+    service->runtime_may_be_modified = 0;
+    if (service->source_file_open != 0)
     {
         /* Install 不得覆盖仍被上一次流程持有的真实文件状态。 */
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    implementation->xip_exit_attempts                 = 0U;
-    implementation->xip_check_before_runtime_mutation = 0;
-    implementation->cancel_requires_indirect          = 0;
-    implementation->progress_last_percent             = 0U;
-    implementation->progress_last_log_ms =
-        implementation->clock->now_ms(implementation->clock->context);
-    implementation->progress_tracking_started = 1;
-    implementation->stage                             = UPDATE_STAGE_XIP_CHECK_INDIRECT;
-    implementation->state                             = SERVICE_RUN_STATE_RUNNING;
+    service->xip_exit_attempts                 = 0U;
+    service->xip_check_before_runtime_mutation = 0;
+    service->cancel_requires_indirect          = 0;
+    service->progress_last_percent             = 0U;
+    service->progress_last_log_ms =
+        service->clock->now_ms(service->clock->context);
+    service->progress_tracking_started = 1;
+    service->stage                             = UPDATE_STAGE_XIP_CHECK_INDIRECT;
+    service->state                             = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -1520,67 +1517,66 @@ static void ProcessTarget(update_service_t *service, int app)
 
 void UpdateService_Process(struct update_service *service)
 {
-    update_service_t *implementation = (update_service_t *) service;
     int source_gui;
 
     /* 非运行态调用是安全的空操作，防止 Application 轮询终态时触发重复 I/O。 */
-    if ((implementation == NULL) || (implementation->initialized == 0) ||
-        (implementation->state != SERVICE_RUN_STATE_RUNNING))
+    if ((service == NULL) || (service->initialized == 0) ||
+        (service->state != SERVICE_RUN_STATE_RUNNING))
     {
         return;
     }
-    ReportInstallProgress(implementation);
+    ReportInstallProgress(service);
     /* 保留低频阶段入口诊断；逐页编程和逐扇区擦除由限流总进度替代。 */
-    if ((implementation->stage != implementation->logged_stage) ||
-        (implementation->stage_logged == 0))
+    if ((service->stage != service->logged_stage) ||
+        (service->stage_logged == 0))
     {
-        if (IsHighFrequencyStage(implementation->stage) == 0)
+        if (IsHighFrequencyStage(service->stage) == 0)
         {
             LOG_INFO("update", "stage=%s(%u) erase=0x%08lx program=0x%08lx target=0x%08lx",
-                     UpdateStageName(implementation->stage), (unsigned) implementation->stage,
-                     (unsigned long) implementation->erase_offset,
-                     (unsigned long) implementation->program_offset,
-                     (unsigned long) implementation->target_offset);
+                     UpdateStageName(service->stage), (unsigned) service->stage,
+                     (unsigned long) service->erase_offset,
+                     (unsigned long) service->program_offset,
+                     (unsigned long) service->target_offset);
         }
-        implementation->logged_stage = implementation->stage;
-        implementation->stage_logged = 1;
+        service->logged_stage = service->stage;
+        service->stage_logged = 1;
     }
-    if ((implementation->stage == UPDATE_STAGE_XIP_CHECK_INDIRECT) ||
-        (implementation->stage == UPDATE_STAGE_XIP_EXIT) ||
-        (implementation->stage == UPDATE_STAGE_XIP_VERIFY_INDIRECT))
+    if ((service->stage == UPDATE_STAGE_XIP_CHECK_INDIRECT) ||
+        (service->stage == UPDATE_STAGE_XIP_EXIT) ||
+        (service->stage == UPDATE_STAGE_XIP_VERIFY_INDIRECT))
     {
-        ProcessEnsureIndirectMode(implementation);
+        ProcessEnsureIndirectMode(service);
         return;
     }
-    if (implementation->stage == UPDATE_STAGE_CANCEL_CLOSE)
+    if (service->stage == UPDATE_STAGE_CANCEL_CLOSE)
     {
-        ProcessCancelClose(implementation);
+        ProcessCancelClose(service);
         return;
     }
-    if ((implementation->stage == UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT) ||
-        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_EXIT) ||
-        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_VERIFY_INDIRECT))
+    if ((service->stage == UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT) ||
+        (service->stage == UPDATE_STAGE_CANCEL_XIP_EXIT) ||
+        (service->stage == UPDATE_STAGE_CANCEL_XIP_VERIFY_INDIRECT))
     {
-        ProcessCancelEnsureIndirectMode(implementation);
+        ProcessCancelEnsureIndirectMode(service);
         return;
     }
     /* 使用连续枚举区间将细粒度状态委托给对应子状态机。 */
-    if ((implementation->stage >= UPDATE_STAGE_PREPARE_MANIFEST_OPEN) &&
-        (implementation->stage <= UPDATE_STAGE_PREPARE_MANIFEST_PARSE))
+    if ((service->stage >= UPDATE_STAGE_PREPARE_MANIFEST_OPEN) &&
+        (service->stage <= UPDATE_STAGE_PREPARE_MANIFEST_PARSE))
     {
-        ProcessPrepare(implementation);
+        ProcessPrepare(service);
         return;
     }
     /* APP 与 GUI 源预检复用同一处理函数，只通过参数决定当前组件。 */
-    if ((implementation->stage >= UPDATE_STAGE_SOURCE_APP_OPEN) &&
-        (implementation->stage <= UPDATE_STAGE_SOURCE_GUI_VERIFY))
+    if ((service->stage >= UPDATE_STAGE_SOURCE_APP_OPEN) &&
+        (service->stage <= UPDATE_STAGE_SOURCE_GUI_VERIFY))
     {
-        source_gui = (implementation->stage >= UPDATE_STAGE_SOURCE_GUI_OPEN) ? 1 : 0;
+        source_gui = (service->stage >= UPDATE_STAGE_SOURCE_GUI_OPEN) ? 1 : 0;
         ProcessSourceHash(
-            implementation, source_gui != 0 ? PACKAGE_FILE_GUI : PACKAGE_FILE_APP,
-            source_gui != 0 ? &implementation->manifest.gui : &implementation->manifest.app,
-            source_gui != 0 ? implementation->runtime_layout->gui_max_size
-                            : implementation->runtime_layout->app_max_size,
+            service, source_gui != 0 ? PACKAGE_FILE_GUI : PACKAGE_FILE_APP,
+            source_gui != 0 ? &service->manifest.gui : &service->manifest.app,
+            source_gui != 0 ? service->runtime_layout->gui_max_size
+                            : service->runtime_layout->app_max_size,
             source_gui != 0 ? UPDATE_STAGE_SOURCE_GUI_SIZE : UPDATE_STAGE_SOURCE_APP_SIZE,
             source_gui != 0 ? UPDATE_STAGE_SOURCE_GUI_HASH : UPDATE_STAGE_SOURCE_APP_HASH,
             source_gui != 0 ? UPDATE_STAGE_SOURCE_GUI_VERIFY : UPDATE_STAGE_SOURCE_APP_VERIFY,
@@ -1589,112 +1585,110 @@ void UpdateService_Process(struct update_service *service)
         return;
     }
     /* 以下顺序固定：APP 擦除/写入/回读，再 GUI 擦除/写入/回读。 */
-    if ((implementation->stage == UPDATE_STAGE_APP_ERASE) ||
-        (implementation->stage == UPDATE_STAGE_APP_ERASE_POLL))
+    if ((service->stage == UPDATE_STAGE_APP_ERASE) ||
+        (service->stage == UPDATE_STAGE_APP_ERASE_POLL))
     {
-        ProcessErase(implementation, 1);
+        ProcessErase(service, 1);
         return;
     }
-    if ((implementation->stage >= UPDATE_STAGE_APP_PROGRAM_OPEN) &&
-        (implementation->stage <= UPDATE_STAGE_APP_PROGRAM_HASH))
+    if ((service->stage >= UPDATE_STAGE_APP_PROGRAM_OPEN) &&
+        (service->stage <= UPDATE_STAGE_APP_PROGRAM_HASH))
     {
-        ProcessProgram(implementation, 1);
+        ProcessProgram(service, 1);
         return;
     }
-    if ((implementation->stage == UPDATE_STAGE_APP_TARGET_READ) ||
-        (implementation->stage == UPDATE_STAGE_APP_TARGET_HASH))
+    if ((service->stage == UPDATE_STAGE_APP_TARGET_READ) ||
+        (service->stage == UPDATE_STAGE_APP_TARGET_HASH))
     {
-        ProcessTarget(implementation, 1);
+        ProcessTarget(service, 1);
         return;
     }
-    if ((implementation->stage == UPDATE_STAGE_GUI_ERASE) ||
-        (implementation->stage == UPDATE_STAGE_GUI_ERASE_POLL))
+    if ((service->stage == UPDATE_STAGE_GUI_ERASE) ||
+        (service->stage == UPDATE_STAGE_GUI_ERASE_POLL))
     {
-        ProcessErase(implementation, 0);
+        ProcessErase(service, 0);
         return;
     }
-    if ((implementation->stage >= UPDATE_STAGE_GUI_PROGRAM_OPEN) &&
-        (implementation->stage <= UPDATE_STAGE_GUI_PROGRAM_HASH))
+    if ((service->stage >= UPDATE_STAGE_GUI_PROGRAM_OPEN) &&
+        (service->stage <= UPDATE_STAGE_GUI_PROGRAM_HASH))
     {
-        ProcessProgram(implementation, 0);
+        ProcessProgram(service, 0);
         return;
     }
-    if ((implementation->stage == UPDATE_STAGE_GUI_TARGET_READ) ||
-        (implementation->stage == UPDATE_STAGE_GUI_TARGET_HASH))
+    if ((service->stage == UPDATE_STAGE_GUI_TARGET_READ) ||
+        (service->stage == UPDATE_STAGE_GUI_TARGET_HASH))
     {
-        ProcessTarget(implementation, 0);
+        ProcessTarget(service, 0);
         return;
     }
-    if (implementation->stage == UPDATE_STAGE_BUILD_RECORD_CANDIDATE)
+    if (service->stage == UPDATE_STAGE_BUILD_RECORD_CANDIDATE)
     {
-        uint32_t selected = implementation->request.component_mask;
+        uint32_t selected = service->request.component_mask;
 
         /* 以当前记录为基底，只覆盖本次确实安装并回读校验通过的组件。 */
-        if (implementation->base_record_valid != 0)
+        if (service->base_record_valid != 0)
         {
-            implementation->candidate_record = implementation->base_record;
+            service->candidate_record = service->base_record;
         }
         else
         {
-            memset(&implementation->candidate_record, 0,
-                   sizeof(implementation->candidate_record));
+            memset(&service->candidate_record, 0,
+                   sizeof(service->candidate_record));
         }
-        implementation->candidate_record.component_mask |=
+        service->candidate_record.component_mask |=
             selected & (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI);
-        if ((implementation->candidate_record.component_mask &
+        if ((service->candidate_record.component_mask &
              (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI)) == 0U)
         {
-            implementation->candidate_record.component_mask =
+            service->candidate_record.component_mask =
                 UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
         }
-        implementation->candidate_record.format_version =
-            ((implementation->candidate_record.component_mask & UPDATE_COMPONENT_THERAPY) != 0U)
+        service->candidate_record.format_version =
+            ((service->candidate_record.component_mask & UPDATE_COMPONENT_THERAPY) != 0U)
                 ? BOOT_ACTIVE_RECORD_FORMAT_V3
                 : BOOT_ACTIVE_RECORD_FORMAT_V2;
-        implementation->candidate_record.state           = BOOT_ACTIVE_RECORD_STATE_VALID;
-        implementation->candidate_record.release_version = implementation->manifest.release_version;
-        implementation->candidate_record.build_number    = implementation->manifest.build_number;
-        memcpy(implementation->candidate_record.package_id_hash,
-               implementation->manifest.package_id_hash128,
-               sizeof(implementation->candidate_record.package_id_hash));
-        memcpy(implementation->candidate_record.manifest_sha256,
-               implementation->manifest.manifest_sha256,
-               sizeof(implementation->candidate_record.manifest_sha256));
+        service->candidate_record.state           = BOOT_ACTIVE_RECORD_STATE_VALID;
+        service->candidate_record.release_version = service->manifest.release_version;
+        service->candidate_record.build_number    = service->manifest.build_number;
+        memcpy(service->candidate_record.package_id_hash,
+               service->manifest.package_id_hash128,
+               sizeof(service->candidate_record.package_id_hash));
+        memcpy(service->candidate_record.manifest_sha256,
+               service->manifest.manifest_sha256,
+               sizeof(service->candidate_record.manifest_sha256));
         if ((selected & UPDATE_COMPONENT_APP) != 0U)
         {
-            implementation->candidate_record.app_size = implementation->manifest.app.size_bytes;
-            memcpy(implementation->candidate_record.app_sha256,
-                   implementation->manifest.app.sha256,
-                   sizeof(implementation->candidate_record.app_sha256));
+            service->candidate_record.app_size = service->manifest.app.size_bytes;
+            memcpy(service->candidate_record.app_sha256,
+                   service->manifest.app.sha256,
+                   sizeof(service->candidate_record.app_sha256));
         }
         if ((selected & UPDATE_COMPONENT_GUI) != 0U)
         {
-            implementation->candidate_record.gui_size = implementation->manifest.gui.size_bytes;
-            memcpy(implementation->candidate_record.gui_sha256,
-                   implementation->manifest.gui.sha256,
-                   sizeof(implementation->candidate_record.gui_sha256));
+            service->candidate_record.gui_size = service->manifest.gui.size_bytes;
+            memcpy(service->candidate_record.gui_sha256,
+                   service->manifest.gui.sha256,
+                   sizeof(service->candidate_record.gui_sha256));
         }
         /* Install 成功并不代表激活完成，等待 BootControlService 的后续提交。 */
-        implementation->candidate_ready = 1;
-        implementation->state           = SERVICE_RUN_STATE_SUCCEEDED;
+        service->candidate_ready = 1;
+        service->state           = SERVICE_RUN_STATE_SUCCEEDED;
         return;
     }
 
-    if (implementation->stage == UPDATE_STAGE_FAILURE_CLOSE)
+    if (service->stage == UPDATE_STAGE_FAILURE_CLOSE)
     {
-        ProcessFailureClose(implementation);
+        ProcessFailureClose(service);
         return;
     }
 
     /* RUNNING 却落入未知阶段时不能静默卡死，必须以内部错误结束。 */
-    Fail(implementation, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_INVALID_STATE);
+    Fail(service, FIRMWARE_STATUS_INVALID_STATE, BOOT_ERROR_INVALID_STATE);
 }
 
 firmware_status_t UpdateService_Cancel(struct update_service *service)
 {
-    update_service_t *implementation = (update_service_t *) service;
-
-    if (implementation == NULL)
+    if (service == NULL)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -1703,14 +1697,14 @@ firmware_status_t UpdateService_Cancel(struct update_service *service)
      * 专属 close 恢复流程，不能用取消掩盖它；主动取消只适用于仍在正常前置流程中
      * 的请求。
      */
-    if ((implementation->initialized == 0) ||
-        (implementation->state != SERVICE_RUN_STATE_RUNNING) ||
-        (implementation->runtime_may_be_modified != 0) ||
-        (implementation->stage == UPDATE_STAGE_FAILURE_CLOSE) ||
-        (implementation->stage == UPDATE_STAGE_CANCEL_CLOSE) ||
-        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT) ||
-        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_EXIT) ||
-        (implementation->stage == UPDATE_STAGE_CANCEL_XIP_VERIFY_INDIRECT))
+    if ((service->initialized == 0) ||
+        (service->state != SERVICE_RUN_STATE_RUNNING) ||
+        (service->runtime_may_be_modified != 0) ||
+        (service->stage == UPDATE_STAGE_FAILURE_CLOSE) ||
+        (service->stage == UPDATE_STAGE_CANCEL_CLOSE) ||
+        (service->stage == UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT) ||
+        (service->stage == UPDATE_STAGE_CANCEL_XIP_EXIT) ||
+        (service->stage == UPDATE_STAGE_CANCEL_XIP_VERIFY_INDIRECT))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -1718,19 +1712,19 @@ firmware_status_t UpdateService_Cancel(struct update_service *service)
      * 初次 XIP 检查后，服务已经拥有“所有 Runtime 擦写必须 indirect”的责任。即使
      * 此刻还在源预检，也要在取消终态前重新查询并在需要时退出 memory-mapped。
      */
-    implementation->cancel_requires_indirect =
-        ((implementation->stage >= UPDATE_STAGE_XIP_CHECK_INDIRECT) &&
-         (implementation->stage <= UPDATE_STAGE_SOURCE_GUI_VERIFY))
+    service->cancel_requires_indirect =
+        ((service->stage >= UPDATE_STAGE_XIP_CHECK_INDIRECT) &&
+         (service->stage <= UPDATE_STAGE_SOURCE_GUI_VERIFY))
             ? 1
             : 0;
-    implementation->close_retry_count = 0U;
-    implementation->candidate_ready   = 0;
-    if (implementation->source_file_open != 0)
+    service->close_retry_count = 0U;
+    service->candidate_ready   = 0;
+    if (service->source_file_open != 0)
     {
-        implementation->stage = UPDATE_STAGE_CANCEL_CLOSE;
+        service->stage = UPDATE_STAGE_CANCEL_CLOSE;
         return FIRMWARE_STATUS_OK;
     }
-    ContinueCancellationCleanup(implementation);
+    ContinueCancellationCleanup(service);
     return FIRMWARE_STATUS_OK;
 }
 
@@ -1748,22 +1742,18 @@ const service_result_t *UpdateService_GetResult(const struct update_service *ser
 
 const validated_manifest_t *UpdateService_GetManifest(const struct update_service *service)
 {
-    const update_service_t *implementation = (const update_service_t *) service;
-
     /* 只暴露已完成完整绑定校验的 Manifest，清理阶段不能借枚举顺序泄漏半成品。 */
-    return (implementation == NULL) || (implementation->manifest_ready == 0)
+    return (service == NULL) || (service->manifest_ready == 0)
                ? NULL
-               : &implementation->manifest;
+               : &service->manifest;
 }
 
 const boot_active_record_t *UpdateService_GetCandidate(const struct update_service *service)
 {
-    const update_service_t *implementation = (const update_service_t *) service;
-
     /* 只有所有选中 Runtime 目标回读均成功后，候选记录才可交给 EEPROM 提交服务。 */
-    return (implementation == NULL) || (implementation->candidate_ready == 0)
+    return (service == NULL) || (service->candidate_ready == 0)
                ? NULL
-               : &implementation->candidate_record;
+               : &service->candidate_record;
 }
 
 int UpdateService_RuntimeMayBeModified(const struct update_service *service)
