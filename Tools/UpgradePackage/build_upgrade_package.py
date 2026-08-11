@@ -4,17 +4,16 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 
 from package_builder import (
     PackageToolError,
-    _parse_request_bytes,
-    create_development_request,
+    create_request,
     package_content_root,
+    parse_request_bytes,
     sha256_bytes,
-    validate_development_request,
+    validate_request,
     update_manifest_from_files,
     verify_package_root,
 )
@@ -36,7 +35,7 @@ def create_manifest_command(args: argparse.Namespace) -> None:
 
 
 def create_request_command(args: argparse.Namespace) -> None:
-    request_path = create_development_request(args.package_root.resolve())
+    request_path = create_request(args.package_root.resolve())
     print(json.dumps({"request": str(request_path), "created": True}, indent=2))
 
 
@@ -55,12 +54,12 @@ def verify_command(args: argparse.Namespace) -> None:
         result["components"][name] = {
             "file": component["file"],
             "size": len(payload),
-            "sha256": hashlib.sha256(payload).hexdigest(),
+            "sha256": sha256_bytes(payload),
         }
     request_path = root / "boot_update_request.json"
     if request_path.is_file():
-        request = _parse_request_bytes(request_path.read_bytes())
-        validate_development_request(request, manifest, manifest_bytes)
+        request = parse_request_bytes(request_path.read_bytes())
+        validate_request(request, manifest, manifest_bytes)
         result["component_mask"] = request["component_mask"]
     print(json.dumps(result, indent=2))
 

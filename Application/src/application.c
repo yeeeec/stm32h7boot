@@ -175,14 +175,16 @@ static int HasTherapyRecord(void)
 }
 
 /** @brief 判断 Composition 是否提供了完整的 Therapy MCU 更新能力。 */
-static int TherapyDependenciesReady(void)
+static int TherapyDependenciesReady(const validated_manifest_t *manifest)
 {
     const package_source_t *source               = application.dependencies.package_source;
     const secondary_mcu_update_request_t *target = &application.dependencies.secondary_mcu_target;
 
-    return (application.dependencies.secondary_mcu_update != NULL) && (source != NULL) &&
-           (source->open != NULL) && (source->close != NULL) &&
-           (target->target_capacity_bytes == UPDATE_THERAPY_IMAGE_MAX_SIZE) &&
+    return (manifest != NULL) && (application.dependencies.secondary_mcu_update != NULL) &&
+           (source != NULL) && (source->open != NULL) && (source->close != NULL) &&
+           (target->target_capacity_bytes != 0U) &&
+           (target->target_capacity_bytes <= UPDATE_THERAPY_IMAGE_MAX_SIZE) &&
+           (manifest->therapy.size_bytes <= target->target_capacity_bytes) &&
            (target->erase_page_count != 0U);
 }
 
@@ -505,7 +507,8 @@ firmware_status_t Application_Process(void)
                 ContinueCurrentRuntime();
                 break;
             }
-            if (ComponentSelected(UPDATE_COMPONENT_THERAPY) && !TherapyDependenciesReady())
+            if (ComponentSelected(UPDATE_COMPONENT_THERAPY) &&
+                !TherapyDependenciesReady(manifest))
             {
                 ContinueCurrentRuntime();
                 break;

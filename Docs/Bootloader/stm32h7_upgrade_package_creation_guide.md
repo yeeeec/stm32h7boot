@@ -10,8 +10,9 @@ manifest.json
 ```
 
 `manifest.json` 由发布人员手工填写版本、目标硬件和 `components`。每个组件
-的 `file`、`format` 固定，`size` 可以先写 `0`，`sha256` 可以先写空字符串，
-脚本会根据实际 BIN 文件计算并回写这两个字段。
+的 `file`、`format` 固定，`size` 可以先写 `0` 或留空，`sha256` 可以先写空字符串，
+脚本会根据实际 BIN 文件计算并回写这两个字段。空 `size` 只允许用于
+`create-manifest` 输入模板；脚本输出和 `verify` 始终使用严格合法的 JSON。
 
 示例模板：
 

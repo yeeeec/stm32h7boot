@@ -28,7 +28,7 @@
 /* 以下超时属于板级通信预算，上层升级服务仍应限制整次升级的总时长。 */
 #define BSP_STM32_ROM_BOOT_COMMAND_TIMEOUT_MS 50U
 #define BSP_STM32_ROM_BOOT_WRITE_TIMEOUT_MS 500U
-#define BSP_STM32_ROM_BOOT_ERASE_TIMEOUT_MS 1000U
+#define BSP_STM32_ROM_BOOT_ERASE_TIMEOUT_MS 3000U
 #define BSP_STM32_ROM_BOOT_RESET_SETTLE_MS 50U
 
 /** 驱动层把 0xFFFF 定义为“不校验型号”；板级量产绑定明确禁止该值。 */
