@@ -21,6 +21,7 @@ APP_END = APP_BASE + APP_MAX_SIZE
 GUI_BASE = 0x90200000
 GUI_MAX_SIZE = 0x00800000
 GUI_END = GUI_BASE + GUI_MAX_SIZE
+THERAPY_MAX_SIZE = 0x00080000
 FILL_BYTE = 0xFF
 
 PRODUCT = "HMI"
@@ -28,16 +29,24 @@ HARDWARE = "STM32H743-W25Q256"
 MANIFEST_FILE = "manifest.json"
 APP_FILE = "hmi.app.bin"
 GUI_FILE = "hmi.gui.bin"
-FIRMWARE_FILES = frozenset((MANIFEST_FILE, APP_FILE, GUI_FILE))
+THERAPY_FILE = "therapy.app.bin"
+COMPONENT_FILES = {"app": APP_FILE, "gui": GUI_FILE, "therapy": THERAPY_FILE}
+FIRMWARE_FILES = frozenset((MANIFEST_FILE, APP_FILE, GUI_FILE, THERAPY_FILE))
 PACKAGE_ID_PATTERN = re.compile(r"^[A-Za-z0-9._+-]{1,63}$")
 VERSION_PATTERN = re.compile(r"^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+
+
+def package_content_root(package_root: Path) -> Path:
+    firmware = package_root / "firmware"
+    return firmware if firmware.is_dir() else package_root
 
 
 @dataclass(frozen=True)
 class ReleaseImages:
     app: bytes
     gui: bytes
+    therapy: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +196,51 @@ def build_manifest(
     }
 
 
+def component_manifest_entry(name: str, payload: bytes) -> dict[str, Any]:
+    if name not in COMPONENT_FILES:
+        raise PackageToolError(f"unknown component: {name}")
+    return {
+        "file": COMPONENT_FILES[name],
+        "format": "raw-bin-v1",
+        "size": len(payload),
+        "sha256": sha256_bytes(payload),
+    }
+
+
+def update_manifest_from_files(package_root: Path) -> tuple[dict[str, Any], bytes]:
+    """Update a hand-authored manifest using the BIN files in package_root."""
+    package_root = package_content_root(package_root)
+    manifest_path = package_root / MANIFEST_FILE
+    try:
+        manifest = json.loads(
+            manifest_path.read_text(encoding="ascii"), object_pairs_hook=_unique_object
+        )
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PackageToolError(f"invalid manifest template: {error}") from error
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("components"), dict):
+        raise PackageToolError("manifest template must contain a components object")
+    components = manifest["components"]
+    for name, filename in COMPONENT_FILES.items():
+        path = package_root / filename
+        if name in components:
+            if not path.is_file():
+                del components[name]
+            else:
+                payload = path.read_bytes()
+                maximum = {
+                    "app": APP_MAX_SIZE,
+                    "gui": GUI_MAX_SIZE,
+                    "therapy": THERAPY_MAX_SIZE,
+                }[name]
+                if not 0 < len(payload) <= maximum:
+                    raise PackageToolError(f"{name} file size is outside the fixed runtime region")
+                components[name] = component_manifest_entry(name, payload)
+    if not components:
+        raise PackageToolError("manifest must contain at least one component with a BIN file")
+    _write_json_sync(manifest_path, manifest)
+    return verify_firmware_directory(package_root)
+
+
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     value: dict[str, Any] = {}
     for key, item in pairs:
@@ -255,9 +309,21 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         raise PackageToolError("manifest minimum_bootloader_version is invalid")
     parse_release_version(target["minimum_bootloader_version"], "minimum_bootloader_version")
 
-    components = _expect_keys(root["components"], {"app", "gui"}, "components")
-    _validate_component(components["app"], "components.app", APP_FILE, APP_MAX_SIZE)
-    _validate_component(components["gui"], "components.gui", GUI_FILE, GUI_MAX_SIZE)
+    components = root["components"]
+    if (
+        not isinstance(components, dict)
+        or not components
+        or set(components) - set(COMPONENT_FILES)
+    ):
+        raise PackageToolError("manifest components must contain a non-empty app/gui/therapy subset")
+    limits = {
+        "app": (APP_FILE, APP_MAX_SIZE),
+        "gui": (GUI_FILE, GUI_MAX_SIZE),
+        "therapy": (THERAPY_FILE, THERAPY_MAX_SIZE),
+    }
+    for name, component in components.items():
+        filename, maximum = limits[name]
+        _validate_component(component, f"components.{name}", filename, maximum)
 
 
 def _write_bytes_sync(path: Path, data: bytes) -> None:
@@ -276,19 +342,22 @@ def verify_firmware_directory(firmware: Path) -> tuple[dict[str, Any], bytes]:
     if not firmware.is_dir():
         raise PackageToolError(f"firmware directory does not exist: {firmware}")
     names = {entry.name for entry in firmware.iterdir()}
-    if names != FIRMWARE_FILES:
-        raise PackageToolError("firmware directory must contain exactly the three release files")
-
     manifest_bytes = (firmware / MANIFEST_FILE).read_bytes()
     manifest = parse_manifest_bytes(manifest_bytes)
-    app = (firmware / APP_FILE).read_bytes()
-    gui = (firmware / GUI_FILE).read_bytes()
-    validate_app_vector(app)
+    expected = {MANIFEST_FILE} | {COMPONENT_FILES[name] for name in manifest["components"]}
+    extras = names - expected
+    if extras != set() and extras != {"boot_update_request.json"}:
+        raise PackageToolError("package directory files do not match manifest components")
 
-    for name, payload, maximum_size in (
-        ("app", app, APP_MAX_SIZE),
-        ("gui", gui, GUI_MAX_SIZE),
-    ):
+    for name, component in manifest["components"].items():
+        payload = (firmware / component["file"]).read_bytes()
+        maximum_size = {
+            "app": APP_MAX_SIZE,
+            "gui": GUI_MAX_SIZE,
+            "therapy": THERAPY_MAX_SIZE,
+        }[name]
+        if name == "app":
+            validate_app_vector(payload)
         component = manifest["components"][name]
         if not 0 < len(payload) <= maximum_size:
             raise PackageToolError(f"{name} file size is outside the fixed runtime region")
@@ -357,7 +426,7 @@ def write_release_package(
 
 
 def verify_package_root(package_root: Path) -> tuple[dict[str, Any], bytes]:
-    return verify_firmware_directory(package_root / "firmware")
+    return verify_firmware_directory(package_content_root(package_root))
 
 
 def _parse_request_bytes(data: bytes) -> dict[str, Any]:
@@ -370,6 +439,7 @@ def _parse_request_bytes(data: bytes) -> dict[str, Any]:
         "requested",
         "package_id",
         "manifest_sha256",
+        "component_mask",
     }:
         raise PackageToolError("development request members do not match the firmware schema")
     if request["format_version"] != 1 or request["requested"] is not True:
@@ -381,7 +451,19 @@ def _parse_request_bytes(data: bytes) -> dict[str, Any]:
         request["manifest_sha256"]
     ) is None:
         raise PackageToolError("development request manifest_sha256 is invalid")
+    if (
+        isinstance(request["component_mask"], bool)
+        or not isinstance(request["component_mask"], int)
+        or request["component_mask"] not in (1, 2, 3, 4, 5, 6, 7)
+    ):
+        raise PackageToolError("development request component_mask is invalid")
     return request
+
+
+def component_mask_for_manifest(manifest: dict[str, Any]) -> int:
+    return sum(
+        {"app": 1, "gui": 2, "therapy": 4}[name] for name in manifest["components"]
+    )
 
 
 def validate_development_request(
@@ -391,6 +473,8 @@ def validate_development_request(
         raise PackageToolError("development request package_id does not match manifest")
     if request["manifest_sha256"] != sha256_bytes(manifest_bytes):
         raise PackageToolError("development request does not bind the current manifest bytes")
+    if request["component_mask"] != component_mask_for_manifest(manifest):
+        raise PackageToolError("development request component_mask does not match manifest")
 
 
 def create_development_request(package_root: Path) -> Path:
@@ -400,6 +484,7 @@ def create_development_request(package_root: Path) -> Path:
         "requested": True,
         "package_id": manifest["package_id"],
         "manifest_sha256": sha256_bytes(manifest_bytes),
+        "component_mask": component_mask_for_manifest(manifest),
     }
     request_path = package_root / "boot_update_request.json"
     temporary_path = package_root / f".boot-update-request-{uuid.uuid4().hex}.new"

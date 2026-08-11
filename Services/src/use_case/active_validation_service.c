@@ -243,7 +243,13 @@ void ActiveValidationService_Process(active_validation_service_t *service)
                 break;
             }
             LOG_INFO("active", "app hash verified");
-            service->stage = ACTIVE_VALIDATION_STAGE_RESET_GUI_HASH;
+            service->state               = SERVICE_RUN_STATE_SUCCEEDED;
+            service->result.status       = FIRMWARE_STATUS_OK;
+            service->result.error        = BOOT_ERROR_NONE;
+            service->result.stage        = (uint32_t) service->stage;
+            service->result.native_error = 0;
+            service->stage               = ACTIVE_VALIDATION_STAGE_IDLE;
+            // service->stage = ACTIVE_VALIDATION_STAGE_RESET_GUI_HASH;
             break;
 
         case ACTIVE_VALIDATION_STAGE_RESET_GUI_HASH:
