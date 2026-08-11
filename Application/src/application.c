@@ -773,8 +773,8 @@ firmware_status_t Application_Process(void)
                 BeginUnmount((ComponentSelected(UPDATE_COMPONENT_THERAPY) &&
                               SecondaryMcuUpdateService_TargetMayBeModified(
                                   application.dependencies.secondary_mcu_update)) ||
-                             (UpdateService_RuntimeMayBeModified(application.dependencies.update) !=
-                              0)
+                                     (UpdateService_RuntimeMayBeModified(
+                                          application.dependencies.update) != 0)
                                  ? APPLICATION_STAGE_RECOVERY_RESET
                                  : APPLICATION_STAGE_FAILED);
             }
@@ -796,8 +796,8 @@ firmware_status_t Application_Process(void)
                 BeginUnmount((ComponentSelected(UPDATE_COMPONENT_THERAPY) &&
                               SecondaryMcuUpdateService_TargetMayBeModified(
                                   application.dependencies.secondary_mcu_update)) ||
-                             (UpdateService_RuntimeMayBeModified(application.dependencies.update) !=
-                              0)
+                                     (UpdateService_RuntimeMayBeModified(
+                                          application.dependencies.update) != 0)
                                  ? APPLICATION_STAGE_RECOVERY_RESET
                                  : APPLICATION_STAGE_FAILED);
             }

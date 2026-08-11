@@ -9,7 +9,7 @@
 
 /* STM32 Get-ID value confirmed for the secondary controller on this board. */
 #ifndef COMPOSITION_SECONDARY_MCU_DEVICE_ID
-#define COMPOSITION_SECONDARY_MCU_DEVICE_ID 0x0450U
+#define COMPOSITION_SECONDARY_MCU_DEVICE_ID 0x0440U
 #endif
 
 #if (COMPOSITION_SECONDARY_MCU_DEVICE_ID > 0xFFFFU) || \
