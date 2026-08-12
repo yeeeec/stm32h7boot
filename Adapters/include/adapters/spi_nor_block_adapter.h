@@ -29,12 +29,10 @@ typedef struct
  *
  * @pre 适配器使用期间 @p device 必须保持有效。
  */
-firmware_status_t SpiNorBlockAdapter_Init(
-    spi_nor_block_adapter_t *adapter,
-    struct spi_nor *device);
+firmware_status_t SpiNorBlockAdapter_Init(spi_nor_block_adapter_t *adapter, struct spi_nor *device);
 
 /** 返回受限的异步块设备接口；参数为 NULL 时返回 NULL。 */
-const async_block_device_t *SpiNorBlockAdapter_AsyncInterface(
-    const spi_nor_block_adapter_t *adapter);
+const async_block_device_t *
+SpiNorBlockAdapter_AsyncInterface(const spi_nor_block_adapter_t *adapter);
 
 #endif

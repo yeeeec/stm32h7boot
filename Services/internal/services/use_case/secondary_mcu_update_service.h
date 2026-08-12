@@ -7,8 +7,8 @@
 
 #include <stdint.h>
 
-#include "firmware/image_source.h"
 #include "firmware/hash.h"
+#include "firmware/image_source.h"
 #include "firmware/mcu_programmer.h"
 #include "services/use_case/secondary_mcu_update_service_api.h"
 
@@ -78,8 +78,8 @@ typedef struct secondary_mcu_update_service
 } secondary_mcu_update_service_t;
 
 /** 校验依赖并初始化外部 MCU Service。 */
-firmware_status_t SecondaryMcuUpdateService_Init(
-    secondary_mcu_update_service_t *service,
-    const secondary_mcu_update_service_dependencies_t *dependencies);
+firmware_status_t
+SecondaryMcuUpdateService_Init(secondary_mcu_update_service_t *service,
+                               const secondary_mcu_update_service_dependencies_t *dependencies);
 
 #endif

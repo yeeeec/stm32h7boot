@@ -16,11 +16,11 @@
 /** package_id 的最大可见字符数，不含结尾 NUL。 */
 #define MANIFEST_PACKAGE_ID_MAX_SIZE 63U
 /** 固定发布文件名的最大字符数，不含结尾 NUL。 */
-#define MANIFEST_FILE_NAME_MAX_SIZE  31U
+#define MANIFEST_FILE_NAME_MAX_SIZE 31U
 /** SHA-256 摘要长度，单位为字节。 */
-#define MANIFEST_SHA256_SIZE         32U
+#define MANIFEST_SHA256_SIZE 32U
 /** package_id 派生哈希的截断长度，单位为字节。 */
-#define MANIFEST_PACKAGE_HASH_SIZE   16U
+#define MANIFEST_PACKAGE_HASH_SIZE 16U
 /** 单个 APP 或 GUI payload 在发布包中的受验证描述。 */
 typedef struct
 {

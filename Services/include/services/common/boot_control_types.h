@@ -17,17 +17,17 @@
 /** Package ID 截断哈希长度，单位为字节。 */
 #define BOOT_CONTROL_PACKAGE_ID_HASH_SIZE 16U
 /** 完整 Manifest SHA-256 摘要长度，单位为字节。 */
-#define BOOT_CONTROL_MANIFEST_HASH_SIZE   32U
+#define BOOT_CONTROL_MANIFEST_HASH_SIZE 32U
 /** APP 或 GUI SHA-256 摘要长度，单位为字节。 */
-#define BOOT_CONTROL_IMAGE_HASH_SIZE      32U
+#define BOOT_CONTROL_IMAGE_HASH_SIZE 32U
 /** 当前持久化记录格式版本。 */
-#define BOOT_ACTIVE_RECORD_FORMAT_V2      2U
+#define BOOT_ACTIVE_RECORD_FORMAT_V2 2U
 /** 增加 Therapy MCU 安装元数据的持久化记录格式。 */
-#define BOOT_ACTIVE_RECORD_FORMAT_V3      3U
+#define BOOT_ACTIVE_RECORD_FORMAT_V3 3U
 /** 单个 EEPROM 槽中 Active Record 的固定占用大小，单位为字节。 */
-#define BOOT_ACTIVE_RECORD_SIZE           256U
+#define BOOT_ACTIVE_RECORD_SIZE 256U
 /** 表示记录已通过提交流程并可作为启动候选项的状态值。 */
-#define BOOT_ACTIVE_RECORD_STATE_VALID    1U
+#define BOOT_ACTIVE_RECORD_STATE_VALID 1U
 
 /**
  * @brief 已提交 Runtime 对的逻辑描述。

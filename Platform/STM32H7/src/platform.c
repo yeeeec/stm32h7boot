@@ -30,7 +30,7 @@ firmware_status_t Platform_Init(void)
         return FIRMWARE_STATUS_IO_ERROR;
     }
     last_watchdog_refresh_ms = Platform_TimeNowMs();
-    platform_initialized = 1;
+    platform_initialized     = 1;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -45,8 +45,7 @@ firmware_status_t Platform_Process(void)
 
     now_ms = Platform_TimeNowMs();
     /* 无符号减法保证调度比较可跨 Tick 回绕。 */
-    if ((uint32_t)(now_ms - last_watchdog_refresh_ms) >=
-        PLATFORM_WATCHDOG_REFRESH_INTERVAL_MS)
+    if ((uint32_t) (now_ms - last_watchdog_refresh_ms) >= PLATFORM_WATCHDOG_REFRESH_INTERVAL_MS)
     {
         firmware_status_t status = Platform_WatchdogRefresh();
 

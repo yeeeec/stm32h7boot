@@ -507,8 +507,7 @@ firmware_status_t Application_Process(void)
                 ContinueCurrentRuntime();
                 break;
             }
-            if (ComponentSelected(UPDATE_COMPONENT_THERAPY) &&
-                !TherapyDependenciesReady(manifest))
+            if (ComponentSelected(UPDATE_COMPONENT_THERAPY) && !TherapyDependenciesReady(manifest))
             {
                 ContinueCurrentRuntime();
                 break;

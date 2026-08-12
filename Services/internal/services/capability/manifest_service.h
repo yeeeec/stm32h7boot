@@ -17,9 +17,8 @@
 
 /* V1 对象 schema 使用 31 个 token；预留受限的异常输入余量，同时将固定工作区
  * 保持在 4 KiB 静态内存预算以内。 */
-_Static_assert(
-    (MANIFEST_SERVICE_TOKEN_CAPACITY * sizeof(json_token_t)) <= 4096U,
-    "Manifest token workspace exceeds the static-memory budget");
+_Static_assert((MANIFEST_SERVICE_TOKEN_CAPACITY * sizeof(json_token_t)) <= 4096U,
+               "Manifest token workspace exceeds the static-memory budget");
 
 /** Manifest 服务初始化时由 Composition 注入的密码学能力。 */
 typedef struct
@@ -51,8 +50,7 @@ typedef struct manifest_service
  * @param dependencies 包含完整 hash_provider_t 回调集的依赖对象。
  * @return 成功时返回 FIRMWARE_STATUS_OK；参数或哈希端口不完整时返回错误。
  */
-firmware_status_t ManifestService_Init(
-    manifest_service_t *service,
-    const manifest_service_dependencies_t *dependencies);
+firmware_status_t ManifestService_Init(manifest_service_t *service,
+                                       const manifest_service_dependencies_t *dependencies);
 
 #endif

@@ -18,19 +18,19 @@
 #include "firmware/status.h"
 
 /** STM32 UART bootloader 的协议控制字节。 */
-#define STM32_ROM_BOOT_SYNC_BYTE       0x7FU
-#define STM32_ROM_BOOT_ACK_BYTE        0x79U
-#define STM32_ROM_BOOT_NACK_BYTE       0x1FU
+#define STM32_ROM_BOOT_SYNC_BYTE 0x7FU
+#define STM32_ROM_BOOT_ACK_BYTE  0x79U
+#define STM32_ROM_BOOT_NACK_BYTE 0x1FU
 
 /** AN3155 中定义的常用命令。目标 ROM 不一定实现全部命令。 */
-#define STM32_ROM_BOOT_COMMAND_GET             0x00U
-#define STM32_ROM_BOOT_COMMAND_GET_VERSION     0x01U
-#define STM32_ROM_BOOT_COMMAND_GET_ID          0x02U
-#define STM32_ROM_BOOT_COMMAND_READ_MEMORY     0x11U
-#define STM32_ROM_BOOT_COMMAND_GO              0x21U
-#define STM32_ROM_BOOT_COMMAND_WRITE_MEMORY    0x31U
-#define STM32_ROM_BOOT_COMMAND_ERASE           0x43U
-#define STM32_ROM_BOOT_COMMAND_EXTENDED_ERASE  0x44U
+#define STM32_ROM_BOOT_COMMAND_GET            0x00U
+#define STM32_ROM_BOOT_COMMAND_GET_VERSION    0x01U
+#define STM32_ROM_BOOT_COMMAND_GET_ID         0x02U
+#define STM32_ROM_BOOT_COMMAND_READ_MEMORY    0x11U
+#define STM32_ROM_BOOT_COMMAND_GO             0x21U
+#define STM32_ROM_BOOT_COMMAND_WRITE_MEMORY   0x31U
+#define STM32_ROM_BOOT_COMMAND_ERASE          0x43U
+#define STM32_ROM_BOOT_COMMAND_EXTENDED_ERASE 0x44U
 
 /** 协议一次 Read/Write Memory 事务允许的最大数据长度。 */
 #define STM32_ROM_BOOT_MAX_MEMORY_TRANSFER 256U
@@ -42,8 +42,7 @@
 #define STM32_ROM_BOOT_MAX_ERASE_PAGE_COUNT 256U
 
 /** Extended Erase 最大帧长度：命令数据、256 个 16-bit 页号和校验字节。 */
-#define STM32_ROM_BOOT_MAX_ERASE_FRAME_SIZE \
-    (2U + (STM32_ROM_BOOT_MAX_ERASE_PAGE_COUNT * 2U) + 1U)
+#define STM32_ROM_BOOT_MAX_ERASE_FRAME_SIZE (2U + (STM32_ROM_BOOT_MAX_ERASE_PAGE_COUNT * 2U) + 1U)
 
 /** 选择标准 Erase Memory 或 Extended Erase 命令。 */
 typedef enum
@@ -71,36 +70,25 @@ typedef enum
  * 个已初始化的 UART。若不需要由驱动切换配置，可以传入 NULL，并由
  * 调用方在 Enter 前后自行完成配置。
  */
-typedef firmware_status_t (*stm32_rom_boot_configure_uart_fn)(
-    void *context,
-    stm32_rom_boot_uart_mode_t mode);
+typedef firmware_status_t (*stm32_rom_boot_configure_uart_fn)(void *context,
+                                                              stm32_rom_boot_uart_mode_t mode);
 
 /** 发送一段已经组帧的 UART 字节；函数返回前必须完成或报告传输结果。 */
-typedef firmware_status_t (*stm32_rom_boot_transmit_fn)(
-    void *context,
-    const uint8_t *data,
-    uint32_t size,
-    uint32_t timeout_ms);
+typedef firmware_status_t (*stm32_rom_boot_transmit_fn)(void *context, const uint8_t *data,
+                                                        uint32_t size, uint32_t timeout_ms);
 
 /** 接收指定数量的 UART 字节；不能在超时后返回“部分成功”。 */
-typedef firmware_status_t (*stm32_rom_boot_receive_fn)(
-    void *context,
-    uint8_t *data,
-    uint32_t size,
-    uint32_t timeout_ms);
+typedef firmware_status_t (*stm32_rom_boot_receive_fn)(void *context, uint8_t *data, uint32_t size,
+                                                       uint32_t timeout_ms);
 
 /** 控制目标 MCU 的 BOOT0 电平；非零表示拉高，零表示拉低。 */
-typedef firmware_status_t (*stm32_rom_boot_set_boot0_fn)(
-    void *context,
-    int high);
+typedef firmware_status_t (*stm32_rom_boot_set_boot0_fn)(void *context, int high);
 
 /** 对目标 MCU 产生一次复位脉冲。 */
 typedef firmware_status_t (*stm32_rom_boot_reset_target_fn)(void *context);
 
 /** 在协议步骤之间提供毫秒级等待。该回调不得依赖目标 MCU 的响应。 */
-typedef void (*stm32_rom_boot_delay_ms_fn)(
-    void *context,
-    uint32_t delay_ms);
+typedef void (*stm32_rom_boot_delay_ms_fn)(void *context, uint32_t delay_ms);
 
 /**
  * @brief STM32 ROM Bootloader 的板级传输端口。
@@ -187,10 +175,8 @@ typedef struct stm32_rom_boot
  * @return FIRMWARE_STATUS_INVALID_ARGUMENT 参数、回调或超时无效。
  * @return FIRMWARE_STATUS_INVALID_STATE 驱动对象已经初始化。
  */
-firmware_status_t Stm32RomBoot_Init(
-    stm32_rom_boot_t *device,
-    const stm32_rom_boot_port_t *port,
-    const stm32_rom_boot_config_t *config);
+firmware_status_t Stm32RomBoot_Init(stm32_rom_boot_t *device, const stm32_rom_boot_port_t *port,
+                                    const stm32_rom_boot_config_t *config);
 
 /**
  * @brief 拉高 BOOT0、复位目标并完成 0x7F 同步握手。
@@ -212,9 +198,7 @@ firmware_status_t Stm32RomBoot_Enter(stm32_rom_boot_t *device);
  * @return FIRMWARE_STATUS_NOT_SUPPORTED 目标没有 Get 或 Get ID 能力。
  * @return FIRMWARE_STATUS_IO_ERROR UART 收发失败或收到 NACK/非法响应。
  */
-firmware_status_t Stm32RomBoot_GetInfo(
-    stm32_rom_boot_t *device,
-    stm32_rom_boot_info_t *info);
+firmware_status_t Stm32RomBoot_GetInfo(stm32_rom_boot_t *device, stm32_rom_boot_info_t *info);
 
 /**
  * @brief 判断目标 ROM 是否声明支持某个命令。
@@ -222,9 +206,7 @@ firmware_status_t Stm32RomBoot_GetInfo(
  * @return 非零表示 GetInfo 最近一次成功返回了该命令，零表示不支持或
  *         尚未成功完成 GetInfo。该查询不会访问 UART。
  */
-int Stm32RomBoot_IsCommandSupported(
-    const stm32_rom_boot_t *device,
-    uint8_t command);
+int Stm32RomBoot_IsCommandSupported(const stm32_rom_boot_t *device, uint8_t command);
 
 /**
  * @brief 从目标 Flash 读取一个协议允许大小的字节块。
@@ -238,11 +220,8 @@ int Stm32RomBoot_IsCommandSupported(
  * @return FIRMWARE_STATUS_TIMEOUT UART 等待响应超时。
  * @return FIRMWARE_STATUS_IO_ERROR 收到 NACK、非法 ACK 或传输失败。
  */
-firmware_status_t Stm32RomBoot_ReadMemory(
-    stm32_rom_boot_t *device,
-    uint32_t address,
-    uint8_t *data,
-    uint32_t size);
+firmware_status_t Stm32RomBoot_ReadMemory(stm32_rom_boot_t *device, uint32_t address, uint8_t *data,
+                                          uint32_t size);
 
 /**
  * @brief 向目标 Flash 写入一个协议允许大小的字节块。
@@ -255,11 +234,8 @@ firmware_status_t Stm32RomBoot_ReadMemory(
  * @return FIRMWARE_STATUS_TIMEOUT 写入完成 ACK 超时。
  * @return FIRMWARE_STATUS_IO_ERROR 收到 NACK、非法 ACK 或传输失败。
  */
-firmware_status_t Stm32RomBoot_WriteMemory(
-    stm32_rom_boot_t *device,
-    uint32_t address,
-    const uint8_t *data,
-    uint32_t size);
+firmware_status_t Stm32RomBoot_WriteMemory(stm32_rom_boot_t *device, uint32_t address,
+                                           const uint8_t *data, uint32_t size);
 
 /**
  * @brief 擦除一组连续页。
@@ -275,10 +251,8 @@ firmware_status_t Stm32RomBoot_WriteMemory(
  * @return FIRMWARE_STATUS_TIMEOUT 擦除完成 ACK 超时。
  * @return FIRMWARE_STATUS_IO_ERROR 收到 NACK、非法 ACK 或传输失败。
  */
-firmware_status_t Stm32RomBoot_ErasePages(
-    stm32_rom_boot_t *device,
-    uint16_t page_start,
-    uint16_t page_count);
+firmware_status_t Stm32RomBoot_ErasePages(stm32_rom_boot_t *device, uint16_t page_start,
+                                          uint16_t page_count);
 
 /**
  * @brief 退出 ROM Bootloader 并复位目标进入用户 Application。

@@ -17,9 +17,8 @@
  * @return 仅在无法启动交接时返回错误。交接成功后不会返回；如果成功后
  *         仍返回，则违反 Contract，必须按 Launch 失败处理。
  */
-typedef firmware_status_t (*application_jump_execute_fn)(
-    void *context,
-    uint32_t vector_table_address);
+typedef firmware_status_t (*application_jump_execute_fn)(void *context,
+                                                         uint32_t vector_table_address);
 
 /**
  * @brief 由 Platform Adapter 持有的最终交接接口。

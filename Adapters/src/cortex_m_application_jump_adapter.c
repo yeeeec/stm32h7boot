@@ -30,16 +30,15 @@ static firmware_status_t Execute(void *context, uint32_t vector_table_address)
     }
 
     /* Cortex-M 向量表前两个 word 分别是初始 MSP 和 Reset Handler 地址。 */
-    initial_msp = *(const volatile uint32_t *)(uintptr_t)vector_table_address;
-    reset_handler =
-        *(const volatile uint32_t *)(uintptr_t)(vector_table_address + 4U);
-    entry = (application_entry_t)(uintptr_t)reset_handler;
+    initial_msp   = *(const volatile uint32_t *) (uintptr_t) vector_table_address;
+    reset_handler = *(const volatile uint32_t *) (uintptr_t) (vector_table_address + 4U);
+    entry         = (application_entry_t) (uintptr_t) reset_handler;
 
     /* 关闭 Bootloader 的系统节拍和中断，避免状态泄漏到应用。 */
     __disable_irq();
     SysTick->CTRL = 0U;
     SysTick->LOAD = 0U;
-    SysTick->VAL = 0U;
+    SysTick->VAL  = 0U;
     for (index = 0U; index < 8U; ++index)
     {
         NVIC->ICER[index] = UINT32_MAX;
@@ -56,8 +55,7 @@ static firmware_status_t Execute(void *context, uint32_t vector_table_address)
     return FIRMWARE_STATUS_INVALID_STATE;
 }
 
-firmware_status_t CortexMApplicationJumpAdapter_Init(
-    cortex_m_application_jump_adapter_t *adapter)
+firmware_status_t CortexMApplicationJumpAdapter_Init(cortex_m_application_jump_adapter_t *adapter)
 {
     if (adapter == NULL)
     {
@@ -69,8 +67,8 @@ firmware_status_t CortexMApplicationJumpAdapter_Init(
     return FIRMWARE_STATUS_OK;
 }
 
-const application_jump_t *CortexMApplicationJumpAdapter_Interface(
-    const cortex_m_application_jump_adapter_t *adapter)
+const application_jump_t *
+CortexMApplicationJumpAdapter_Interface(const cortex_m_application_jump_adapter_t *adapter)
 {
     /* 接口内嵌在适配器中，返回其稳定地址。 */
     return (adapter == NULL) ? NULL : &adapter->interface;

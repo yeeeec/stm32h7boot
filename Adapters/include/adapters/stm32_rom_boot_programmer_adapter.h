@@ -27,12 +27,11 @@ typedef struct
  * @param[in] device BSP_Stm32RomBootDevice() 返回的驱动对象。
  * @return 参数有效时返回 FIRMWARE_STATUS_OK。
  */
-firmware_status_t Stm32RomBootProgrammerAdapter_Init(
-    stm32_rom_boot_programmer_adapter_t *adapter,
-    struct stm32_rom_boot *device);
+firmware_status_t Stm32RomBootProgrammerAdapter_Init(stm32_rom_boot_programmer_adapter_t *adapter,
+                                                     struct stm32_rom_boot *device);
 
 /** 返回 Adapter 内嵌的通用编程器接口；参数为空时返回 NULL。 */
-const mcu_programmer_t *Stm32RomBootProgrammerAdapter_Interface(
-    const stm32_rom_boot_programmer_adapter_t *adapter);
+const mcu_programmer_t *
+Stm32RomBootProgrammerAdapter_Interface(const stm32_rom_boot_programmer_adapter_t *adapter);
 
 #endif

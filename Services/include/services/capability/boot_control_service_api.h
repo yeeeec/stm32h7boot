@@ -21,9 +21,8 @@ struct boot_control_service;
  * @param[out] record 接收选中的有效记录。
  * @return 成功时为 FIRMWARE_STATUS_OK；未找到有效记录或底层读取失败时返回对应状态。
  */
-firmware_status_t BootControlService_LoadActive(
-    struct boot_control_service *service,
-    boot_active_record_t *record);
+firmware_status_t BootControlService_LoadActive(struct boot_control_service *service,
+                                                boot_active_record_t *record);
 
 /**
  * 启动一个 Active Record 原子提交。
@@ -35,9 +34,8 @@ firmware_status_t BootControlService_LoadActive(
  * @param[in] record 候选记录；服务会复制其内容并补齐 sequence。
  * @return 可启动时为 FIRMWARE_STATUS_OK；否则为参数或状态错误。
  */
-firmware_status_t BootControlService_CommitActiveStart(
-    struct boot_control_service *service,
-    const boot_active_record_t *record);
+firmware_status_t BootControlService_CommitActiveStart(struct boot_control_service *service,
+                                                       const boot_active_record_t *record);
 
 /**
  * @brief 推进一步 EEPROM 页写、就绪轮询、回读校验或内部状态转换。
@@ -47,11 +45,9 @@ firmware_status_t BootControlService_CommitActiveStart(
 void BootControlService_Process(struct boot_control_service *service);
 
 /** @brief 返回当前提交生命周期状态；NULL 服务视为失败。 */
-service_run_state_t BootControlService_GetState(
-    const struct boot_control_service *service);
+service_run_state_t BootControlService_GetState(const struct boot_control_service *service);
 
 /** @brief 返回最近一次提交的结果快照；返回指针由服务持有。 */
-const service_result_t *BootControlService_GetResult(
-    const struct boot_control_service *service);
+const service_result_t *BootControlService_GetResult(const struct boot_control_service *service);
 
 #endif

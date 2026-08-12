@@ -634,10 +634,9 @@ firmware_status_t UpdateService_Init(update_service_t *service,
     if ((service == NULL) || (dependencies == NULL) || (dependencies->package_source == NULL) ||
         (dependencies->manifest_service == NULL) ||
         (dependencies->update_request_service == NULL) || (dependencies->hash == NULL) ||
-        (dependencies->clock == NULL) ||
-        (dependencies->storage == NULL) || (dependencies->xip_controller == NULL) ||
-        (dependencies->runtime_layout == NULL) || (dependencies->manifest_buffer == NULL) ||
-        (dependencies->io_buffer == NULL))
+        (dependencies->clock == NULL) || (dependencies->storage == NULL) ||
+        (dependencies->xip_controller == NULL) || (dependencies->runtime_layout == NULL) ||
+        (dependencies->manifest_buffer == NULL) || (dependencies->io_buffer == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -646,9 +645,8 @@ firmware_status_t UpdateService_Init(update_service_t *service,
         (dependencies->package_source->get_size == NULL) ||
         (dependencies->package_source->read_at == NULL) || (dependencies->hash->reset == NULL) ||
         (dependencies->hash->update == NULL) || (dependencies->hash->finish == NULL) ||
-        (dependencies->clock->now_ms == NULL) ||
-        (dependencies->storage->get_info == NULL) || (dependencies->storage->read == NULL) ||
-        (dependencies->storage->program_start == NULL) ||
+        (dependencies->clock->now_ms == NULL) || (dependencies->storage->get_info == NULL) ||
+        (dependencies->storage->read == NULL) || (dependencies->storage->program_start == NULL) ||
         (dependencies->storage->erase_start == NULL) || (dependencies->storage->poll == NULL) ||
         (dependencies->storage->get_operation_result == NULL) ||
         (dependencies->xip_controller->is_memory_mapped == NULL) ||
@@ -751,9 +749,8 @@ firmware_status_t UpdateService_PrepareStart(struct update_service *service,
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t UpdateService_InstallStartWithRecord(
-    struct update_service *service,
-    const boot_active_record_t *current_record)
+firmware_status_t UpdateService_InstallStartWithRecord(struct update_service *service,
+                                                       const boot_active_record_t *current_record)
 {
     uint32_t host_mask;
 
@@ -762,17 +759,14 @@ firmware_status_t UpdateService_InstallStartWithRecord(
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     /* Install 只能消费刚刚成功 Prepare 的 Manifest，不能绕过源校验。 */
-    if ((service->initialized == 0) ||
-        (service->state != SERVICE_RUN_STATE_SUCCEEDED) ||
+    if ((service->initialized == 0) || (service->state != SERVICE_RUN_STATE_SUCCEEDED) ||
         (service->stage != UPDATE_STAGE_PREPARED) || (service->manifest_ready == 0))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    host_mask = service->request.component_mask &
-                (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI);
+    host_mask = service->request.component_mask & (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI);
     if ((host_mask == 0U) ||
-        ((host_mask != (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI)) &&
-         (current_record == NULL)))
+        ((host_mask != (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI)) && (current_record == NULL)))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -781,8 +775,7 @@ firmware_status_t UpdateService_InstallStartWithRecord(
         service->base_record = *current_record;
         if (service->base_record.component_mask == 0U)
         {
-            service->base_record.component_mask =
-                UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+            service->base_record.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
         }
         service->base_record_valid = 1;
     }
@@ -802,9 +795,8 @@ firmware_status_t UpdateService_InstallStartWithRecord(
     service->xip_check_before_runtime_mutation = 0;
     service->cancel_requires_indirect          = 0;
     service->progress_last_percent             = 0U;
-    service->progress_last_log_ms =
-        service->clock->now_ms(service->clock->context);
-    service->progress_tracking_started = 1;
+    service->progress_last_log_ms              = service->clock->now_ms(service->clock->context);
+    service->progress_tracking_started         = 1;
     service->stage                             = UPDATE_STAGE_XIP_CHECK_INDIRECT;
     service->state                             = SERVICE_RUN_STATE_RUNNING;
     return FIRMWARE_STATUS_OK;
@@ -1185,7 +1177,7 @@ static int CalculateInstallProgressPercent(const update_service_t *service, uint
     {
         completed = total;
     }
-    *percent = (uint32_t)((completed * 100ULL) / total);
+    *percent = (uint32_t) ((completed * 100ULL) / total);
     return 1;
 }
 
@@ -1200,7 +1192,7 @@ static void ReportInstallProgress(update_service_t *service)
         return;
     }
     now_ms = service->clock->now_ms(service->clock->context);
-    if ((uint32_t)(now_ms - service->progress_last_log_ms) <
+    if ((uint32_t) (now_ms - service->progress_last_log_ms) <
         UPDATE_SERVICE_PROGRESS_LOG_INTERVAL_MS)
     {
         return;
@@ -1255,7 +1247,7 @@ static void ProcessErase(update_service_t *service, int app)
         }
         /* 从此刻起任何失败都可能留下不完整 Runtime，标志必须粘滞。 */
         service->runtime_may_be_modified = 1;
-        status = StartErase(service, base, size, service->erase_offset);
+        status                           = StartErase(service, base, size, service->erase_offset);
         if (!FirmwareStatus_IsOk(status))
         {
             LOG_ERROR("update", "%s start failed: status=%d offset=0x%08lx",
@@ -1508,8 +1500,7 @@ static void ProcessTarget(update_service_t *service, int app)
         return;
     }
     /* APP 验证后仅在 GUI 被选择时继续，否则直接生成候选记录。 */
-    service->stage = (app != 0) &&
-                             ((service->request.component_mask & UPDATE_COMPONENT_GUI) != 0U)
+    service->stage = (app != 0) && ((service->request.component_mask & UPDATE_COMPONENT_GUI) != 0U)
                          ? UPDATE_STAGE_GUI_ERASE
                          : UPDATE_STAGE_BUILD_RECORD_CANDIDATE;
     service->erase_offset = 0U;
@@ -1527,15 +1518,13 @@ void UpdateService_Process(struct update_service *service)
     }
     ReportInstallProgress(service);
     /* 保留低频阶段入口诊断；逐页编程和逐扇区擦除由限流总进度替代。 */
-    if ((service->stage != service->logged_stage) ||
-        (service->stage_logged == 0))
+    if ((service->stage != service->logged_stage) || (service->stage_logged == 0))
     {
         if (IsHighFrequencyStage(service->stage) == 0)
         {
             LOG_INFO("update", "stage=%s(%u) erase=0x%08lx program=0x%08lx target=0x%08lx",
                      UpdateStageName(service->stage), (unsigned) service->stage,
-                     (unsigned long) service->erase_offset,
-                     (unsigned long) service->program_offset,
+                     (unsigned long) service->erase_offset, (unsigned long) service->program_offset,
                      (unsigned long) service->target_offset);
         }
         service->logged_stage = service->stage;
@@ -1632,16 +1621,14 @@ void UpdateService_Process(struct update_service *service)
         }
         else
         {
-            memset(&service->candidate_record, 0,
-                   sizeof(service->candidate_record));
+            memset(&service->candidate_record, 0, sizeof(service->candidate_record));
         }
         service->candidate_record.component_mask |=
             selected & (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI);
         if ((service->candidate_record.component_mask &
              (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI)) == 0U)
         {
-            service->candidate_record.component_mask =
-                UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
+            service->candidate_record.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
         }
         service->candidate_record.format_version =
             ((service->candidate_record.component_mask & UPDATE_COMPONENT_THERAPY) != 0U)
@@ -1650,24 +1637,20 @@ void UpdateService_Process(struct update_service *service)
         service->candidate_record.state           = BOOT_ACTIVE_RECORD_STATE_VALID;
         service->candidate_record.release_version = service->manifest.release_version;
         service->candidate_record.build_number    = service->manifest.build_number;
-        memcpy(service->candidate_record.package_id_hash,
-               service->manifest.package_id_hash128,
+        memcpy(service->candidate_record.package_id_hash, service->manifest.package_id_hash128,
                sizeof(service->candidate_record.package_id_hash));
-        memcpy(service->candidate_record.manifest_sha256,
-               service->manifest.manifest_sha256,
+        memcpy(service->candidate_record.manifest_sha256, service->manifest.manifest_sha256,
                sizeof(service->candidate_record.manifest_sha256));
         if ((selected & UPDATE_COMPONENT_APP) != 0U)
         {
             service->candidate_record.app_size = service->manifest.app.size_bytes;
-            memcpy(service->candidate_record.app_sha256,
-                   service->manifest.app.sha256,
+            memcpy(service->candidate_record.app_sha256, service->manifest.app.sha256,
                    sizeof(service->candidate_record.app_sha256));
         }
         if ((selected & UPDATE_COMPONENT_GUI) != 0U)
         {
             service->candidate_record.gui_size = service->manifest.gui.size_bytes;
-            memcpy(service->candidate_record.gui_sha256,
-                   service->manifest.gui.sha256,
+            memcpy(service->candidate_record.gui_sha256, service->manifest.gui.sha256,
                    sizeof(service->candidate_record.gui_sha256));
         }
         /* Install 成功并不代表激活完成，等待 BootControlService 的后续提交。 */
@@ -1697,10 +1680,8 @@ firmware_status_t UpdateService_Cancel(struct update_service *service)
      * 专属 close 恢复流程，不能用取消掩盖它；主动取消只适用于仍在正常前置流程中
      * 的请求。
      */
-    if ((service->initialized == 0) ||
-        (service->state != SERVICE_RUN_STATE_RUNNING) ||
-        (service->runtime_may_be_modified != 0) ||
-        (service->stage == UPDATE_STAGE_FAILURE_CLOSE) ||
+    if ((service->initialized == 0) || (service->state != SERVICE_RUN_STATE_RUNNING) ||
+        (service->runtime_may_be_modified != 0) || (service->stage == UPDATE_STAGE_FAILURE_CLOSE) ||
         (service->stage == UPDATE_STAGE_CANCEL_CLOSE) ||
         (service->stage == UPDATE_STAGE_CANCEL_XIP_CHECK_INDIRECT) ||
         (service->stage == UPDATE_STAGE_CANCEL_XIP_EXIT) ||
@@ -1712,13 +1693,12 @@ firmware_status_t UpdateService_Cancel(struct update_service *service)
      * 初次 XIP 检查后，服务已经拥有“所有 Runtime 擦写必须 indirect”的责任。即使
      * 此刻还在源预检，也要在取消终态前重新查询并在需要时退出 memory-mapped。
      */
-    service->cancel_requires_indirect =
-        ((service->stage >= UPDATE_STAGE_XIP_CHECK_INDIRECT) &&
-         (service->stage <= UPDATE_STAGE_SOURCE_GUI_VERIFY))
-            ? 1
-            : 0;
-    service->close_retry_count = 0U;
-    service->candidate_ready   = 0;
+    service->cancel_requires_indirect = ((service->stage >= UPDATE_STAGE_XIP_CHECK_INDIRECT) &&
+                                         (service->stage <= UPDATE_STAGE_SOURCE_GUI_VERIFY))
+                                            ? 1
+                                            : 0;
+    service->close_retry_count        = 0U;
+    service->candidate_ready          = 0;
     if (service->source_file_open != 0)
     {
         service->stage = UPDATE_STAGE_CANCEL_CLOSE;
@@ -1743,17 +1723,13 @@ const service_result_t *UpdateService_GetResult(const struct update_service *ser
 const validated_manifest_t *UpdateService_GetManifest(const struct update_service *service)
 {
     /* 只暴露已完成完整绑定校验的 Manifest，清理阶段不能借枚举顺序泄漏半成品。 */
-    return (service == NULL) || (service->manifest_ready == 0)
-               ? NULL
-               : &service->manifest;
+    return (service == NULL) || (service->manifest_ready == 0) ? NULL : &service->manifest;
 }
 
 const boot_active_record_t *UpdateService_GetCandidate(const struct update_service *service)
 {
     /* 只有所有选中 Runtime 目标回读均成功后，候选记录才可交给 EEPROM 提交服务。 */
-    return (service == NULL) || (service->candidate_ready == 0)
-               ? NULL
-               : &service->candidate_record;
+    return (service == NULL) || (service->candidate_ready == 0) ? NULL : &service->candidate_record;
 }
 
 int UpdateService_RuntimeMayBeModified(const struct update_service *service)

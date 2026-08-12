@@ -9,19 +9,13 @@
 #include "spi_nor.h"
 
 /** 将通用读取请求转发给 SPI NOR 驱动。 */
-static firmware_status_t Read(
-    void *context,
-    uint32_t address,
-    void *data,
-    uint32_t size)
+static firmware_status_t Read(void *context, uint32_t address, void *data, uint32_t size)
 {
-    return SpiNor_Read((spi_nor_t *)context, address, data, size);
+    return SpiNor_Read((spi_nor_t *) context, address, data, size);
 }
 
 /** 查询 SPI NOR 参数，并填充异步块设备信息。 */
-static firmware_status_t AsyncGetInfo(
-    void *context,
-    async_block_device_info_t *info)
+static firmware_status_t AsyncGetInfo(void *context, async_block_device_info_t *info)
 {
     spi_nor_info_t device_info;
     firmware_status_t status;
@@ -30,36 +24,30 @@ static firmware_status_t AsyncGetInfo(
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    status = SpiNor_GetInfo((spi_nor_t *)context, &device_info);
+    status = SpiNor_GetInfo((spi_nor_t *) context, &device_info);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
 
     info->capacity_bytes = device_info.capacity_bytes;
-    info->program_size = device_info.page_size;
-    info->erase_size = device_info.erase_size;
+    info->program_size   = device_info.page_size;
+    info->erase_size     = device_info.erase_size;
     return FIRMWARE_STATUS_OK;
 }
 
 /** 启动一次异步擦除操作。 */
-static firmware_status_t EraseStart(
-    void *context,
-    uint32_t address,
-    uint32_t size)
+static firmware_status_t EraseStart(void *context, uint32_t address, uint32_t size)
 {
-    return SpiNor_EraseStart((spi_nor_t *)context, address, size);
+    return SpiNor_EraseStart((spi_nor_t *) context, address, size);
 }
 
 /** 校验页边界后启动一次异步编程操作。 */
-static firmware_status_t AsyncProgram(
-    void *context,
-    uint32_t address,
-    const void *data,
-    uint32_t size)
+static firmware_status_t AsyncProgram(void *context, uint32_t address, const void *data,
+                                      uint32_t size)
 {
     spi_nor_info_t info;
-    firmware_status_t status = SpiNor_GetInfo((spi_nor_t *)context, &info);
+    firmware_status_t status = SpiNor_GetInfo((spi_nor_t *) context, &info);
 
     if (!FirmwareStatus_IsOk(status))
     {
@@ -72,19 +60,18 @@ static firmware_status_t AsyncProgram(
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
-    return SpiNor_ProgramStart((spi_nor_t *)context, address, data, size);
+    return SpiNor_ProgramStart((spi_nor_t *) context, address, data, size);
 }
 
 /** 推进 SPI NOR 异步操作状态机。 */
 static firmware_status_t Poll(void *context)
 {
-    return SpiNor_OperationPoll((spi_nor_t *)context);
+    return SpiNor_OperationPoll((spi_nor_t *) context);
 }
 
 /** 将 SPI NOR 操作状态映射为通用异步块设备状态。 */
-static firmware_status_t GetOperationResult(
-    void *context,
-    async_block_device_operation_result_t *result)
+static firmware_status_t GetOperationResult(void *context,
+                                            async_block_device_operation_result_t *result)
 {
     spi_nor_operation_result_t driver_result;
     firmware_status_t status;
@@ -93,7 +80,7 @@ static firmware_status_t GetOperationResult(
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    status = SpiNor_GetOperationResult((spi_nor_t *)context, &driver_result);
+    status = SpiNor_GetOperationResult((spi_nor_t *) context, &driver_result);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -118,9 +105,7 @@ static firmware_status_t GetOperationResult(
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t SpiNorBlockAdapter_Init(
-    spi_nor_block_adapter_t *adapter,
-    struct spi_nor *device)
+firmware_status_t SpiNorBlockAdapter_Init(spi_nor_block_adapter_t *adapter, struct spi_nor *device)
 {
     if ((adapter == NULL) || (device == NULL))
     {
@@ -128,20 +113,20 @@ firmware_status_t SpiNorBlockAdapter_Init(
     }
 
     /* 调用者只通过有界的异步接口访问同一个驱动上下文。 */
-    adapter->device = device;
-    adapter->async_interface.context = device;
-    adapter->async_interface.get_info = AsyncGetInfo;
-    adapter->async_interface.read = Read;
-    adapter->async_interface.program_start = AsyncProgram;
-    adapter->async_interface.erase_start = EraseStart;
-    adapter->async_interface.poll = Poll;
+    adapter->device                               = device;
+    adapter->async_interface.context              = device;
+    adapter->async_interface.get_info             = AsyncGetInfo;
+    adapter->async_interface.read                 = Read;
+    adapter->async_interface.program_start        = AsyncProgram;
+    adapter->async_interface.erase_start          = EraseStart;
+    adapter->async_interface.poll                 = Poll;
     adapter->async_interface.get_operation_result = GetOperationResult;
-    adapter->async_interface.cancel = NULL;
+    adapter->async_interface.cancel               = NULL;
     return FIRMWARE_STATUS_OK;
 }
 
-const async_block_device_t *SpiNorBlockAdapter_AsyncInterface(
-    const spi_nor_block_adapter_t *adapter)
+const async_block_device_t *
+SpiNorBlockAdapter_AsyncInterface(const spi_nor_block_adapter_t *adapter)
 {
     /* 返回适配器内嵌的异步接口。 */
     return (adapter == NULL) ? NULL : &adapter->async_interface;

@@ -33,8 +33,7 @@ typedef struct
 } fatfs_package_source_adapter_t;
 
 /** 初始化共享卷状态，初始时卷和文件均未打开。 */
-firmware_status_t FatFsReleaseVolumeContext_Init(
-    fatfs_release_volume_context_t *volume);
+firmware_status_t FatFsReleaseVolumeContext_Init(fatfs_release_volume_context_t *volume);
 
 /**
  * 初始化固定文件访问及旧路径名兼容访问。
@@ -45,12 +44,11 @@ firmware_status_t FatFsReleaseVolumeContext_Init(
  * @return 成功时返回 FIRMWARE_STATUS_OK；参数无效时返回
  *         FIRMWARE_STATUS_INVALID_ARGUMENT。
  */
-firmware_status_t FatFsPackageSourceAdapter_Init(
-    fatfs_package_source_adapter_t *adapter,
-    fatfs_release_volume_context_t *volume);
+firmware_status_t FatFsPackageSourceAdapter_Init(fatfs_package_source_adapter_t *adapter,
+                                                 fatfs_release_volume_context_t *volume);
 
 /** 返回适配器持有的发布包访问接口；参数为 NULL 时返回 NULL。 */
-const package_source_t *FatFsPackageSourceAdapter_Interface(
-    const fatfs_package_source_adapter_t *adapter);
+const package_source_t *
+FatFsPackageSourceAdapter_Interface(const fatfs_package_source_adapter_t *adapter);
 
 #endif

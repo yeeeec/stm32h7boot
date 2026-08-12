@@ -55,8 +55,7 @@ typedef struct launch_service
  * @param[in] dependencies 所有接口和 SRAM 策略。
  * @return FIRMWARE_STATUS_OK 或参数/重复初始化错误。
  */
-firmware_status_t LaunchService_Init(
-    launch_service_t *service,
-    const launch_service_dependencies_t *dependencies);
+firmware_status_t LaunchService_Init(launch_service_t *service,
+                                     const launch_service_dependencies_t *dependencies);
 
 #endif

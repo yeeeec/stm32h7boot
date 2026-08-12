@@ -190,10 +190,9 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
     switch (service->stage)
     {
         case SECONDARY_MCU_UPDATE_STAGE_SOURCE_INFO:
-            status = service->source->get_info(service->source->context,
-                                                      &service->source_info);
-            if (!FirmwareStatus_IsOk(status) || (service->source_info.size_bytes !=
-                                                 service->request.image_size_bytes))
+            status = service->source->get_info(service->source->context, &service->source_info);
+            if (!FirmwareStatus_IsOk(status) ||
+                (service->source_info.size_bytes != service->request.image_size_bytes))
             {
                 BeginFailure(service,
                              FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_ARGUMENT
@@ -202,7 +201,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
                 break;
             }
             service->source_offset = 0U;
-            service->stage = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_RESET;
+            service->stage         = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_RESET;
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_RESET:
@@ -213,7 +212,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
                 break;
             }
             service->source_offset = 0U;
-            service->stage = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_READ;
+            service->stage         = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_READ;
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_READ:
@@ -223,14 +222,13 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
                 service->stage = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_FINISH;
                 break;
             }
-            chunk = MinU32(remaining, service->buffer_size);
-            status = service->source->read(service->source->context,
-                                                  service->source_offset,
-                                                  service->write_buffer, chunk);
+            chunk  = MinU32(remaining, service->buffer_size);
+            status = service->source->read(service->source->context, service->source_offset,
+                                           service->write_buffer, chunk);
             if (FirmwareStatus_IsOk(status))
             {
-                status = service->hash->update(service->hash->context,
-                                                      service->write_buffer, chunk);
+                status =
+                    service->hash->update(service->hash->context, service->write_buffer, chunk);
             }
             if (!FirmwareStatus_IsOk(status))
             {
@@ -241,8 +239,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_FINISH:
-            status = service->hash->finish(service->hash->context,
-                                                  service->source_digest);
+            status = service->hash->finish(service->hash->context, service->source_digest);
             if (!FirmwareStatus_IsOk(status) ||
                 (memcmp(service->source_digest, service->request.sha256,
                         FIRMWARE_SHA256_DIGEST_SIZE) != 0))
@@ -254,19 +251,19 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             }
             /* Hashing consumed the source stream; programming always restarts at byte zero. */
             service->source_offset = 0U;
-            service->stage = SECONDARY_MCU_UPDATE_STAGE_BEGIN;
+            service->stage         = SECONDARY_MCU_UPDATE_STAGE_BEGIN;
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_BEGIN:
-            status = service->programmer->begin(service->programmer->context,
-                                                       &service->programmer_info);
+            status =
+                service->programmer->begin(service->programmer->context, &service->programmer_info);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_SECONDARY_MCU_ENTER);
                 break;
             }
             service->session_active = 1;
-            status = ValidateProgrammerInfo(&service->programmer_info);
+            status                  = ValidateProgrammerInfo(&service->programmer_info);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_SECONDARY_MCU_TARGET);
@@ -276,18 +273,16 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_ERASE:
-            remaining =
-                service->request.erase_page_count - service->erase_page_offset;
+            remaining = service->request.erase_page_count - service->erase_page_offset;
             if (remaining == 0U)
             {
                 service->stage = SECONDARY_MCU_UPDATE_STAGE_READ_SOURCE;
                 break;
             }
             chunk  = MinU32(remaining, service->programmer_info.max_erase_block_count);
-            status = service->programmer->erase(service->programmer->context,
-                                                       service->request.erase_page_start +
-                                                           service->erase_page_offset,
-                                                       chunk);
+            status = service->programmer->erase(
+                service->programmer->context,
+                service->request.erase_page_start + service->erase_page_offset, chunk);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_SECONDARY_MCU_ERASE);
@@ -307,9 +302,8 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             chunk  = MinU32(remaining, service->buffer_size);
             chunk  = MinU32(chunk, service->programmer_info.max_write_size);
             chunk  = MinU32(chunk, service->programmer_info.max_read_size);
-            status = service->source->read(service->source->context,
-                                                  service->source_offset,
-                                                  service->write_buffer, chunk);
+            status = service->source->read(service->source->context, service->source_offset,
+                                           service->write_buffer, chunk);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_SECONDARY_MCU_SOURCE);
@@ -320,10 +314,10 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_WRITE:
-            status = service->programmer->write(
-                service->programmer->context,
-                service->request.target_address + service->source_offset,
-                service->write_buffer, service->pending_size);
+            status =
+                service->programmer->write(service->programmer->context,
+                                           service->request.target_address + service->source_offset,
+                                           service->write_buffer, service->pending_size);
             if (!FirmwareStatus_IsOk(status))
             {
                 BeginFailure(service, status, BOOT_ERROR_SECONDARY_MCU_PROGRAM);
@@ -334,13 +328,13 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_READBACK:
-            status = service->programmer->read(
-                service->programmer->context,
-                service->request.target_address + service->source_offset,
-                service->readback_buffer, service->pending_size);
+            status =
+                service->programmer->read(service->programmer->context,
+                                          service->request.target_address + service->source_offset,
+                                          service->readback_buffer, service->pending_size);
             if (!FirmwareStatus_IsOk(status) ||
-                (memcmp(service->write_buffer, service->readback_buffer,
-                        service->pending_size) != 0))
+                (memcmp(service->write_buffer, service->readback_buffer, service->pending_size) !=
+                 0))
             {
                 BeginFailure(service,
                              FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
@@ -358,20 +352,20 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             {
                 /* end 失败时仍允许 abort 做第二次恢复；保留退出错误为根因。 */
                 service->failure_status = status;
-                service->failure_error = BOOT_ERROR_SECONDARY_MCU_EXIT;
-                service->failure_stage = service->stage;
-                service->result.status = status;
-                service->result.error = BOOT_ERROR_SECONDARY_MCU_EXIT;
-                service->result.stage = (uint32_t)service->stage;
-                service->stage = SECONDARY_MCU_UPDATE_STAGE_ABORT;
+                service->failure_error  = BOOT_ERROR_SECONDARY_MCU_EXIT;
+                service->failure_stage  = service->stage;
+                service->result.status  = status;
+                service->result.error   = BOOT_ERROR_SECONDARY_MCU_EXIT;
+                service->result.stage   = (uint32_t) service->stage;
+                service->stage          = SECONDARY_MCU_UPDATE_STAGE_ABORT;
                 break;
             }
             service->session_active = 0;
-            service->state         = SERVICE_RUN_STATE_SUCCEEDED;
-            service->result.status = FIRMWARE_STATUS_OK;
-            service->result.error  = BOOT_ERROR_NONE;
-            service->result.stage  = (uint32_t) service->stage;
-            service->stage         = SECONDARY_MCU_UPDATE_STAGE_IDLE;
+            service->state          = SERVICE_RUN_STATE_SUCCEEDED;
+            service->result.status  = FIRMWARE_STATUS_OK;
+            service->result.error   = BOOT_ERROR_NONE;
+            service->result.stage   = (uint32_t) service->stage;
+            service->stage          = SECONDARY_MCU_UPDATE_STAGE_IDLE;
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_ABORT:
@@ -390,8 +384,7 @@ firmware_status_t SecondaryMcuUpdateService_Cancel(struct secondary_mcu_update_s
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if ((service->initialized == 0) ||
-        (service->state != SERVICE_RUN_STATE_RUNNING) ||
+    if ((service->initialized == 0) || (service->state != SERVICE_RUN_STATE_RUNNING) ||
         (service->target_may_be_modified != 0) ||
         (service->stage == SECONDARY_MCU_UPDATE_STAGE_ABORT))
     {

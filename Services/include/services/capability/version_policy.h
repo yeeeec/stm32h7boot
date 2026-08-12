@@ -12,13 +12,9 @@
  * @return lhs 小于、等于或大于 rhs 时分别返回负数、零或正数；任一参数为 NULL 时
  *         返回零，调用者应在此之前完成参数校验。
  */
-int VersionPolicy_Compare(
-    const release_version_t *lhs,
-    const release_version_t *rhs);
+int VersionPolicy_Compare(const release_version_t *lhs, const release_version_t *rhs);
 
 /** @brief 仅在 candidate 严格新于 current 时返回非零。 */
-int VersionPolicy_IsUpgrade(
-    const release_version_t *current,
-    const release_version_t *candidate);
+int VersionPolicy_IsUpgrade(const release_version_t *current, const release_version_t *candidate);
 
 #endif

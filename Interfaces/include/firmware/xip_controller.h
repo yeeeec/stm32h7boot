@@ -14,14 +14,10 @@ typedef firmware_status_t (*xip_controller_enter_fn)(void *context);
 /** 在 erase 或 program 前请求切换到 indirect mode。 */
 typedef firmware_status_t (*xip_controller_exit_fn)(void *context);
 /** 查询硬件后置条件；过期的软件 Cache 不能作为依据。 */
-typedef firmware_status_t (*xip_controller_is_mapped_fn)(
-    void *context,
-    int *mapped);
+typedef firmware_status_t (*xip_controller_is_mapped_fn)(void *context, int *mapped);
 /** 外部 Flash 写入后使 mapped 范围覆盖的 Cache 状态失效。 */
-typedef firmware_status_t (*xip_controller_invalidate_fn)(
-    void *context,
-    uint32_t mapped_address,
-    uint32_t size);
+typedef firmware_status_t (*xip_controller_invalidate_fn)(void *context, uint32_t mapped_address,
+                                                          uint32_t size);
 
 /**
  * @brief 外部 Flash memory-mapped Window 的 Exclusive Controller。

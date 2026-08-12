@@ -12,40 +12,29 @@
 
 #include "firmware/status.h"
 
-#define AT24C128_CAPACITY_BYTES  (16UL * 1024UL)
-#define AT24C128_PAGE_SIZE_BYTES 64U
+#define AT24C128_CAPACITY_BYTES   (16UL * 1024UL)
+#define AT24C128_PAGE_SIZE_BYTES  64U
 #define AT24C128_ADDRESS_MIN_7BIT 0x50U
 #define AT24C128_ADDRESS_MAX_7BIT 0x57U
 
-typedef firmware_status_t (*at24_read_fn)(
-    void *context,
-    uint8_t device_address_7bit,
-    uint16_t memory_address,
-    uint8_t *data,
-    uint32_t size);
-typedef firmware_status_t (*at24_write_fn)(
-    void *context,
-    uint8_t device_address_7bit,
-    uint16_t memory_address,
-    const uint8_t *data,
-    uint32_t size);
-typedef firmware_status_t (*at24_probe_ready_fn)(
-    void *context,
-    uint8_t device_address_7bit,
-    int *ready);
+typedef firmware_status_t (*at24_read_fn)(void *context, uint8_t device_address_7bit,
+                                          uint16_t memory_address, uint8_t *data, uint32_t size);
+typedef firmware_status_t (*at24_write_fn)(void *context, uint8_t device_address_7bit,
+                                           uint16_t memory_address, const uint8_t *data,
+                                           uint32_t size);
+typedef firmware_status_t (*at24_probe_ready_fn)(void *context, uint8_t device_address_7bit,
+                                                 int *ready);
 typedef uint32_t (*at24_now_ms_fn)(void *context);
-typedef firmware_status_t (*at24_set_write_enabled_fn)(
-    void *context,
-    int enabled);
+typedef firmware_status_t (*at24_set_write_enabled_fn)(void *context, int enabled);
 
 /** Transport operations supplied by the board binding. */
 typedef struct
 {
-    void *context; /**< Passed unchanged to every callback. */
-    at24_read_fn read; /**< Perform one 16-bit-addressed random read. */
-    at24_write_fn write; /**< Transmit one page-bounded write. */
+    void *context;                   /**< Passed unchanged to every callback. */
+    at24_read_fn read;               /**< Perform one 16-bit-addressed random read. */
+    at24_write_fn write;             /**< Transmit one page-bounded write. */
     at24_probe_ready_fn probe_ready; /**< Perform one acknowledge-poll attempt. */
-    at24_now_ms_fn now_ms; /**< Return a wrapping millisecond tick. */
+    at24_now_ms_fn now_ms;           /**< Return a wrapping millisecond tick. */
     /** Optional board WP control; NULL means the device is externally writable. */
     at24_set_write_enabled_fn set_write_enabled;
 } at24_port_t;
@@ -54,7 +43,7 @@ typedef struct
 typedef struct
 {
     uint8_t device_address_7bit; /**< Unshifted address in the 0x50..0x57 range. */
-    uint32_t write_timeout_ms; /**< Maximum internal write-cycle duration. */
+    uint32_t write_timeout_ms;   /**< Maximum internal write-cycle duration. */
 } at24_config_t;
 
 /** Fixed AT24C128 geometry in bytes. */
@@ -102,10 +91,7 @@ typedef struct at24
  * @return FIRMWARE_STATUS_INVALID_ARGUMENT for invalid dependencies or address.
  * @return FIRMWARE_STATUS_INVALID_STATE if @p device is already initialized.
  */
-firmware_status_t At24_Init(
-    at24_t *device,
-    const at24_port_t *port,
-    const at24_config_t *config);
+firmware_status_t At24_Init(at24_t *device, const at24_port_t *port, const at24_config_t *config);
 
 /** Return the fixed AT24C128 capacity and page size. */
 firmware_status_t At24_GetInfo(const at24_t *device, at24_info_t *info);
@@ -114,25 +100,16 @@ firmware_status_t At24_GetInfo(const at24_t *device, at24_info_t *info);
 firmware_status_t At24_Probe(at24_t *device);
 
 /** Read an arbitrary nonempty in-range byte sequence while no write is busy. */
-firmware_status_t At24_Read(
-    at24_t *device,
-    uint32_t address,
-    void *data,
-    uint32_t size);
+firmware_status_t At24_Read(at24_t *device, uint32_t address, void *data, uint32_t size);
 
 /** Start one nonempty write that cannot cross a 64-byte physical page. */
-firmware_status_t At24_WritePageStart(
-    at24_t *device,
-    uint32_t address,
-    const void *data,
-    uint32_t size);
+firmware_status_t At24_WritePageStart(at24_t *device, uint32_t address, const void *data,
+                                      uint32_t size);
 
 /** Perform one bounded acknowledge-poll attempt for a started write. */
 firmware_status_t At24_OperationPoll(at24_t *device);
 
 /** Return the current or most recent write result. */
-firmware_status_t At24_GetOperationResult(
-    const at24_t *device,
-    at24_operation_result_t *result);
+firmware_status_t At24_GetOperationResult(const at24_t *device, at24_operation_result_t *result);
 
 #endif

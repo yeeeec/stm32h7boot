@@ -21,9 +21,8 @@ struct update_service;
  * @param[in] request 已严格校验的受信升级请求。
  * @return FIRMWARE_STATUS_OK 后，调用者必须调用 Process 直至终态。
  */
-firmware_status_t UpdateService_PrepareStart(
-    struct update_service *service,
-    const update_request_t *request);
+firmware_status_t UpdateService_PrepareStart(struct update_service *service,
+                                             const update_request_t *request);
 
 /**
  * @brief 将请求选择的 APP/GUI 组件安装到固定 Runtime 区域。
@@ -39,9 +38,8 @@ firmware_status_t UpdateService_InstallStart(struct update_service *service);
  * 单独更新 APP 或 GUI 时 current_record 必须非 NULL，以便保留未选组件元数据；
  * APP+GUI 首次安装允许传入 NULL。
  */
-firmware_status_t UpdateService_InstallStartWithRecord(
-    struct update_service *service,
-    const boot_active_record_t *current_record);
+firmware_status_t UpdateService_InstallStartWithRecord(struct update_service *service,
+                                                       const boot_active_record_t *current_record);
 
 /** @brief 推进一步有界的读取、哈希、Flash 异步轮询或状态转换。 */
 void UpdateService_Process(struct update_service *service);
@@ -56,26 +54,21 @@ void UpdateService_Process(struct update_service *service);
 firmware_status_t UpdateService_Cancel(struct update_service *service);
 
 /** @brief 返回更新生命周期状态；NULL 服务视为失败。 */
-service_run_state_t UpdateService_GetState(
-    const struct update_service *service);
+service_run_state_t UpdateService_GetState(const struct update_service *service);
 
 /** @brief 返回最近一次准备或安装尝试的结果快照。 */
-const service_result_t *UpdateService_GetResult(
-    const struct update_service *service);
+const service_result_t *UpdateService_GetResult(const struct update_service *service);
 
 /** @brief 返回已准备的 Manifest；Prepare 未成功前返回 NULL。 */
-const validated_manifest_t *UpdateService_GetManifest(
-    const struct update_service *service);
+const validated_manifest_t *UpdateService_GetManifest(const struct update_service *service);
 
 /** @brief 安装成功后返回尚未提交到 EEPROM 的候选 Active Record。 */
-const boot_active_record_t *UpdateService_GetCandidate(
-    const struct update_service *service);
+const boot_active_record_t *UpdateService_GetCandidate(const struct update_service *service);
 
 /**
  * 返回本次安装是否可能已经修改 Runtime。
  * 首次 APP 或 GUI 擦除开始时该值变为真，并保持到下次 Prepare 重新初始化为止。
  */
-int UpdateService_RuntimeMayBeModified(
-    const struct update_service *service);
+int UpdateService_RuntimeMayBeModified(const struct update_service *service);
 
 #endif

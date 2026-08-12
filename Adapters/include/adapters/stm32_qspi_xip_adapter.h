@@ -27,12 +27,9 @@ typedef struct
  * @return 成功时返回 FIRMWARE_STATUS_OK。
  * @return 任一参数为 NULL 时返回 FIRMWARE_STATUS_INVALID_ARGUMENT。
  */
-firmware_status_t Stm32QspiXipAdapter_Init(
-    stm32_qspi_xip_adapter_t *adapter,
-    void *qspi_handle);
+firmware_status_t Stm32QspiXipAdapter_Init(stm32_qspi_xip_adapter_t *adapter, void *qspi_handle);
 
 /** 返回适配器持有的 XIP 控制器接口；参数为 NULL 时返回 NULL。 */
-const xip_controller_t *Stm32QspiXipAdapter_Interface(
-    const stm32_qspi_xip_adapter_t *adapter);
+const xip_controller_t *Stm32QspiXipAdapter_Interface(const stm32_qspi_xip_adapter_t *adapter);
 
 #endif

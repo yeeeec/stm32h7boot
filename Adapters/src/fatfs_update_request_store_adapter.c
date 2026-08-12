@@ -29,8 +29,7 @@ static firmware_status_t FatFsRequestStatus(FRESULT result)
     {
         return FIRMWARE_STATUS_NOT_FOUND;
     }
-    if ((result == FR_INVALID_OBJECT) || (result == FR_NOT_ENABLED) ||
-        (result == FR_NOT_READY))
+    if ((result == FR_INVALID_OBJECT) || (result == FR_NOT_ENABLED) || (result == FR_NOT_READY))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -44,7 +43,7 @@ static firmware_status_t FatFsRequestStatus(FRESULT result)
 /** 拼接共享卷中的固定 trusted request 文件路径。 */
 static firmware_status_t BuildRequestPath(char *full_path, size_t full_path_size)
 {
-    const size_t volume_path_length = strlen(SDPath);
+    const size_t volume_path_length  = strlen(SDPath);
     const size_t request_path_length = strlen(FATFS_REQUEST_PATH + 1U);
 
     if ((full_path == NULL) || (full_path_size == 0U) || (volume_path_length == 0U))
@@ -67,12 +66,11 @@ static firmware_status_t BuildRequestPath(char *full_path, size_t full_path_size
  * request_file_open 只有在底层 f_close 成功后才清零。
  */
 static firmware_status_t CloseRequestFile(fatfs_update_request_store_adapter_t *adapter,
-                                           firmware_status_t status)
+                                          firmware_status_t status)
 {
     firmware_status_t close_status;
 
-    if ((adapter == NULL) || (adapter->volume == NULL) ||
-        (adapter->volume->request_file_open == 0))
+    if ((adapter == NULL) || (adapter->volume == NULL) || (adapter->volume->request_file_open == 0))
     {
         return status;
     }
@@ -87,11 +85,10 @@ static firmware_status_t CloseRequestFile(fatfs_update_request_store_adapter_t *
 }
 
 /** 读取完整 trusted request 文件，并在返回前关闭共享文件句柄。 */
-static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capacity,
-                                 uint32_t *size)
+static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capacity, uint32_t *size)
 {
     fatfs_update_request_store_adapter_t *adapter =
-        (fatfs_update_request_store_adapter_t *)context;
+        (fatfs_update_request_store_adapter_t *) context;
     char full_path[FATFS_REQUEST_PATH_BUFFER_SIZE];
     FSIZE_t request_size;
     UINT bytes_read;
@@ -133,15 +130,15 @@ static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capaci
         return CloseRequestFile(adapter, FIRMWARE_STATUS_OK);
     }
 
-    result = f_read(&SDFile, buffer, (UINT)request_size, &bytes_read);
+    result = f_read(&SDFile, buffer, (UINT) request_size, &bytes_read);
     status = FatFsRequestStatus(result);
-    if (FirmwareStatus_IsOk(status) && (bytes_read != (UINT)request_size))
+    if (FirmwareStatus_IsOk(status) && (bytes_read != (UINT) request_size))
     {
         status = FIRMWARE_STATUS_IO_ERROR;
     }
     if (FirmwareStatus_IsOk(status))
     {
-        *size = (uint32_t)request_size;
+        *size = (uint32_t) request_size;
     }
     return CloseRequestFile(adapter, status);
 }
@@ -150,7 +147,7 @@ static firmware_status_t LoadRaw(void *context, uint8_t *buffer, uint32_t capaci
 static firmware_status_t Clear(void *context)
 {
     fatfs_update_request_store_adapter_t *adapter =
-        (fatfs_update_request_store_adapter_t *)context;
+        (fatfs_update_request_store_adapter_t *) context;
     char full_path[FATFS_REQUEST_PATH_BUFFER_SIZE];
     firmware_status_t status;
 
@@ -171,24 +168,23 @@ static firmware_status_t Clear(void *context)
     return FatFsRequestStatus(f_unlink(full_path));
 }
 
-firmware_status_t FatFsUpdateRequestStoreAdapter_Init(
-    fatfs_update_request_store_adapter_t *adapter,
-    fatfs_release_volume_context_t *volume)
+firmware_status_t FatFsUpdateRequestStoreAdapter_Init(fatfs_update_request_store_adapter_t *adapter,
+                                                      fatfs_release_volume_context_t *volume)
 {
     if ((adapter == NULL) || (volume == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     /* 保存共享卷引用，所有权仍由调用者管理。 */
-    adapter->volume = volume;
-    adapter->interface.context = adapter;
+    adapter->volume             = volume;
+    adapter->interface.context  = adapter;
     adapter->interface.load_raw = LoadRaw;
-    adapter->interface.clear = Clear;
+    adapter->interface.clear    = Clear;
     return FIRMWARE_STATUS_OK;
 }
 
-const update_request_store_t *FatFsUpdateRequestStoreAdapter_Interface(
-    const fatfs_update_request_store_adapter_t *adapter)
+const update_request_store_t *
+FatFsUpdateRequestStoreAdapter_Interface(const fatfs_update_request_store_adapter_t *adapter)
 {
     /* 返回适配器内嵌的 request 存储接口。 */
     return (adapter == NULL) ? NULL : &adapter->interface;

@@ -31,44 +31,25 @@ static firmware_status_t HalStatus(HAL_StatusTypeDef status)
     return FIRMWARE_STATUS_IO_ERROR;
 }
 
-static firmware_status_t I2cRead(
-    void *context,
-    uint8_t device_address_7bit,
-    uint16_t memory_address,
-    uint8_t *data,
-    uint32_t size)
+static firmware_status_t I2cRead(void *context, uint8_t device_address_7bit,
+                                 uint16_t memory_address, uint8_t *data, uint32_t size)
 {
-    return HalStatus(HAL_I2C_Mem_Read(
-        (I2C_HandleTypeDef *)context,
-        (uint16_t)((uint16_t)device_address_7bit << 1U),
-        memory_address,
-        I2C_MEMADD_SIZE_16BIT,
-        data,
-        (uint16_t)size,
-        BSP_EEPROM_TRANSFER_TIMEOUT_MS));
+    return HalStatus(HAL_I2C_Mem_Read((I2C_HandleTypeDef *) context,
+                                      (uint16_t) ((uint16_t) device_address_7bit << 1U),
+                                      memory_address, I2C_MEMADD_SIZE_16BIT, data, (uint16_t) size,
+                                      BSP_EEPROM_TRANSFER_TIMEOUT_MS));
 }
 
-static firmware_status_t I2cWrite(
-    void *context,
-    uint8_t device_address_7bit,
-    uint16_t memory_address,
-    const uint8_t *data,
-    uint32_t size)
+static firmware_status_t I2cWrite(void *context, uint8_t device_address_7bit,
+                                  uint16_t memory_address, const uint8_t *data, uint32_t size)
 {
-    return HalStatus(HAL_I2C_Mem_Write(
-        (I2C_HandleTypeDef *)context,
-        (uint16_t)((uint16_t)device_address_7bit << 1U),
-        memory_address,
-        I2C_MEMADD_SIZE_16BIT,
-        (uint8_t *)data,
-        (uint16_t)size,
-        BSP_EEPROM_TRANSFER_TIMEOUT_MS));
+    return HalStatus(HAL_I2C_Mem_Write((I2C_HandleTypeDef *) context,
+                                       (uint16_t) ((uint16_t) device_address_7bit << 1U),
+                                       memory_address, I2C_MEMADD_SIZE_16BIT, (uint8_t *) data,
+                                       (uint16_t) size, BSP_EEPROM_TRANSFER_TIMEOUT_MS));
 }
 
-static firmware_status_t I2cProbeReady(
-    void *context,
-    uint8_t device_address_7bit,
-    int *ready)
+static firmware_status_t I2cProbeReady(void *context, uint8_t device_address_7bit, int *ready)
 {
     HAL_StatusTypeDef status;
 
@@ -76,11 +57,8 @@ static firmware_status_t I2cProbeReady(
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    status = HAL_I2C_IsDeviceReady(
-        (I2C_HandleTypeDef *)context,
-        (uint16_t)((uint16_t)device_address_7bit << 1U),
-        1U,
-        1U);
+    status = HAL_I2C_IsDeviceReady((I2C_HandleTypeDef *) context,
+                                   (uint16_t) ((uint16_t) device_address_7bit << 1U), 1U, 1U);
     /*
      * HAL 无法区分预期的 Busy NACK 与临时探测失败。两者都报告为未就绪，
      * 由 AT24 驱动的有界写周期 Timeout 决定最终结果。
@@ -91,7 +69,7 @@ static firmware_status_t I2cProbeReady(
 
 static uint32_t I2cNowMs(void *context)
 {
-    (void)context;
+    (void) context;
     return HAL_GetTick();
 }
 
@@ -110,15 +88,15 @@ firmware_status_t BSP_EepromInit(const bsp_eeprom_config_t *config)
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    port.context = &hi2c1;
-    port.read = I2cRead;
-    port.write = I2cWrite;
-    port.probe_ready = I2cProbeReady;
-    port.now_ms = I2cNowMs;
-    port.set_write_enabled = NULL;
+    port.context                      = &hi2c1;
+    port.read                         = I2cRead;
+    port.write                        = I2cWrite;
+    port.probe_ready                  = I2cProbeReady;
+    port.now_ms                       = I2cNowMs;
+    port.set_write_enabled            = NULL;
     driver_config.device_address_7bit = config->device_address_7bit;
-    driver_config.write_timeout_ms = config->write_timeout_ms;
-    status = At24_Init(&eeprom, &port, &driver_config);
+    driver_config.write_timeout_ms    = config->write_timeout_ms;
+    status                            = At24_Init(&eeprom, &port, &driver_config);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;

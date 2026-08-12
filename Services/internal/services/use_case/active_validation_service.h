@@ -11,8 +11,8 @@
 
 #include "firmware/async_block_device.h"
 #include "firmware/hash.h"
-#include "services/common/runtime_layout.h"
 #include "services/capability/vector_validation.h"
+#include "services/common/runtime_layout.h"
 #include "services/use_case/active_validation_service_api.h"
 
 /** 固定 Runtime 增量校验所需的调用者持有依赖与工作缓冲区。 */
@@ -89,8 +89,8 @@ typedef struct active_validation_service
  * @param[in] dependencies 长生命周期依赖和工作缓冲区。
  * @return FIRMWARE_STATUS_OK，或参数/状态错误。
  */
-firmware_status_t ActiveValidationService_Init(
-    active_validation_service_t *service,
-    const active_validation_service_dependencies_t *dependencies);
+firmware_status_t
+ActiveValidationService_Init(active_validation_service_t *service,
+                             const active_validation_service_dependencies_t *dependencies);
 
 #endif

@@ -12,11 +12,8 @@
 #define UPDATE_REQUEST_STORE_MAX_RAW_SIZE 1024U
 
 /** 加载 Trusted Request 原始文档，不解析也不校验。 */
-typedef firmware_status_t (*update_request_store_load_raw_fn)(
-    void *context,
-    uint8_t *buffer,
-    uint32_t capacity,
-    uint32_t *size);
+typedef firmware_status_t (*update_request_store_load_raw_fn)(void *context, uint8_t *buffer,
+                                                              uint32_t capacity, uint32_t *size);
 /** 只有所属 Application Workflow 进入 Cleanup 后才清除 Request。 */
 typedef firmware_status_t (*update_request_store_clear_fn)(void *context);
 

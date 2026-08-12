@@ -268,8 +268,7 @@ typedef struct update_service
  * @param[in] dependencies 发布源、服务、外部 Flash 和缓冲区。
  * @return FIRMWARE_STATUS_OK 或参数、分区、缓冲区错误。
  */
-firmware_status_t UpdateService_Init(
-    update_service_t *service,
-    const update_service_dependencies_t *dependencies);
+firmware_status_t UpdateService_Init(update_service_t *service,
+                                     const update_service_dependencies_t *dependencies);
 
 #endif

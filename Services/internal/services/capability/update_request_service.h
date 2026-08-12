@@ -15,7 +15,7 @@
 /** 更新请求 JSON 的最大允许字节数，限制启动阶段的静态资源和解析时间。 */
 #define UPDATE_REQUEST_SERVICE_MAX_DOCUMENT_SIZE 512U
 /** 更新请求 schema 所需的固定 JSON token 容量。 */
-#define UPDATE_REQUEST_SERVICE_TOKEN_CAPACITY     16U
+#define UPDATE_REQUEST_SERVICE_TOKEN_CAPACITY 16U
 
 /** 更新请求服务初始化时由 Composition 注入的密码学能力。 */
 typedef struct
@@ -46,8 +46,8 @@ typedef struct update_request_service
  * @param dependencies 包含完整 hash_provider_t 回调集的依赖对象。
  * @return 成功时返回 FIRMWARE_STATUS_OK；参数或哈希端口不完整时返回错误。
  */
-firmware_status_t UpdateRequestService_Init(
-    update_request_service_t *service,
-    const update_request_service_dependencies_t *dependencies);
+firmware_status_t
+UpdateRequestService_Init(update_request_service_t *service,
+                          const update_request_service_dependencies_t *dependencies);
 
 #endif

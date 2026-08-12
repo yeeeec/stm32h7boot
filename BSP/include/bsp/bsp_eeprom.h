@@ -15,7 +15,7 @@ struct at24;
 typedef struct
 {
     uint8_t device_address_7bit; /**< 由原理图确定的 0x50..0x57 地址。 */
-    uint32_t write_timeout_ms; /**< AT24 内部写周期的最大时间。 */
+    uint32_t write_timeout_ms;   /**< AT24 内部写周期的最大时间。 */
 } bsp_eeprom_config_t;
 
 /**

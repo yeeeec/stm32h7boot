@@ -24,10 +24,8 @@ struct manifest_service;
  * @param[out] manifest 接收严格校验后的领域模型及派生摘要。
  * @return FIRMWARE_STATUS_OK，或代表格式、容量、哈希 Provider 的错误状态。
  */
-firmware_status_t ManifestService_ParseAndValidate(
-    struct manifest_service *service,
-    const uint8_t *data,
-    uint32_t size,
-    validated_manifest_t *manifest);
+firmware_status_t ManifestService_ParseAndValidate(struct manifest_service *service,
+                                                   const uint8_t *data, uint32_t size,
+                                                   validated_manifest_t *manifest);
 
 #endif

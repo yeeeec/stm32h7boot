@@ -18,11 +18,10 @@ typedef struct
 } stm32_system_reset_adapter_t;
 
 /** 将平台复位原语绑定到稳定的固件接口。 */
-firmware_status_t Stm32SystemResetAdapter_Init(
-    stm32_system_reset_adapter_t *adapter);
+firmware_status_t Stm32SystemResetAdapter_Init(stm32_system_reset_adapter_t *adapter);
 
 /** 返回已初始化适配器持有的接口；未初始化或参数为 NULL 时返回 NULL。 */
-const system_reset_t *Stm32SystemResetAdapter_Interface(
-    const stm32_system_reset_adapter_t *adapter);
+const system_reset_t *
+Stm32SystemResetAdapter_Interface(const stm32_system_reset_adapter_t *adapter);
 
 #endif

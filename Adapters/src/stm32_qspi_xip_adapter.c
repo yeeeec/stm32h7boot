@@ -16,9 +16,9 @@
 /** 快速读取指令所需的 dummy cycle 数。 */
 #define QSPI_FAST_READ_DUMMY_CYCLES 8U
 /** QSPI memory-mapped 窗口起始地址。 */
-#define QSPI_MAPPED_BASE            0x90000000UL
+#define QSPI_MAPPED_BASE 0x90000000UL
 /** QSPI memory-mapped 窗口允许的最大范围。 */
-#define QSPI_MAPPED_SIZE            (32UL * 1024UL * 1024UL)
+#define QSPI_MAPPED_SIZE (32UL * 1024UL * 1024UL)
 
 /** 将 HAL 状态码转换为固件层统一状态码。 */
 static firmware_status_t HalStatus(HAL_StatusTypeDef status)
@@ -56,15 +56,13 @@ static int HardwareIsMemoryMapped(const QSPI_HandleTypeDef *handle)
  */
 static void SynchronizeIndirectHalState(QSPI_HandleTypeDef *handle)
 {
-    if ((handle == NULL) || (handle->Instance == NULL) ||
-        (HardwareIsMemoryMapped(handle) != 0) ||
+    if ((handle == NULL) || (handle->Instance == NULL) || (HardwareIsMemoryMapped(handle) != 0) ||
         (READ_BIT(handle->Instance->SR, QSPI_FLAG_BUSY) != 0U))
     {
         return;
     }
     if ((handle->State == HAL_QSPI_STATE_BUSY_MEM_MAPPED) ||
-        ((handle->State == HAL_QSPI_STATE_ERROR) &&
-         (handle->ErrorCode == HAL_QSPI_ERROR_TIMEOUT)))
+        ((handle->State == HAL_QSPI_STATE_ERROR) && (handle->ErrorCode == HAL_QSPI_ERROR_TIMEOUT)))
     {
         handle->State = HAL_QSPI_STATE_READY;
     }
@@ -73,8 +71,7 @@ static void SynchronizeIndirectHalState(QSPI_HandleTypeDef *handle)
 /** 配置并进入 QSPI memory-mapped 读取模式。 */
 static firmware_status_t Enter(void *context)
 {
-    stm32_qspi_xip_adapter_t *adapter =
-        (stm32_qspi_xip_adapter_t *)context;
+    stm32_qspi_xip_adapter_t *adapter = (stm32_qspi_xip_adapter_t *) context;
     QSPI_HandleTypeDef *handle;
     QSPI_CommandTypeDef command;
     QSPI_MemoryMappedTypeDef configuration;
@@ -84,7 +81,7 @@ static firmware_status_t Enter(void *context)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    handle = (QSPI_HandleTypeDef *)adapter->qspi_handle;
+    handle = (QSPI_HandleTypeDef *) adapter->qspi_handle;
     if ((handle == NULL) || (handle->Instance == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
@@ -98,23 +95,20 @@ static firmware_status_t Enter(void *context)
 
     /* 使用单线快速读取命令配置 memory-mapped 窗口。 */
     memset(&command, 0, sizeof(command));
-    command.InstructionMode = QSPI_INSTRUCTION_1_LINE;
-    command.Instruction = QSPI_FAST_READ_INSTRUCTION;
-    command.AddressMode = QSPI_ADDRESS_1_LINE;
-    command.AddressSize = QSPI_ADDRESS_32_BITS;
-    command.AlternateByteMode = QSPI_ALTERNATE_BYTES_NONE;
-    command.DataMode = QSPI_DATA_1_LINE;
-    command.DummyCycles = QSPI_FAST_READ_DUMMY_CYCLES;
-    command.DdrMode = QSPI_DDR_MODE_DISABLE;
-    command.DdrHoldHalfCycle = QSPI_DDR_HHC_ANALOG_DELAY;
-    command.SIOOMode = QSPI_SIOO_INST_EVERY_CMD;
+    command.InstructionMode         = QSPI_INSTRUCTION_1_LINE;
+    command.Instruction             = QSPI_FAST_READ_INSTRUCTION;
+    command.AddressMode             = QSPI_ADDRESS_1_LINE;
+    command.AddressSize             = QSPI_ADDRESS_32_BITS;
+    command.AlternateByteMode       = QSPI_ALTERNATE_BYTES_NONE;
+    command.DataMode                = QSPI_DATA_1_LINE;
+    command.DummyCycles             = QSPI_FAST_READ_DUMMY_CYCLES;
+    command.DdrMode                 = QSPI_DDR_MODE_DISABLE;
+    command.DdrHoldHalfCycle        = QSPI_DDR_HHC_ANALOG_DELAY;
+    command.SIOOMode                = QSPI_SIOO_INST_EVERY_CMD;
     configuration.TimeOutActivation = QSPI_TIMEOUT_COUNTER_DISABLE;
-    configuration.TimeOutPeriod = 0U;
+    configuration.TimeOutPeriod     = 0U;
 
-    status = HalStatus(HAL_QSPI_MemoryMapped(
-        handle,
-        &command,
-        &configuration));
+    status = HalStatus(HAL_QSPI_MemoryMapped(handle, &command, &configuration));
     if (FirmwareStatus_IsOk(status))
     {
         adapter->mapped = HardwareIsMemoryMapped(handle);
@@ -129,8 +123,7 @@ static firmware_status_t Enter(void *context)
 /** 退出 QSPI memory-mapped 模式并恢复可执行 indirect 状态。 */
 static firmware_status_t Exit(void *context)
 {
-    stm32_qspi_xip_adapter_t *adapter =
-        (stm32_qspi_xip_adapter_t *)context;
+    stm32_qspi_xip_adapter_t *adapter = (stm32_qspi_xip_adapter_t *) context;
     QSPI_HandleTypeDef *handle;
     firmware_status_t status;
 
@@ -138,7 +131,7 @@ static firmware_status_t Exit(void *context)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    handle = (QSPI_HandleTypeDef *)adapter->qspi_handle;
+    handle = (QSPI_HandleTypeDef *) adapter->qspi_handle;
     if ((handle == NULL) || (handle->Instance == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
@@ -157,8 +150,7 @@ static firmware_status_t Exit(void *context)
     {
         handle->State = HAL_QSPI_STATE_BUSY_MEM_MAPPED;
     }
-    status = HalStatus(HAL_QSPI_Abort(
-        handle));
+    status = HalStatus(HAL_QSPI_Abort(handle));
     if (FirmwareStatus_IsOk(status))
     {
         /* HAL 在空闲 memory-mapped 窗口上可能不清 FMODE；成功 Abort 后补齐后置条件。 */
@@ -180,15 +172,14 @@ static firmware_status_t Exit(void *context)
 /** 读取 QSPI 硬件 FMODE，并同步 HAL 的间接模式状态。 */
 static firmware_status_t IsMapped(void *context, int *mapped)
 {
-    stm32_qspi_xip_adapter_t *adapter =
-        (stm32_qspi_xip_adapter_t *)context;
+    stm32_qspi_xip_adapter_t *adapter = (stm32_qspi_xip_adapter_t *) context;
     QSPI_HandleTypeDef *handle;
 
     if ((adapter == NULL) || (mapped == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    handle = (QSPI_HandleTypeDef *)adapter->qspi_handle;
+    handle = (QSPI_HandleTypeDef *) adapter->qspi_handle;
     if ((handle == NULL) || (handle->Instance == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
@@ -203,26 +194,21 @@ static firmware_status_t IsMapped(void *context, int *mapped)
 }
 
 /** 按 D-Cache 行边界失效 XIP 数据缓存和指令缓存。 */
-static firmware_status_t Invalidate(
-    void *context,
-    uint32_t mapped_address,
-    uint32_t size)
+static firmware_status_t Invalidate(void *context, uint32_t mapped_address, uint32_t size)
 {
-    stm32_qspi_xip_adapter_t *adapter =
-        (stm32_qspi_xip_adapter_t *)context;
+    stm32_qspi_xip_adapter_t *adapter = (stm32_qspi_xip_adapter_t *) context;
     QSPI_HandleTypeDef *handle;
     uint32_t range_end;
     uint32_t aligned_start;
     uint32_t aligned_end;
     firmware_status_t status;
 
-    if ((adapter == NULL) || (size == 0U) ||
-        (mapped_address < QSPI_MAPPED_BASE) ||
+    if ((adapter == NULL) || (size == 0U) || (mapped_address < QSPI_MAPPED_BASE) ||
         (mapped_address > UINT32_MAX - size))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    handle = (QSPI_HandleTypeDef *)adapter->qspi_handle;
+    handle = (QSPI_HandleTypeDef *) adapter->qspi_handle;
     if ((handle == NULL) || (handle->Instance == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
@@ -244,11 +230,9 @@ static firmware_status_t Invalidate(
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
-    aligned_end = (range_end + PLATFORM_DCACHE_LINE_SIZE - 1U) &
-                  ~(PLATFORM_DCACHE_LINE_SIZE - 1U);
-    status = Platform_DCacheInvalidate(
-        (const void *)(uintptr_t)aligned_start,
-        (size_t)(aligned_end - aligned_start));
+    aligned_end = (range_end + PLATFORM_DCACHE_LINE_SIZE - 1U) & ~(PLATFORM_DCACHE_LINE_SIZE - 1U);
+    status      = Platform_DCacheInvalidate((const void *) (uintptr_t) aligned_start,
+                                            (size_t) (aligned_end - aligned_start));
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -257,9 +241,7 @@ static firmware_status_t Invalidate(
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t Stm32QspiXipAdapter_Init(
-    stm32_qspi_xip_adapter_t *adapter,
-    void *qspi_handle)
+firmware_status_t Stm32QspiXipAdapter_Init(stm32_qspi_xip_adapter_t *adapter, void *qspi_handle)
 {
     if ((adapter == NULL) || (qspi_handle == NULL))
     {
@@ -267,18 +249,17 @@ firmware_status_t Stm32QspiXipAdapter_Init(
     }
 
     /* 适配器只保存 HAL 句柄引用，句柄生命周期由 Composition 管理。 */
-    adapter->qspi_handle = qspi_handle;
-    adapter->mapped = 0;
-    adapter->interface.context = adapter;
+    adapter->qspi_handle                        = qspi_handle;
+    adapter->mapped                             = 0;
+    adapter->interface.context                  = adapter;
     adapter->interface.enter_memory_mapped_read = Enter;
-    adapter->interface.exit_memory_mapped = Exit;
-    adapter->interface.is_memory_mapped = IsMapped;
-    adapter->interface.invalidate_mapped_cache = Invalidate;
+    adapter->interface.exit_memory_mapped       = Exit;
+    adapter->interface.is_memory_mapped         = IsMapped;
+    adapter->interface.invalidate_mapped_cache  = Invalidate;
     return FIRMWARE_STATUS_OK;
 }
 
-const xip_controller_t *Stm32QspiXipAdapter_Interface(
-    const stm32_qspi_xip_adapter_t *adapter)
+const xip_controller_t *Stm32QspiXipAdapter_Interface(const stm32_qspi_xip_adapter_t *adapter)
 {
     /* 返回适配器内嵌的 XIP 控制器接口。 */
     return (adapter == NULL) ? NULL : &adapter->interface;

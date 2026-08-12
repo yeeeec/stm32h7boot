@@ -9,17 +9,17 @@
 
 #include <stdint.h>
 
-#include "firmware/image_authenticator.h"
 #include "crypto/sha256.h"
+#include "firmware/image_authenticator.h"
 
 #define MICRO_ECC_P256_PUBLIC_KEY_SIZE 64U
-#define MICRO_ECC_P256_SIGNATURE_SIZE   64U
-#define MICRO_ECC_KEY_ID_MAX_SIZE       31U
+#define MICRO_ECC_P256_SIGNATURE_SIZE  64U
+#define MICRO_ECC_KEY_ID_MAX_SIZE      31U
 
 /** Provider configuration copied during initialization. */
 typedef struct
 {
-    const char *key_id; /**< ASCII key identifier copied into the provider. */
+    const char *key_id;        /**< ASCII key identifier copied into the provider. */
     const uint8_t *public_key; /**< 64-byte uncompressed X||Y P-256 key. */
 } micro_ecc_authenticator_config_t;
 
@@ -34,12 +34,11 @@ typedef struct
 } micro_ecc_authenticator_t;
 
 /** Initialize a provider with one copied P-256 public key and Key ID. */
-firmware_status_t MicroEccAuthenticator_Init(
-    micro_ecc_authenticator_t *authenticator,
-    const micro_ecc_authenticator_config_t *config);
+firmware_status_t MicroEccAuthenticator_Init(micro_ecc_authenticator_t *authenticator,
+                                             const micro_ecc_authenticator_config_t *config);
 
 /** Return the provider interface owned by an authenticator. */
-const image_authenticator_t *MicroEccAuthenticator_Interface(
-    const micro_ecc_authenticator_t *authenticator);
+const image_authenticator_t *
+MicroEccAuthenticator_Interface(const micro_ecc_authenticator_t *authenticator);
 
 #endif

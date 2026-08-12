@@ -25,14 +25,10 @@ typedef struct
 firmware_status_t Sha256_Reset(sha256_context_t *context);
 
 /** Consume bytes without retaining the caller buffer. */
-firmware_status_t Sha256_Update(
-    sha256_context_t *context,
-    const void *data,
-    size_t size);
+firmware_status_t Sha256_Update(sha256_context_t *context, const void *data, size_t size);
 
 /** Finalize into a 32-byte digest without modifying the source context. */
-firmware_status_t Sha256_Finish(
-    const sha256_context_t *context,
-    uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE]);
+firmware_status_t Sha256_Finish(const sha256_context_t *context,
+                                uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE]);
 
 #endif

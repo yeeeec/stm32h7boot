@@ -12,7 +12,7 @@
 
 static firmware_status_t Reset(void *context)
 {
-    crc32_iso_hdlc_t *checksum = (crc32_iso_hdlc_t *)context;
+    crc32_iso_hdlc_t *checksum = (crc32_iso_hdlc_t *) context;
 
     if (checksum == NULL)
     {
@@ -24,8 +24,8 @@ static firmware_status_t Reset(void *context)
 
 static firmware_status_t Update(void *context, const void *data, size_t size)
 {
-    crc32_iso_hdlc_t *checksum = (crc32_iso_hdlc_t *)context;
-    const uint8_t *bytes = (const uint8_t *)data;
+    crc32_iso_hdlc_t *checksum = (crc32_iso_hdlc_t *) context;
+    const uint8_t *bytes       = (const uint8_t *) data;
     size_t index;
 
     if ((checksum == NULL) || ((data == NULL) && (size != 0U)))
@@ -42,8 +42,7 @@ static firmware_status_t Update(void *context, const void *data, size_t size)
         {
             uint32_t mask = 0U - (checksum->state & 1U);
 
-            checksum->state =
-                (checksum->state >> 1U) ^ (CRC32_REFLECTED_POLYNOMIAL & mask);
+            checksum->state = (checksum->state >> 1U) ^ (CRC32_REFLECTED_POLYNOMIAL & mask);
         }
     }
     return FIRMWARE_STATUS_OK;
@@ -51,7 +50,7 @@ static firmware_status_t Update(void *context, const void *data, size_t size)
 
 static firmware_status_t GetValue(void *context, uint32_t *value)
 {
-    const crc32_iso_hdlc_t *checksum = (const crc32_iso_hdlc_t *)context;
+    const crc32_iso_hdlc_t *checksum = (const crc32_iso_hdlc_t *) context;
 
     if ((checksum == NULL) || (value == NULL))
     {
@@ -68,11 +67,11 @@ firmware_status_t Crc32IsoHdlc_Init(crc32_iso_hdlc_t *checksum)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
-    checksum->interface.context = checksum;
-    checksum->interface.reset = Reset;
-    checksum->interface.update = Update;
+    checksum->interface.context   = checksum;
+    checksum->interface.reset     = Reset;
+    checksum->interface.update    = Update;
     checksum->interface.get_value = GetValue;
-    checksum->state = CRC32_INITIAL_VALUE;
+    checksum->state               = CRC32_INITIAL_VALUE;
     return FIRMWARE_STATUS_OK;
 }
 

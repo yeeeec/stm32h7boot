@@ -9,7 +9,7 @@
 static firmware_status_t GetInfo(void *context, firmware_image_info_t *info)
 {
     const package_image_source_adapter_t *adapter =
-        (const package_image_source_adapter_t *)context;
+        (const package_image_source_adapter_t *) context;
     firmware_status_t status;
 
     if ((adapter == NULL) || (adapter->package_source == NULL) || (info == NULL) ||
@@ -18,32 +18,29 @@ static firmware_status_t GetInfo(void *context, firmware_image_info_t *info)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
-    status = adapter->package_source->get_size(
-        adapter->package_source->context, &info->size_bytes);
+    status = adapter->package_source->get_size(adapter->package_source->context, &info->size_bytes);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
     }
-    return (info->size_bytes == 0U) ? FIRMWARE_STATUS_INVALID_ARGUMENT
-                                    : FIRMWARE_STATUS_OK;
+    return (info->size_bytes == 0U) ? FIRMWARE_STATUS_INVALID_ARGUMENT : FIRMWARE_STATUS_OK;
 }
 
-static firmware_status_t Read(void *context, uint32_t offset, uint8_t *data,
-                              uint32_t size)
+static firmware_status_t Read(void *context, uint32_t offset, uint8_t *data, uint32_t size)
 {
     const package_image_source_adapter_t *adapter =
-        (const package_image_source_adapter_t *)context;
+        (const package_image_source_adapter_t *) context;
     uint32_t bytes_read = 0U;
     firmware_status_t status;
 
-    if ((adapter == NULL) || (adapter->package_source == NULL) || (data == NULL) ||
-        (size == 0U) || (adapter->package_source->read_at == NULL))
+    if ((adapter == NULL) || (adapter->package_source == NULL) || (data == NULL) || (size == 0U) ||
+        (adapter->package_source->read_at == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
-    status = adapter->package_source->read_at(
-        adapter->package_source->context, offset, data, size, &bytes_read);
+    status = adapter->package_source->read_at(adapter->package_source->context, offset, data, size,
+                                              &bytes_read);
     if (!FirmwareStatus_IsOk(status))
     {
         return status;
@@ -52,25 +49,24 @@ static firmware_status_t Read(void *context, uint32_t offset, uint8_t *data,
     return (bytes_read == size) ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_IO_ERROR;
 }
 
-firmware_status_t PackageImageSourceAdapter_Init(
-    package_image_source_adapter_t *adapter,
-    const package_source_t *package_source)
+firmware_status_t PackageImageSourceAdapter_Init(package_image_source_adapter_t *adapter,
+                                                 const package_source_t *package_source)
 {
-    if ((adapter == NULL) || (package_source == NULL) ||
-        (package_source->get_size == NULL) || (package_source->read_at == NULL))
+    if ((adapter == NULL) || (package_source == NULL) || (package_source->get_size == NULL) ||
+        (package_source->read_at == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
-    adapter->package_source = package_source;
-    adapter->interface.context = adapter;
+    adapter->package_source     = package_source;
+    adapter->interface.context  = adapter;
     adapter->interface.get_info = GetInfo;
-    adapter->interface.read = Read;
+    adapter->interface.read     = Read;
     return FIRMWARE_STATUS_OK;
 }
 
-const firmware_image_source_t *PackageImageSourceAdapter_Interface(
-    const package_image_source_adapter_t *adapter)
+const firmware_image_source_t *
+PackageImageSourceAdapter_Interface(const package_image_source_adapter_t *adapter)
 {
     return (adapter == NULL) ? NULL : &adapter->interface;
 }

@@ -85,10 +85,7 @@ typedef struct
  * @param size    待输出字节数。
  * @return FIRMWARE_STATUS_OK 表示片段已接收；其他状态会终止规范化过程。
  */
-typedef firmware_status_t (*json_canonical_sink_fn)(
-    void *context,
-    const void *data,
-    size_t size);
+typedef firmware_status_t (*json_canonical_sink_fn)(void *context, const void *data, size_t size);
 
 /**
  * 解析一份完整的严格 JSON 文档，并拒绝任意对象内的重复键。
@@ -101,14 +98,11 @@ typedef firmware_status_t (*json_canonical_sink_fn)(
  * @return FIRMWARE_STATUS_OK 表示完整根对象解析成功；
  *         FIRMWARE_STATUS_INVALID_ARGUMENT 表示参数无效；
  *         FIRMWARE_STATUS_OUT_OF_RANGE 表示深度、Token 容量或数值范围不足；
- *         FIRMWARE_STATUS_NOT_SUPPORTED 或 FIRMWARE_STATUS_INVALID_STATE 表示输入不符合受支持的严格 JSON 子集。
+ *         FIRMWARE_STATUS_NOT_SUPPORTED 或 FIRMWARE_STATUS_INVALID_STATE 表示输入不符合受支持的严格
+ * JSON 子集。
  */
-firmware_status_t JsonDocument_Parse(
-    json_document_t *document,
-    const uint8_t *data,
-    uint32_t size,
-    json_token_t *tokens,
-    uint32_t token_capacity);
+firmware_status_t JsonDocument_Parse(json_document_t *document, const uint8_t *data, uint32_t size,
+                                     json_token_t *tokens, uint32_t token_capacity);
 
 /**
  * 查找指定对象的成员，并返回其值 Token 的索引。
@@ -121,11 +115,8 @@ firmware_status_t JsonDocument_Parse(
  *         FIRMWARE_STATUS_INVALID_ARGUMENT 表示参数或对象索引无效；
  *         FIRMWARE_STATUS_INVALID_STATE 表示成员不存在或 Token 结构损坏。
  */
-firmware_status_t JsonDocument_FindMember(
-    const json_document_t *document,
-    uint32_t object_index,
-    const char *key,
-    uint32_t *value_index);
+firmware_status_t JsonDocument_FindMember(const json_document_t *document, uint32_t object_index,
+                                          const char *key, uint32_t *value_index);
 
 /**
  * 返回数组中按输入顺序编号的直接元素。
@@ -138,11 +129,8 @@ firmware_status_t JsonDocument_FindMember(
  *         FIRMWARE_STATUS_INVALID_ARGUMENT 表示参数或数组索引无效；
  *         FIRMWARE_STATUS_OUT_OF_RANGE 表示序号超出数组直接元素范围。
  */
-firmware_status_t JsonDocument_ArrayGet(
-    const json_document_t *document,
-    uint32_t array_index,
-    uint32_t element_index,
-    uint32_t *value_index);
+firmware_status_t JsonDocument_ArrayGet(const json_document_t *document, uint32_t array_index,
+                                        uint32_t element_index, uint32_t *value_index);
 
 /**
  * 复制一个字符串 Token 的 ASCII 内容，并补写空字符结束符。
@@ -155,11 +143,8 @@ firmware_status_t JsonDocument_ArrayGet(
  *         FIRMWARE_STATUS_INVALID_ARGUMENT 表示参数或索引无效；
  *         FIRMWARE_STATUS_OUT_OF_RANGE 表示 Token 不是字符串或目标缓冲区不足。
  */
-firmware_status_t JsonDocument_CopyString(
-    const json_document_t *document,
-    uint32_t token_index,
-    char *destination,
-    uint32_t destination_size);
+firmware_status_t JsonDocument_CopyString(const json_document_t *document, uint32_t token_index,
+                                          char *destination, uint32_t destination_size);
 
 /**
  * 将严格 JSON 中的非负十进制整数 Token 转换为 uint32_t。
@@ -172,10 +157,8 @@ firmware_status_t JsonDocument_CopyString(
  *         FIRMWARE_STATUS_INVALID_STATE 表示 Token 不是数字；
  *         FIRMWARE_STATUS_OUT_OF_RANGE 表示数值超过 uint32_t 的可表示范围。
  */
-firmware_status_t JsonDocument_GetU32(
-    const json_document_t *document,
-    uint32_t token_index,
-    uint32_t *value);
+firmware_status_t JsonDocument_GetU32(const json_document_t *document, uint32_t token_index,
+                                      uint32_t *value);
 
 /**
  * 读取 JSON 布尔 Token。
@@ -187,10 +170,8 @@ firmware_status_t JsonDocument_GetU32(
  *         FIRMWARE_STATUS_INVALID_ARGUMENT 表示参数或索引无效；
  *         FIRMWARE_STATUS_INVALID_STATE 表示 Token 不是布尔值。
  */
-firmware_status_t JsonDocument_GetBoolean(
-    const json_document_t *document,
-    uint32_t token_index,
-    int *value);
+firmware_status_t JsonDocument_GetBoolean(const json_document_t *document, uint32_t token_index,
+                                          int *value);
 
 /**
  * 将字符串 Token 与一个以空字符结尾的 ASCII 字面量进行精确比较。
@@ -200,10 +181,8 @@ firmware_status_t JsonDocument_GetBoolean(
  * @param value       待匹配的 ASCII 字面量。
  * @return 非零表示完全相等；零表示参数无效、Token 不是字符串或内容不同。
  */
-int JsonDocument_StringEquals(
-    const json_document_t *document,
-    uint32_t token_index,
-    const char *value);
+int JsonDocument_StringEquals(const json_document_t *document, uint32_t token_index,
+                              const char *value);
 
 /**
  * 输出本严格 ASCII/uint32 JSON 子集支持的 RFC 8785 风格规范化形式。
@@ -221,11 +200,9 @@ int JsonDocument_StringEquals(
  *         FIRMWARE_STATUS_INVALID_ARGUMENT 表示参数或排除对象无效；
  *         其他状态由 sink 回调原样传播。
  */
-firmware_status_t JsonDocument_Canonicalize(
-    const json_document_t *document,
-    uint32_t excluded_object_index,
-    const char *excluded_member,
-    json_canonical_sink_fn sink,
-    void *sink_context);
+firmware_status_t JsonDocument_Canonicalize(const json_document_t *document,
+                                            uint32_t excluded_object_index,
+                                            const char *excluded_member,
+                                            json_canonical_sink_fn sink, void *sink_context);
 
 #endif
