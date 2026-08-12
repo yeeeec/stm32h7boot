@@ -2,7 +2,7 @@ add_library(firmware_composition STATIC
     src/composition.c
 )
 
-set(SECONDARY_MCU_TARGET "F030" CACHE STRING
+set(SECONDARY_MCU_TARGET "F429" CACHE STRING
     "Therapy controller target: F030 or F429")
 set_property(CACHE SECONDARY_MCU_TARGET PROPERTY STRINGS F030 F429)
 
