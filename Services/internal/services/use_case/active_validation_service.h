@@ -66,6 +66,8 @@ typedef struct active_validation_service
     const memory_region_t *sram_regions;
     /** 合法 Application 栈区间数量。 */
     uint32_t sram_region_count;
+    
+    /* 运行过程中不断变化的状态 */
     /** 本次校验开始时复制的 Active Record，避免外部对象被修改。 */
     boot_active_record_t active_record;
     /** 指向固定 Runtime 布局，Start 时取得。 */

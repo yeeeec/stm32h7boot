@@ -18,8 +18,6 @@
     (MCU_PROGRAMMER_CAPABILITY_READ | MCU_PROGRAMMER_CAPABILITY_WRITE |                            \
      MCU_PROGRAMMER_CAPABILITY_ERASE)
 
-#define SECONDARY_MCU_LOG_TAG "secondary-mcu"
-
 static const char *SecondaryMcuUpdateStageName(secondary_mcu_update_stage_t stage)
 {
     switch (stage)
@@ -62,7 +60,7 @@ static uint32_t MinU32(uint32_t left, uint32_t right)
 static void BeginFailure(secondary_mcu_update_service_t *service, firmware_status_t status,
                          boot_error_t error)
 {
-    LOG_ERROR(SECONDARY_MCU_LOG_TAG,
+    LOG_ERROR("secondary-mcu",
               "update failed: stage=%s(%u) status=%d error=%d source=%lu/%lu erase=%lu/%lu",
               SecondaryMcuUpdateStageName(service->stage), (unsigned) service->stage, (int) status,
               (int) error, (unsigned long) service->source_offset,
@@ -95,12 +93,12 @@ static void ProcessAbort(secondary_mcu_update_service_t *service)
 
     if (FirmwareStatus_IsOk(abort_status))
     {
-        LOG_INFO(SECONDARY_MCU_LOG_TAG, "abort completed: requested=%d",
+        LOG_INFO("secondary-mcu", "abort completed: requested=%d",
                  service->cancel_requested);
     }
     else
     {
-        LOG_ERROR(SECONDARY_MCU_LOG_TAG, "abort failed: requested=%d status=%d",
+        LOG_ERROR("secondary-mcu", "abort failed: requested=%d status=%d",
                   service->cancel_requested, (int) abort_status);
     }
 
@@ -133,7 +131,7 @@ static void ProcessAbort(secondary_mcu_update_service_t *service)
         }
     }
     service->stage = SECONDARY_MCU_UPDATE_STAGE_IDLE;
-    LOG_INFO(SECONDARY_MCU_LOG_TAG, "terminal state=%d status=%d error=%d stage=%u",
+    LOG_INFO("secondary-mcu", "terminal state=%d status=%d error=%d stage=%u",
              (int) service->state, (int) service->result.status, (int) service->result.error,
              (unsigned) service->result.stage);
 }
@@ -186,7 +184,7 @@ SecondaryMcuUpdateService_Init(secondary_mcu_update_service_t *service,
     service->result.error    = BOOT_ERROR_NONE;
     service->stage           = SECONDARY_MCU_UPDATE_STAGE_IDLE;
     service->initialized     = 1;
-    LOG_DEBUG(SECONDARY_MCU_LOG_TAG, "initialized: buffer=%lu",
+    LOG_DEBUG("secondary-mcu", "initialized: buffer=%lu",
               (unsigned long) service->buffer_size);
     return FIRMWARE_STATUS_OK;
 }
@@ -231,7 +229,7 @@ firmware_status_t SecondaryMcuUpdateService_Start(struct secondary_mcu_update_se
     service->result.native_error    = 0;
     service->state                  = SERVICE_RUN_STATE_RUNNING;
     service->stage                  = SECONDARY_MCU_UPDATE_STAGE_SOURCE_INFO;
-    LOG_INFO(SECONDARY_MCU_LOG_TAG,
+    LOG_INFO("secondary-mcu",
              "start: image=%lu target=0x%08lx capacity=%lu erase-page=%lu count=%lu",
              (unsigned long) request->image_size_bytes, (unsigned long) request->target_address,
              (unsigned long) request->target_capacity_bytes,
@@ -261,7 +259,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             {
                 if (FirmwareStatus_IsOk(status))
                 {
-                    LOG_ERROR(SECONDARY_MCU_LOG_TAG,
+                    LOG_ERROR("secondary-mcu",
                               "source size mismatch: expected=%lu actual=%lu",
                               (unsigned long) service->request.image_size_bytes,
                               (unsigned long) service->source_info.size_bytes);
@@ -274,7 +272,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             }
             service->source_offset = 0U;
             service->stage         = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_RESET;
-            LOG_INFO(SECONDARY_MCU_LOG_TAG, "source ready: size=%lu",
+            LOG_INFO("secondary-mcu", "source ready: size=%lu",
                      (unsigned long) service->source_info.size_bytes);
             break;
 
@@ -287,7 +285,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             }
             service->source_offset = 0U;
             service->stage         = SECONDARY_MCU_UPDATE_STAGE_SOURCE_HASH_READ;
-            LOG_INFO(SECONDARY_MCU_LOG_TAG, "source hash started: size=%lu",
+            LOG_INFO("secondary-mcu", "source hash started: size=%lu",
                      (unsigned long) service->request.image_size_bytes);
             break;
 
@@ -322,7 +320,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             {
                 if (FirmwareStatus_IsOk(status))
                 {
-                    LOG_ERROR(SECONDARY_MCU_LOG_TAG, "source hash mismatch");
+                    LOG_ERROR("secondary-mcu", "source hash mismatch");
                 }
                 BeginFailure(service,
                              FirmwareStatus_IsOk(status) ? FIRMWARE_STATUS_INVALID_STATE : status,
@@ -332,7 +330,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             /* Hashing consumed the source stream; programming always restarts at byte zero. */
             service->source_offset = 0U;
             service->stage         = SECONDARY_MCU_UPDATE_STAGE_BEGIN;
-            LOG_INFO(SECONDARY_MCU_LOG_TAG, "source hash verified");
+            LOG_INFO("secondary-mcu", "source hash verified");
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_BEGIN:
@@ -347,7 +345,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             status                  = ValidateProgrammerInfo(&service->programmer_info);
             if (!FirmwareStatus_IsOk(status))
             {
-                LOG_ERROR(SECONDARY_MCU_LOG_TAG,
+                LOG_ERROR("secondary-mcu",
                           "target capabilities invalid: write=%lu read=%lu erase-block=%lu caps=0x%08lx",
                           (unsigned long) service->programmer_info.max_write_size,
                           (unsigned long) service->programmer_info.max_read_size,
@@ -357,7 +355,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
                 break;
             }
             service->stage = SECONDARY_MCU_UPDATE_STAGE_ERASE;
-            LOG_INFO(SECONDARY_MCU_LOG_TAG,
+            LOG_INFO("secondary-mcu",
                      "target connected: device=0x%04x write=%lu read=%lu erase-block=%lu caps=0x%08lx",
                      (unsigned) service->programmer_info.device_id,
                      (unsigned long) service->programmer_info.max_write_size,
@@ -371,7 +369,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             if (remaining == 0U)
             {
                 service->stage = SECONDARY_MCU_UPDATE_STAGE_READ_SOURCE;
-                LOG_INFO(SECONDARY_MCU_LOG_TAG, "erase complete: pages=%lu",
+                LOG_INFO("secondary-mcu", "erase complete: pages=%lu",
                          (unsigned long) service->request.erase_page_count);
                 break;
             }
@@ -384,7 +382,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
                 BeginFailure(service, status, BOOT_ERROR_SECONDARY_MCU_ERASE);
                 break;
             }
-            LOG_DEBUG(SECONDARY_MCU_LOG_TAG,
+            LOG_DEBUG("secondary-mcu",
                       "erase block: page=%lu count=%lu progress=%lu/%lu",
                       (unsigned long) (service->request.erase_page_start +
                                        service->erase_page_offset),
@@ -400,7 +398,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             if (remaining == 0U)
             {
                 service->stage = SECONDARY_MCU_UPDATE_STAGE_END;
-                LOG_INFO(SECONDARY_MCU_LOG_TAG, "program and verify complete: bytes=%lu",
+                LOG_INFO("secondary-mcu", "program and verify complete: bytes=%lu",
                          (unsigned long) service->request.image_size_bytes);
                 break;
             }
@@ -416,7 +414,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             }
             service->pending_size = chunk;
             service->stage        = SECONDARY_MCU_UPDATE_STAGE_WRITE;
-            LOG_DEBUG(SECONDARY_MCU_LOG_TAG, "source block: offset=%lu size=%lu",
+            LOG_DEBUG("secondary-mcu", "source block: offset=%lu size=%lu",
                       (unsigned long) service->source_offset, (unsigned long) chunk);
             break;
 
@@ -432,7 +430,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             }
             service->target_may_be_modified = 1;
             service->stage                  = SECONDARY_MCU_UPDATE_STAGE_READBACK;
-            LOG_DEBUG(SECONDARY_MCU_LOG_TAG, "target write: address=0x%08lx size=%lu",
+            LOG_DEBUG("secondary-mcu", "target write: address=0x%08lx size=%lu",
                       (unsigned long) (service->request.target_address + service->source_offset),
                       (unsigned long) service->pending_size);
             break;
@@ -448,7 +446,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             {
                 if (FirmwareStatus_IsOk(status))
                 {
-                    LOG_ERROR(SECONDARY_MCU_LOG_TAG,
+                    LOG_ERROR("secondary-mcu",
                               "target verify mismatch: address=0x%08lx size=%lu",
                               (unsigned long) (service->request.target_address +
                                                service->source_offset),
@@ -459,7 +457,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
                              BOOT_ERROR_SECONDARY_MCU_VERIFY);
                 break;
             }
-            LOG_DEBUG(SECONDARY_MCU_LOG_TAG, "target verified: offset=%lu size=%lu progress=%lu/%lu",
+            LOG_DEBUG("secondary-mcu", "target verified: offset=%lu size=%lu progress=%lu/%lu",
                       (unsigned long) service->source_offset,
                       (unsigned long) service->pending_size,
                       (unsigned long) (service->source_offset + service->pending_size),
@@ -474,7 +472,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             if (!FirmwareStatus_IsOk(status))
             {
                 /* end 失败时仍允许 abort 做第二次恢复；保留退出错误为根因。 */
-                LOG_ERROR(SECONDARY_MCU_LOG_TAG, "target session end failed: status=%d",
+                LOG_ERROR("secondary-mcu", "target session end failed: status=%d",
                           (int) status);
                 service->failure_status = status;
                 service->failure_error  = BOOT_ERROR_SECONDARY_MCU_EXIT;
@@ -491,7 +489,7 @@ void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *serv
             service->result.error   = BOOT_ERROR_NONE;
             service->result.stage   = (uint32_t) service->stage;
             service->stage          = SECONDARY_MCU_UPDATE_STAGE_IDLE;
-            LOG_INFO(SECONDARY_MCU_LOG_TAG, "target session ended successfully");
+            LOG_INFO("secondary-mcu", "target session ended successfully");
             break;
 
         case SECONDARY_MCU_UPDATE_STAGE_ABORT:
@@ -518,7 +516,7 @@ firmware_status_t SecondaryMcuUpdateService_Cancel(struct secondary_mcu_update_s
     }
 
     service->cancel_requested = 1;
-    LOG_INFO(SECONDARY_MCU_LOG_TAG, "cancel requested: stage=%s(%u)",
+    LOG_INFO("secondary-mcu", "cancel requested: stage=%s(%u)",
              SecondaryMcuUpdateStageName(service->stage), (unsigned) service->stage);
     if (service->session_active != 0)
     {
@@ -533,7 +531,7 @@ firmware_status_t SecondaryMcuUpdateService_Cancel(struct secondary_mcu_update_s
         service->result.error  = BOOT_ERROR_NONE;
         service->result.stage  = (uint32_t) service->stage;
         service->stage         = SECONDARY_MCU_UPDATE_STAGE_IDLE;
-        LOG_INFO(SECONDARY_MCU_LOG_TAG, "cancelled: stage=%s(%u)",
+        LOG_INFO("secondary-mcu", "cancelled: stage=%s(%u)",
                  SecondaryMcuUpdateStageName(cancelled_stage), (unsigned) cancelled_stage);
     }
     return FIRMWARE_STATUS_OK;
