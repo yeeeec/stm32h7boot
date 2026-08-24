@@ -14,3 +14,7 @@ target_link_libraries(firmware_application
     PUBLIC firmware_types
     PRIVATE firmware_services firmware_interfaces firmware_logger
 )
+
+target_compile_definitions(firmware_application PRIVATE
+    $<$<CONFIG:Debug>:BOOT_SKIP_ACTIVE_HASH_VALIDATION=1>
+)
