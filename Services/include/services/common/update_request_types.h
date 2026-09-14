@@ -11,19 +11,20 @@
 #include <stdint.h>
 
 /** 当前 trusted request 文档格式版本。 */
-#define UPDATE_REQUEST_FORMAT_VERSION      1U
+#define UPDATE_REQUEST_FORMAT_VERSION 1U
 /** package_id 最大字符数，不含结尾 NUL。 */
 #define UPDATE_REQUEST_PACKAGE_ID_MAX_SIZE 63U
 /** Manifest SHA-256 摘要长度，单位为字节。 */
-#define UPDATE_REQUEST_MANIFEST_HASH_SIZE  32U
+#define UPDATE_REQUEST_MANIFEST_HASH_SIZE 32U
 /** therapy.app.bin 的产品级最大 RAW 镜像大小，单位为字节。 */
-#define UPDATE_THERAPY_IMAGE_MAX_SIZE      (512UL * 1024UL)
+#define UPDATE_THERAPY_IMAGE_MAX_SIZE (512UL * 1024UL)
 
 /** Upgrade-request component selection bits. */
 #define UPDATE_COMPONENT_APP     (1U << 0)
 #define UPDATE_COMPONENT_GUI     (1U << 1)
 #define UPDATE_COMPONENT_THERAPY (1U << 2)
-#define UPDATE_COMPONENT_ALL     (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI | UPDATE_COMPONENT_THERAPY)
+#define UPDATE_COMPONENT_ALL                                                                       \
+    (UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI | UPDATE_COMPONENT_THERAPY)
 
 /** 严格解析且语义校验通过的升级请求。 */
 typedef struct

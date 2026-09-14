@@ -17,51 +17,36 @@ static sha256_context_t *HashContext(micro_ecc_authenticator_t *authenticator)
 
 static firmware_status_t HashReset(void *context)
 {
-    micro_ecc_authenticator_t *authenticator =
-        (micro_ecc_authenticator_t *)context;
+    micro_ecc_authenticator_t *authenticator = (micro_ecc_authenticator_t *) context;
 
-    return (authenticator == NULL)
-               ? FIRMWARE_STATUS_INVALID_ARGUMENT
-               : Sha256_Reset(HashContext(authenticator));
+    return (authenticator == NULL) ? FIRMWARE_STATUS_INVALID_ARGUMENT
+                                   : Sha256_Reset(HashContext(authenticator));
 }
 
-static firmware_status_t HashUpdate(
-    void *context,
-    const void *data,
-    size_t size)
+static firmware_status_t HashUpdate(void *context, const void *data, size_t size)
 {
-    micro_ecc_authenticator_t *authenticator =
-        (micro_ecc_authenticator_t *)context;
+    micro_ecc_authenticator_t *authenticator = (micro_ecc_authenticator_t *) context;
 
-    return (authenticator == NULL)
-               ? FIRMWARE_STATUS_INVALID_ARGUMENT
-               : Sha256_Update(HashContext(authenticator), data, size);
+    return (authenticator == NULL) ? FIRMWARE_STATUS_INVALID_ARGUMENT
+                                   : Sha256_Update(HashContext(authenticator), data, size);
 }
 
-static firmware_status_t HashFinish(
-    void *context,
-    uint8_t digest[IMAGE_AUTHENTICATOR_SHA256_SIZE])
+static firmware_status_t HashFinish(void *context, uint8_t digest[IMAGE_AUTHENTICATOR_SHA256_SIZE])
 {
-    micro_ecc_authenticator_t *authenticator =
-        (micro_ecc_authenticator_t *)context;
+    micro_ecc_authenticator_t *authenticator = (micro_ecc_authenticator_t *) context;
 
-    return (authenticator == NULL)
-               ? FIRMWARE_STATUS_INVALID_ARGUMENT
-               : Sha256_Finish(HashContext(authenticator), digest);
+    return (authenticator == NULL) ? FIRMWARE_STATUS_INVALID_ARGUMENT
+                                   : Sha256_Finish(HashContext(authenticator), digest);
 }
 
-static firmware_status_t VerifySignature(
-    void *context,
-    const char *key_id,
-    const uint8_t digest[IMAGE_AUTHENTICATOR_SHA256_SIZE],
-    const uint8_t *signature,
-    size_t signature_size)
+static firmware_status_t VerifySignature(void *context, const char *key_id,
+                                         const uint8_t digest[IMAGE_AUTHENTICATOR_SHA256_SIZE],
+                                         const uint8_t *signature, size_t signature_size)
 {
-    const micro_ecc_authenticator_t *authenticator =
-        (const micro_ecc_authenticator_t *)context;
+    const micro_ecc_authenticator_t *authenticator = (const micro_ecc_authenticator_t *) context;
 
-    if ((authenticator == NULL) || (key_id == NULL) || (digest == NULL) ||
-        (signature == NULL) || (signature_size != MICRO_ECC_P256_SIGNATURE_SIZE))
+    if ((authenticator == NULL) || (key_id == NULL) || (digest == NULL) || (signature == NULL) ||
+        (signature_size != MICRO_ECC_P256_SIGNATURE_SIZE))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -69,24 +54,19 @@ static firmware_status_t VerifySignature(
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    return (uECC_verify(
-                authenticator->public_key,
-                digest,
-                IMAGE_AUTHENTICATOR_SHA256_SIZE,
-                signature,
-                uECC_secp256r1()) != 0)
+    return (uECC_verify(authenticator->public_key, digest, IMAGE_AUTHENTICATOR_SHA256_SIZE,
+                        signature, uECC_secp256r1()) != 0)
                ? FIRMWARE_STATUS_OK
                : FIRMWARE_STATUS_INVALID_STATE;
 }
 
-firmware_status_t MicroEccAuthenticator_Init(
-    micro_ecc_authenticator_t *authenticator,
-    const micro_ecc_authenticator_config_t *config)
+firmware_status_t MicroEccAuthenticator_Init(micro_ecc_authenticator_t *authenticator,
+                                             const micro_ecc_authenticator_config_t *config)
 {
     size_t key_id_length;
 
-    if ((authenticator == NULL) || (config == NULL) ||
-        (config->key_id == NULL) || (config->public_key == NULL))
+    if ((authenticator == NULL) || (config == NULL) || (config->key_id == NULL) ||
+        (config->public_key == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -106,17 +86,17 @@ firmware_status_t MicroEccAuthenticator_Init(
 
     memcpy(authenticator->public_key, config->public_key, sizeof(authenticator->public_key));
     memcpy(authenticator->key_id, config->key_id, key_id_length + 1U);
-    authenticator->interface.context = authenticator;
-    authenticator->interface.hash_reset = HashReset;
-    authenticator->interface.hash_update = HashUpdate;
-    authenticator->interface.hash_finish = HashFinish;
+    authenticator->interface.context          = authenticator;
+    authenticator->interface.hash_reset       = HashReset;
+    authenticator->interface.hash_update      = HashUpdate;
+    authenticator->interface.hash_finish      = HashFinish;
     authenticator->interface.verify_signature = VerifySignature;
-    authenticator->initialized = 1;
+    authenticator->initialized                = 1;
     return HashReset(authenticator);
 }
 
-const image_authenticator_t *MicroEccAuthenticator_Interface(
-    const micro_ecc_authenticator_t *authenticator)
+const image_authenticator_t *
+MicroEccAuthenticator_Interface(const micro_ecc_authenticator_t *authenticator)
 {
     return (authenticator == NULL) ? NULL : &authenticator->interface;
 }

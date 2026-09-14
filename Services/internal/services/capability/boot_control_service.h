@@ -99,8 +99,7 @@ typedef struct boot_control_service
  * @param dependencies 已注入的 EEPROM 存储端口与 CRC 端口。
  * @return 成功时返回 FIRMWARE_STATUS_OK；参数、端口或存储几何不满足要求时返回错误。
  */
-firmware_status_t BootControlService_Init(
-    boot_control_service_t *service,
-    const boot_control_service_dependencies_t *dependencies);
+firmware_status_t BootControlService_Init(boot_control_service_t *service,
+                                          const boot_control_service_dependencies_t *dependencies);
 
 #endif

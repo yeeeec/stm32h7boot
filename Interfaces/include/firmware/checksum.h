@@ -13,14 +13,9 @@
 /** 开始新的计算并丢弃 Provider 之前的状态。 */
 typedef firmware_status_t (*checksum_reset_fn)(void *context);
 /** 同步消费字节，不保留调用者的 Buffer。 */
-typedef firmware_status_t (*checksum_update_fn)(
-    void *context,
-    const void *data,
-    size_t size);
+typedef firmware_status_t (*checksum_update_fn)(void *context, const void *data, size_t size);
 /** 返回最近一次 reset() 后已接受全部字节的 Checksum 值。 */
-typedef firmware_status_t (*checksum_get_value_fn)(
-    void *context,
-    uint32_t *value);
+typedef firmware_status_t (*checksum_get_value_fn)(void *context, uint32_t *value);
 
 /**
  * @brief 增量 Checksum 接口。

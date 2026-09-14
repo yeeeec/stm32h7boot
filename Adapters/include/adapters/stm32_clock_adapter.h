@@ -30,7 +30,6 @@ void STM32ClockAdapter_Init(stm32_clock_adapter_t *adapter);
  *
  * @note 返回指针仅在 @p adapter 有效期间保持有效。
  */
-const system_clock_t *STM32ClockAdapter_Interface(
-    const stm32_clock_adapter_t *adapter);
+const system_clock_t *STM32ClockAdapter_Interface(const stm32_clock_adapter_t *adapter);
 
 #endif

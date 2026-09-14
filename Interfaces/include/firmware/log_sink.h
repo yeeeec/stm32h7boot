@@ -13,10 +13,7 @@
 /**
  * 写入一条完整 Log Record。Sink 必须在返回前消费 Buffer，不得保留该指针。
  */
-typedef firmware_status_t (*log_sink_write_fn)(
-    void *context,
-    const uint8_t *data,
-    size_t size);
+typedef firmware_status_t (*log_sink_write_fn)(void *context, const uint8_t *data, size_t size);
 
 /**
  * @brief Logger 输出 Contract。

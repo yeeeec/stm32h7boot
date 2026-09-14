@@ -29,8 +29,7 @@ static firmware_status_t FatFsStatus(FRESULT result)
     {
         return FIRMWARE_STATUS_NOT_FOUND;
     }
-    if ((result == FR_INVALID_OBJECT) || (result == FR_NOT_ENABLED) ||
-        (result == FR_NOT_READY))
+    if ((result == FR_INVALID_OBJECT) || (result == FR_NOT_ENABLED) || (result == FR_NOT_READY))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -91,7 +90,7 @@ static firmware_status_t BuildSdPath(const char *path, char *full_path, size_t f
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
-    volume_path_length = strlen(SDPath);
+    volume_path_length   = strlen(SDPath);
     relative_path_length = strlen(relative_path);
     if (volume_path_length == 0U)
     {
@@ -139,7 +138,7 @@ static firmware_status_t IsMediaPresent(void *context, int *present)
 /** 检测介质并挂载 FatFs 卷，成功后更新共享状态。 */
 static firmware_status_t Mount(void *context)
 {
-    fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *)context;
+    fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *) context;
     firmware_status_t status;
     int present;
 
@@ -166,7 +165,7 @@ static firmware_status_t Mount(void *context)
     status = FatFsStatus(f_mount(&SDFatFS, SDPath, 1U));
     if (!FirmwareStatus_IsOk(status))
     {
-        LOG_WARN("sd", "FatFs mount failed: status=%d", (int)status);
+        LOG_WARN("sd", "FatFs mount failed: status=%d", (int) status);
         return status;
     }
     adapter->volume->mounted = 1;
@@ -176,7 +175,7 @@ static firmware_status_t Mount(void *context)
 /** 关闭残留 request 文件后卸载 FatFs 卷。 */
 static firmware_status_t Unmount(void *context)
 {
-    fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *)context;
+    fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *) context;
     firmware_status_t status;
 
     if ((adapter == NULL) || (adapter->volume == NULL))
@@ -236,13 +235,13 @@ static firmware_status_t Open(void *context, package_file_id_t file)
     const char *path = PackageFilePath(file);
 
     return (path == NULL) ? FIRMWARE_STATUS_INVALID_ARGUMENT
-                          : OpenPath((fatfs_package_source_adapter_t *)context, path);
+                          : OpenPath((fatfs_package_source_adapter_t *) context, path);
 }
 
 /** 关闭当前发布包文件；仅在 f_close 成功后清除状态标志。 */
 static firmware_status_t Close(void *context)
 {
-    fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *)context;
+    fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *) context;
     firmware_status_t status;
 
     if ((adapter == NULL) || (adapter->volume == NULL))
@@ -265,7 +264,7 @@ static firmware_status_t Close(void *context)
 static firmware_status_t GetSize(void *context, uint32_t *size)
 {
     const fatfs_package_source_adapter_t *adapter =
-        (const fatfs_package_source_adapter_t *)context;
+        (const fatfs_package_source_adapter_t *) context;
     FSIZE_t file_size;
 
     if ((adapter == NULL) || (adapter->volume == NULL) || (size == NULL))
@@ -281,7 +280,7 @@ static firmware_status_t GetSize(void *context, uint32_t *size)
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
-    *size = (uint32_t)file_size;
+    *size = (uint32_t) file_size;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -289,13 +288,13 @@ static firmware_status_t GetSize(void *context, uint32_t *size)
 static firmware_status_t ReadAt(void *context, uint32_t offset, void *data, uint32_t size,
                                 uint32_t *bytes_read)
 {
-    fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *)context;
+    fatfs_package_source_adapter_t *adapter = (fatfs_package_source_adapter_t *) context;
     FSIZE_t file_size;
     UINT read_count;
     FRESULT result;
 
-    if ((adapter == NULL) || (adapter->volume == NULL) || (data == NULL) ||
-        (bytes_read == NULL) || (size == 0U) || (size > UINT_MAX))
+    if ((adapter == NULL) || (adapter->volume == NULL) || (data == NULL) || (bytes_read == NULL) ||
+        (size == 0U) || (size > UINT_MAX))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -304,25 +303,25 @@ static firmware_status_t ReadAt(void *context, uint32_t offset, void *data, uint
         return FIRMWARE_STATUS_INVALID_STATE;
     }
     file_size = f_size(&SDFile);
-    if ((file_size > UINT32_MAX) || ((FSIZE_t)offset > file_size) ||
-        ((FSIZE_t)size > (file_size - (FSIZE_t)offset)))
+    if ((file_size > UINT32_MAX) || ((FSIZE_t) offset > file_size) ||
+        ((FSIZE_t) size > (file_size - (FSIZE_t) offset)))
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }
     /* FatFs 先定位再读取；返回实际读取字节数供上层校验。 */
-    result = f_lseek(&SDFile, (FSIZE_t)offset);
+    result = f_lseek(&SDFile, (FSIZE_t) offset);
     if (result != FR_OK)
     {
         return FatFsStatus(result);
     }
-    result = f_read(&SDFile, data, (UINT)size, &read_count);
-    *bytes_read = (uint32_t)read_count;
+    result      = f_read(&SDFile, data, (UINT) size, &read_count);
+    *bytes_read = (uint32_t) read_count;
     return FatFsStatus(result);
 }
 
 /** 将 package_source 的字节缓冲区请求转发到通用读取实现。 */
-static firmware_status_t PackageReadAt(void *context, uint32_t offset, uint8_t *data,
-                                       uint32_t size, uint32_t *bytes_read)
+static firmware_status_t PackageReadAt(void *context, uint32_t offset, uint8_t *data, uint32_t size,
+                                       uint32_t *bytes_read)
 {
     return ReadAt(context, offset, data, size, bytes_read);
 }
@@ -334,7 +333,7 @@ firmware_status_t FatFsReleaseVolumeContext_Init(fatfs_release_volume_context_t 
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     /* 卷状态由两个适配器共享，初始化时必须全部清空。 */
-    volume->mounted = 0;
+    volume->mounted           = 0;
     volume->package_file_open = 0;
     volume->request_file_open = 0;
     return FIRMWARE_STATUS_OK;
@@ -349,20 +348,20 @@ firmware_status_t FatFsPackageSourceAdapter_Init(fatfs_package_source_adapter_t 
     }
 
     /* Package Source 和 Request Store 共用同一个卷状态及 SDFile。 */
-    adapter->volume = volume;
-    adapter->interface.context = adapter;
+    adapter->volume                     = volume;
+    adapter->interface.context          = adapter;
     adapter->interface.is_media_present = IsMediaPresent;
-    adapter->interface.mount = Mount;
-    adapter->interface.unmount = Unmount;
-    adapter->interface.open = Open;
-    adapter->interface.close = Close;
-    adapter->interface.get_size = GetSize;
-    adapter->interface.read_at = PackageReadAt;
+    adapter->interface.mount            = Mount;
+    adapter->interface.unmount          = Unmount;
+    adapter->interface.open             = Open;
+    adapter->interface.close            = Close;
+    adapter->interface.get_size         = GetSize;
+    adapter->interface.read_at          = PackageReadAt;
     return FIRMWARE_STATUS_OK;
 }
 
-const package_source_t *FatFsPackageSourceAdapter_Interface(
-    const fatfs_package_source_adapter_t *adapter)
+const package_source_t *
+FatFsPackageSourceAdapter_Interface(const fatfs_package_source_adapter_t *adapter)
 {
     /* 返回适配器内嵌的发布包接口。 */
     return (adapter == NULL) ? NULL : &adapter->interface;

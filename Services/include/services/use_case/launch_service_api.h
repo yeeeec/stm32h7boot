@@ -18,12 +18,10 @@ struct launch_service;
  *
  * @return 仅在失败时返回；成功的 Application 交接不会返回。
  */
-firmware_status_t LaunchService_Execute(
-    struct launch_service *service,
-    const boot_active_record_t *active_record);
+firmware_status_t LaunchService_Execute(struct launch_service *service,
+                                        const boot_active_record_t *active_record);
 
 /** @brief 返回最近一次启动尝试的结果快照。 */
-const service_result_t *LaunchService_GetResult(
-    const struct launch_service *service);
+const service_result_t *LaunchService_GetResult(const struct launch_service *service);
 
 #endif

@@ -25,12 +25,11 @@ typedef struct
  * @param[in] package_source Package source implementation and current-file
  *                           lifecycle owner.
  */
-firmware_status_t PackageImageSourceAdapter_Init(
-    package_image_source_adapter_t *adapter,
-    const package_source_t *package_source);
+firmware_status_t PackageImageSourceAdapter_Init(package_image_source_adapter_t *adapter,
+                                                 const package_source_t *package_source);
 
 /** Return the image-source interface embedded in @p adapter. */
-const firmware_image_source_t *PackageImageSourceAdapter_Interface(
-    const package_image_source_adapter_t *adapter);
+const firmware_image_source_t *
+PackageImageSourceAdapter_Interface(const package_image_source_adapter_t *adapter);
 
 #endif

@@ -61,7 +61,6 @@ typedef struct
  * @return FIRMWARE_STATUS_INVALID_ARGUMENT 表示依赖、必要接口或回调缺失。
  * @return FIRMWARE_STATUS_INVALID_STATE 表示已配置或已初始化，禁止重复发布。
  */
-firmware_status_t Application_Configure(
-    const application_dependencies_t *dependencies);
+firmware_status_t Application_Configure(const application_dependencies_t *dependencies);
 
 #endif

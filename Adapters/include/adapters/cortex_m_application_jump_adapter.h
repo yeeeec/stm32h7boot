@@ -15,11 +15,10 @@ typedef struct
 } cortex_m_application_jump_adapter_t;
 
 /** 初始化 Cortex-M 应用跳转适配器。 */
-firmware_status_t CortexMApplicationJumpAdapter_Init(
-    cortex_m_application_jump_adapter_t *adapter);
+firmware_status_t CortexMApplicationJumpAdapter_Init(cortex_m_application_jump_adapter_t *adapter);
 
 /** 返回适配器持有的应用跳转接口；参数为 NULL 时返回 NULL。 */
-const application_jump_t *CortexMApplicationJumpAdapter_Interface(
-    const cortex_m_application_jump_adapter_t *adapter);
+const application_jump_t *
+CortexMApplicationJumpAdapter_Interface(const cortex_m_application_jump_adapter_t *adapter);
 
 #endif

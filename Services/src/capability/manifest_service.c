@@ -174,7 +174,7 @@ static int TokenMatchesPattern(const json_document_t *document, uint32_t token_i
         uint8_t value = document->data[index];
 
         if (!(((value >= 'A') && (value <= 'Z')) || ((value >= 'a') && (value <= 'z')) ||
-              ((value >= '0') && (value <= '9')) || (strchr(additional, (int)value) != NULL)))
+              ((value >= '0') && (value <= '9')) || (strchr(additional, (int) value) != NULL)))
         {
             return 0;
         }
@@ -207,7 +207,7 @@ static firmware_status_t ParseVersion(const json_document_t *document, uint32_t 
     }
     for (part = 0U; part < 3U; ++part)
     {
-        uint32_t value = 0U;
+        uint32_t value  = 0U;
         uint32_t digits = 0U;
 
         if ((position >= token->end) || (document->data[position] < '0') ||
@@ -223,14 +223,14 @@ static firmware_status_t ParseVersion(const json_document_t *document, uint32_t 
         while ((position < token->end) && (document->data[position] >= '0') &&
                (document->data[position] <= '9'))
         {
-            value = value * 10U + (uint32_t)(document->data[position] - '0');
+            value = value * 10U + (uint32_t) (document->data[position] - '0');
             if ((value > UINT16_MAX) || (++digits > 5U))
             {
                 return FIRMWARE_STATUS_OUT_OF_RANGE;
             }
             ++position;
         }
-        parts[part] = (uint16_t)value;
+        parts[part] = (uint16_t) value;
         if (part < 2U)
         {
             if ((position >= token->end) || (document->data[position++] != '.'))
@@ -295,13 +295,13 @@ static firmware_status_t ParseSha256(const json_document_t *document, uint32_t o
     for (index = 0U; index < MANIFEST_SHA256_SIZE; ++index)
     {
         int high = HexDigit(document->data[document->tokens[token].start + index * 2U]);
-        int low = HexDigit(document->data[document->tokens[token].start + index * 2U + 1U]);
+        int low  = HexDigit(document->data[document->tokens[token].start + index * 2U + 1U]);
 
         if ((high < 0) || (low < 0))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
-        output[index] = (uint8_t)((high << 4) | low);
+        output[index] = (uint8_t) ((high << 4) | low);
     }
     return FIRMWARE_STATUS_OK;
 }
@@ -333,9 +333,9 @@ static firmware_status_t ParseRelease(const json_document_t *document, uint32_t 
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    manifest->release_version.major = (uint16_t)major;
-    manifest->release_version.minor = (uint16_t)minor;
-    manifest->release_version.patch = (uint16_t)patch;
+    manifest->release_version.major = (uint16_t) major;
+    manifest->release_version.minor = (uint16_t) minor;
+    manifest->release_version.patch = (uint16_t) patch;
     return FIRMWARE_STATUS_OK;
 }
 
@@ -362,8 +362,10 @@ static firmware_status_t ParseTarget(const json_document_t *document, uint32_t r
         !FirmwareStatus_IsOk(RequireConstantString(document, object, "product", "HMI")) ||
         !FirmwareStatus_IsOk(
             RequireConstantString(document, object, "hardware", "STM32H743-W25Q256")) ||
-        !FirmwareStatus_IsOk(RequireString(document, object, "minimum_bootloader_version", &version)) ||
-        !FirmwareStatus_IsOk(ParseVersion(document, version, &manifest->minimum_bootloader_version)))
+        !FirmwareStatus_IsOk(
+            RequireString(document, object, "minimum_bootloader_version", &version)) ||
+        !FirmwareStatus_IsOk(
+            ParseVersion(document, version, &manifest->minimum_bootloader_version)))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -398,7 +400,7 @@ static firmware_status_t ParseComponent(const json_document_t *document, uint32_
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    (void)strcpy(component->file, file);
+    (void) strcpy(component->file, file);
     return FIRMWARE_STATUS_OK;
 }
 
@@ -432,7 +434,7 @@ static firmware_status_t ParseComponents(const json_document_t *document, uint32
     if (FirmwareStatus_IsOk(FindMember(document, components, "app", &component)))
     {
         if (!FirmwareStatus_IsOk(ParseComponent(document, component, "hmi.app.bin",
-                                                 BOOT_APP_RUNTIME_SIZE, &manifest->app)))
+                                                BOOT_APP_RUNTIME_SIZE, &manifest->app)))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
@@ -442,7 +444,7 @@ static firmware_status_t ParseComponents(const json_document_t *document, uint32
     if (FirmwareStatus_IsOk(FindMember(document, components, "gui", &component)))
     {
         if (!FirmwareStatus_IsOk(ParseComponent(document, component, "hmi.gui.bin",
-                                                 BOOT_GUI_RUNTIME_SIZE, &manifest->gui)))
+                                                BOOT_GUI_RUNTIME_SIZE, &manifest->gui)))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
@@ -452,8 +454,7 @@ static firmware_status_t ParseComponents(const json_document_t *document, uint32
     if (FirmwareStatus_IsOk(FindMember(document, components, "therapy", &component)))
     {
         if (!FirmwareStatus_IsOk(ParseComponent(document, component, "therapy.app.bin",
-                                                 UPDATE_THERAPY_IMAGE_MAX_SIZE,
-                                                 &manifest->therapy)))
+                                                UPDATE_THERAPY_IMAGE_MAX_SIZE, &manifest->therapy)))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
@@ -462,8 +463,7 @@ static firmware_status_t ParseComponents(const json_document_t *document, uint32
     }
 
     /* Unknown or duplicate member names make child_count differ from recognized_count. */
-    return (recognized_count == member_count) ? FIRMWARE_STATUS_OK
-                                               : FIRMWARE_STATUS_INVALID_STATE;
+    return (recognized_count == member_count) ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_INVALID_STATE;
 }
 
 /**
@@ -591,8 +591,8 @@ firmware_status_t ManifestService_ParseAndValidate(struct manifest_service *serv
     }
 
     memset(&parsed, 0, sizeof(parsed));
-    status = JsonDocument_Parse(&document, data, size, service->tokens,
-                                MANIFEST_SERVICE_TOKEN_CAPACITY);
+    status =
+        JsonDocument_Parse(&document, data, size, service->tokens, MANIFEST_SERVICE_TOKEN_CAPACITY);
     /* 按冻结 schema 由外到内校验，任何一步失败都阻止后续字段或哈希处理。 */
     if (FirmwareStatus_IsOk(status))
     {
@@ -616,8 +616,8 @@ firmware_status_t ManifestService_ParseAndValidate(struct manifest_service *serv
     }
     if (FirmwareStatus_IsOk(status))
     {
-        status = HashBytes(service->hash, parsed.package_id, strlen(parsed.package_id),
-                           package_digest);
+        status =
+            HashBytes(service->hash, parsed.package_id, strlen(parsed.package_id), package_digest);
     }
     if (FirmwareStatus_IsOk(status))
     {

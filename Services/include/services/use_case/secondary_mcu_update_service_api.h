@@ -39,13 +39,11 @@ typedef struct
  * SUCCEEDED、FAILED 或 CANCELLED。Service 会在首次擦除前完成 Source 尺寸检查、
  * 目标 ROM 能力检查和地址范围检查。
  */
-firmware_status_t SecondaryMcuUpdateService_Start(
-    struct secondary_mcu_update_service *service,
-    const secondary_mcu_update_request_t *request);
+firmware_status_t SecondaryMcuUpdateService_Start(struct secondary_mcu_update_service *service,
+                                                  const secondary_mcu_update_request_t *request);
 
 /** 推进一步有界的 Source 读取、ROM 命令、回读校验或状态转换。 */
-void SecondaryMcuUpdateService_Process(
-    struct secondary_mcu_update_service *service);
+void SecondaryMcuUpdateService_Process(struct secondary_mcu_update_service *service);
 
 /**
  * @brief 请求取消安装。
@@ -53,16 +51,15 @@ void SecondaryMcuUpdateService_Process(
  * 目标尚未擦除或写入时允许取消。目标已经可能改变后拒绝取消，调用者应继续
  * Process() 让失败清理完成，以免把半成品误当成可启动镜像。
  */
-firmware_status_t SecondaryMcuUpdateService_Cancel(
-    struct secondary_mcu_update_service *service);
+firmware_status_t SecondaryMcuUpdateService_Cancel(struct secondary_mcu_update_service *service);
 
 /** 返回服务生命周期状态；NULL 服务按 FAILED 处理。 */
-service_run_state_t SecondaryMcuUpdateService_GetState(
-    const struct secondary_mcu_update_service *service);
+service_run_state_t
+SecondaryMcuUpdateService_GetState(const struct secondary_mcu_update_service *service);
 
 /** 返回最近一次操作结果；结果对象由 Service 持有。 */
-const service_result_t *SecondaryMcuUpdateService_GetResult(
-    const struct secondary_mcu_update_service *service);
+const service_result_t *
+SecondaryMcuUpdateService_GetResult(const struct secondary_mcu_update_service *service);
 
 /** 返回目标是否已经可能被擦写；失败恢复策略据此决定是否必须复位。 */
 int SecondaryMcuUpdateService_TargetMayBeModified(

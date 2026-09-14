@@ -18,7 +18,7 @@
 typedef struct
 {
     uint32_t capacity_bytes;
-/* 单次 program 调用可接受的最大字节数；一次调用不得跨越该边界。 */
+    /* 单次 program 调用可接受的最大字节数；一次调用不得跨越该边界。 */
     uint32_t program_size;
     uint32_t erase_size;
 } async_block_device_info_t;
@@ -44,27 +44,17 @@ typedef struct
     firmware_status_t status;
 } async_block_device_operation_result_t;
 
-typedef firmware_status_t (*async_block_device_get_info_fn)(
-    void *context,
-    async_block_device_info_t *info);
-typedef firmware_status_t (*async_block_device_read_fn)(
-    void *context,
-    uint32_t address,
-    void *data,
-    uint32_t size);
-typedef firmware_status_t (*async_block_device_program_start_fn)(
-    void *context,
-    uint32_t address,
-    const void *data,
-    uint32_t size);
-typedef firmware_status_t (*async_block_device_erase_start_fn)(
-    void *context,
-    uint32_t address,
-    uint32_t size);
+typedef firmware_status_t (*async_block_device_get_info_fn)(void *context,
+                                                            async_block_device_info_t *info);
+typedef firmware_status_t (*async_block_device_read_fn)(void *context, uint32_t address, void *data,
+                                                        uint32_t size);
+typedef firmware_status_t (*async_block_device_program_start_fn)(void *context, uint32_t address,
+                                                                 const void *data, uint32_t size);
+typedef firmware_status_t (*async_block_device_erase_start_fn)(void *context, uint32_t address,
+                                                               uint32_t size);
 typedef firmware_status_t (*async_block_device_poll_fn)(void *context);
 typedef firmware_status_t (*async_block_device_get_operation_result_fn)(
-    void *context,
-    async_block_device_operation_result_t *result);
+    void *context, async_block_device_operation_result_t *result);
 typedef firmware_status_t (*async_block_device_cancel_fn)(void *context);
 
 /**

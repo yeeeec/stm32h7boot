@@ -25,12 +25,11 @@ typedef struct
  * @return 成功时返回 FIRMWARE_STATUS_OK；参数为 NULL 时返回
  *         FIRMWARE_STATUS_INVALID_ARGUMENT。
  */
-firmware_status_t FatFsUpdateRequestStoreAdapter_Init(
-    fatfs_update_request_store_adapter_t *adapter,
-    fatfs_release_volume_context_t *volume);
+firmware_status_t FatFsUpdateRequestStoreAdapter_Init(fatfs_update_request_store_adapter_t *adapter,
+                                                      fatfs_release_volume_context_t *volume);
 
 /** 返回适配器持有的 request 存储接口；参数为 NULL 时返回 NULL。 */
-const update_request_store_t *FatFsUpdateRequestStoreAdapter_Interface(
-    const fatfs_update_request_store_adapter_t *adapter);
+const update_request_store_t *
+FatFsUpdateRequestStoreAdapter_Interface(const fatfs_update_request_store_adapter_t *adapter);
 
 #endif

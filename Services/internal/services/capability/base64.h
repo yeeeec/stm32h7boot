@@ -29,11 +29,7 @@
  * 失败时不会产生可供上层信任的输出长度；调用者应仅在返回成功后读取
  * @p decoded 和 @p decoded_size。
  */
-firmware_status_t Base64_DecodeStrict(
-    const char *encoded,
-    size_t encoded_size,
-    uint8_t *decoded,
-    size_t decoded_capacity,
-    size_t *decoded_size);
+firmware_status_t Base64_DecodeStrict(const char *encoded, size_t encoded_size, uint8_t *decoded,
+                                      size_t decoded_capacity, size_t *decoded_size);
 
 #endif /* SERVICES_BASE64_H：防止该内部接口被重复包含。 */

@@ -28,12 +28,11 @@ typedef struct
  * @return 参数为 NULL 时返回 FIRMWARE_STATUS_INVALID_ARGUMENT。
  * @return @p device 未初始化时返回底层驱动的状态错误。
  */
-firmware_status_t At24BootControlAdapter_Init(
-    at24_boot_control_adapter_t *adapter,
-    struct at24 *device);
+firmware_status_t At24BootControlAdapter_Init(at24_boot_control_adapter_t *adapter,
+                                              struct at24 *device);
 
 /** 返回适配器持有的 Boot Control 存储接口；参数为 NULL 时返回 NULL。 */
-const boot_control_store_t *At24BootControlAdapter_Interface(
-    const at24_boot_control_adapter_t *adapter);
+const boot_control_store_t *
+At24BootControlAdapter_Interface(const at24_boot_control_adapter_t *adapter);
 
 #endif

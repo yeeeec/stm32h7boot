@@ -10,8 +10,6 @@
 #include "firmware/system_clock.h"
 
 /** Bind the logger once to a synchronous output sink and monotonic clock. */
-firmware_status_t Logging_Configure(
-    const log_sink_t *sink,
-    const system_clock_t *clock);
+firmware_status_t Logging_Configure(const log_sink_t *sink, const system_clock_t *clock);
 
 #endif

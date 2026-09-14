@@ -57,8 +57,7 @@ typedef struct
  * @pre MX_GPIO_Init() 与 MX_USART2_UART_Init() 已成功执行。
  * @note 本模块独占 USART2；初始化后其他模块不得并发收发或修改 USART2 配置。
  */
-firmware_status_t BSP_Stm32RomBootInit(
-    const bsp_stm32_rom_boot_config_t *config);
+firmware_status_t BSP_Stm32RomBootInit(const bsp_stm32_rom_boot_config_t *config);
 
 /**
  * @brief 获取 BSP 持有的 STM32 ROM Boot 驱动实例。

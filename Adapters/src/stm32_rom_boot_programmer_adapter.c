@@ -78,8 +78,7 @@ static firmware_status_t Erase(void *context, uint32_t page_start, uint32_t page
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    if ((page_start > UINT16_MAX) || (page_count == 0U) ||
-        (page_count > UINT16_MAX))
+    if ((page_start > UINT16_MAX) || (page_count == 0U) || (page_count > UINT16_MAX))
     {
         return FIRMWARE_STATUS_OUT_OF_RANGE;
     }

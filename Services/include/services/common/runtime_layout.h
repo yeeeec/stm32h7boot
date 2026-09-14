@@ -12,20 +12,20 @@
 #include <stdint.h>
 
 /** APP 在 W25Q256 中的固定起始偏移。 */
-#define BOOT_APP_FLASH_OFFSET   0x000000UL
+#define BOOT_APP_FLASH_OFFSET 0x000000UL
 /** APP 在 QSPI memory-mapped 窗口中的 CPU 起始地址。 */
-#define BOOT_APP_RUNTIME_BASE   0x90000000UL
+#define BOOT_APP_RUNTIME_BASE 0x90000000UL
 /** APP 固定 Runtime 分区容量，单位为字节。 */
-#define BOOT_APP_RUNTIME_SIZE   (1UL * 1024UL * 1024UL)
+#define BOOT_APP_RUNTIME_SIZE (1UL * 1024UL * 1024UL)
 /** 与 @ref BOOT_APP_FLASH_OFFSET 同义的历史兼容名称。 */
 #define BOOT_APP_RUNTIME_OFFSET BOOT_APP_FLASH_OFFSET
 
 /** GUI 在 W25Q256 中的固定起始偏移。 */
-#define BOOT_GUI_FLASH_OFFSET   0x200000UL
+#define BOOT_GUI_FLASH_OFFSET 0x200000UL
 /** GUI 在 QSPI memory-mapped 窗口中的 CPU 起始地址。 */
-#define BOOT_GUI_RUNTIME_BASE   0x90200000UL
+#define BOOT_GUI_RUNTIME_BASE 0x90200000UL
 /** GUI 固定 Runtime 分区容量，单位为字节。 */
-#define BOOT_GUI_RUNTIME_SIZE   (8UL * 1024UL * 1024UL)
+#define BOOT_GUI_RUNTIME_SIZE (8UL * 1024UL * 1024UL)
 /** 与 @ref BOOT_GUI_FLASH_OFFSET 同义的历史兼容名称。 */
 #define BOOT_GUI_RUNTIME_OFFSET BOOT_GUI_FLASH_OFFSET
 

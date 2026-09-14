@@ -9,12 +9,9 @@
 #include "bsp/bsp_debug.h"
 
 /** 将日志字节流转发到 BSP 调试串口。 */
-static firmware_status_t LogWrite(
-    void *context,
-    const uint8_t *data,
-    size_t size)
+static firmware_status_t LogWrite(void *context, const uint8_t *data, size_t size)
 {
-    (void)context;
+    (void) context;
     return BSP_DebugWrite(data, size);
 }
 
@@ -27,7 +24,7 @@ void UartLogAdapter_Init(uart_log_adapter_t *adapter)
 
     /* 调试串口由 BSP 管理，日志适配器只需绑定写回调。 */
     adapter->interface.context = NULL;
-    adapter->interface.write = LogWrite;
+    adapter->interface.write   = LogWrite;
 }
 
 const log_sink_t *UartLogAdapter_Interface(const uart_log_adapter_t *adapter)

@@ -39,18 +39,18 @@
 #error "Unsupported COMPOSITION_SECONDARY_MCU_TARGET"
 #endif
 
-#if (COMPOSITION_SECONDARY_MCU_DEVICE_ID > 0xFFFFU) || \
+#if (COMPOSITION_SECONDARY_MCU_DEVICE_ID > 0xFFFFU) ||                                             \
     (COMPOSITION_SECONDARY_MCU_DEVICE_ID == 0xFFFFU)
 #error "COMPOSITION_SECONDARY_MCU_DEVICE_ID must be a confirmed 16-bit STM32 ID"
 #endif
 
-#if (COMPOSITION_SECONDARY_MCU_USE_EXTENDED_ERASE != 0) && \
+#if (COMPOSITION_SECONDARY_MCU_USE_EXTENDED_ERASE != 0) &&                                         \
     (COMPOSITION_SECONDARY_MCU_USE_EXTENDED_ERASE != 1)
 #error "COMPOSITION_SECONDARY_MCU_USE_EXTENDED_ERASE must be 0 or 1"
 #endif
 
-#if (COMPOSITION_THERAPY_TARGET_CAPACITY == 0U) || \
-    (COMPOSITION_THERAPY_TARGET_CAPACITY > UPDATE_THERAPY_IMAGE_MAX_SIZE) || \
+#if (COMPOSITION_THERAPY_TARGET_CAPACITY == 0U) ||                                                 \
+    (COMPOSITION_THERAPY_TARGET_CAPACITY > UPDATE_THERAPY_IMAGE_MAX_SIZE) ||                       \
     (COMPOSITION_THERAPY_ERASE_PAGE_COUNT == 0U)
 #error "Therapy target layout exceeds the supported package contract"
 #endif

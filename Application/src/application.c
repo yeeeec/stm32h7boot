@@ -507,8 +507,7 @@ firmware_status_t Application_Process(void)
                 ContinueCurrentRuntime();
                 break;
             }
-            if (ComponentSelected(UPDATE_COMPONENT_THERAPY) &&
-                !TherapyDependenciesReady(manifest))
+            if (ComponentSelected(UPDATE_COMPONENT_THERAPY) && !TherapyDependenciesReady(manifest))
             {
                 ContinueCurrentRuntime();
                 break;
@@ -851,6 +850,11 @@ firmware_status_t Application_Process(void)
                 FailClosed();
                 break;
             }
+#if defined(BOOT_SKIP_ACTIVE_HASH_VALIDATION) && BOOT_SKIP_ACTIVE_HASH_VALIDATION
+            LOG_WARN("app", "debug build: skip active runtime hash validation");
+            application.stage = APPLICATION_STAGE_LAUNCH;
+            break;
+#endif
             status            = ActiveValidationService_Start(application.dependencies.validation,
                                                               &application.active_record);
             application.stage = FirmwareStatus_IsOk(status) ? APPLICATION_STAGE_VALIDATE_PROCESS

@@ -147,7 +147,7 @@ static int HexDigit(uint8_t value)
  * @return 成功时返回 FIRMWARE_STATUS_OK；字段格式错误时返回错误。
  */
 static firmware_status_t ParseManifestSha256(const json_document_t *document, uint32_t token,
-                                              uint8_t digest[UPDATE_REQUEST_MANIFEST_HASH_SIZE])
+                                             uint8_t digest[UPDATE_REQUEST_MANIFEST_HASH_SIZE])
 {
     uint32_t index;
 
@@ -160,13 +160,13 @@ static firmware_status_t ParseManifestSha256(const json_document_t *document, ui
     for (index = 0U; index < UPDATE_REQUEST_MANIFEST_HASH_SIZE; ++index)
     {
         int high = HexDigit(document->data[document->tokens[token].start + index * 2U]);
-        int low = HexDigit(document->data[document->tokens[token].start + index * 2U + 1U]);
+        int low  = HexDigit(document->data[document->tokens[token].start + index * 2U + 1U]);
 
         if ((high < 0) || (low < 0))
         {
             return FIRMWARE_STATUS_INVALID_STATE;
         }
-        digest[index] = (uint8_t)((high << 4) | low);
+        digest[index] = (uint8_t) ((high << 4) | low);
     }
     return FIRMWARE_STATUS_OK;
 }
@@ -206,9 +206,9 @@ static firmware_status_t HashBytes(const hash_provider_t *hash, const void *data
  * @param dependencies 包含完整 hash_provider_t 回调集的依赖对象。
  * @return 成功时返回 FIRMWARE_STATUS_OK；重复初始化或依赖不完整时返回错误。
  */
-firmware_status_t UpdateRequestService_Init(
-    update_request_service_t *service,
-    const update_request_service_dependencies_t *dependencies)
+firmware_status_t
+UpdateRequestService_Init(update_request_service_t *service,
+                          const update_request_service_dependencies_t *dependencies)
 {
     const hash_provider_t *hash;
 
@@ -247,8 +247,8 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
                                                         const uint8_t *data, uint32_t size,
                                                         update_request_t *request)
 {
-    static const char *const legacy_members[] = {"format_version", "requested", "package_id",
-                                                 "manifest_sha256"};
+    static const char *const legacy_members[]   = {"format_version", "requested", "package_id",
+                                                   "manifest_sha256"};
     static const char *const selected_members[] = {"format_version", "requested", "package_id",
                                                    "manifest_sha256", "component_mask"};
     update_request_t parsed;
@@ -282,7 +282,7 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
         member_count = document.tokens[0U].child_count;
         if (member_count == 4U)
         {
-            status = ValidateObjectMembers(&document, 0U, legacy_members, 4U);
+            status                = ValidateObjectMembers(&document, 0U, legacy_members, 4U);
             parsed.component_mask = UPDATE_COMPONENT_APP | UPDATE_COMPONENT_GUI;
         }
         else if (member_count == 5U)
@@ -299,8 +299,7 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
         }
     }
     if (FirmwareStatus_IsOk(status) &&
-        ((parsed.component_mask == 0U) ||
-         ((parsed.component_mask & ~UPDATE_COMPONENT_ALL) != 0U)))
+        ((parsed.component_mask == 0U) || ((parsed.component_mask & ~UPDATE_COMPONENT_ALL) != 0U)))
     {
         status = FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -348,7 +347,7 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
     if (FirmwareStatus_IsOk(status))
     {
         parsed.requested = 1U;
-        *request = parsed;
+        *request         = parsed;
     }
     return status;
 }
@@ -367,17 +366,13 @@ firmware_status_t UpdateRequestService_ParseAndValidate(struct update_request_se
  * @return 成功时返回 FIRMWARE_STATUS_OK；绑定不一致或哈希计算失败时返回错误。
  */
 firmware_status_t UpdateRequestService_ValidateManifestBinding(
-    struct update_request_service *service,
-    const update_request_t *request,
-    const uint8_t *manifest_data,
-    uint32_t manifest_size,
-    const validated_manifest_t *manifest)
+    struct update_request_service *service, const update_request_t *request,
+    const uint8_t *manifest_data, uint32_t manifest_size, const validated_manifest_t *manifest)
 {
     uint8_t raw_manifest_sha256[UPDATE_REQUEST_MANIFEST_HASH_SIZE];
     firmware_status_t status;
 
-    if ((service == NULL) || (request == NULL) || (manifest_data == NULL) ||
-        (manifest == NULL))
+    if ((service == NULL) || (request == NULL) || (manifest_data == NULL) || (manifest == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -398,7 +393,8 @@ firmware_status_t UpdateRequestService_ValidateManifestBinding(
         return status;
     }
     if ((memcmp(request->manifest_sha256, raw_manifest_sha256, sizeof(raw_manifest_sha256)) != 0) ||
-        (memcmp(manifest->manifest_sha256, raw_manifest_sha256, sizeof(raw_manifest_sha256)) != 0) ||
+        (memcmp(manifest->manifest_sha256, raw_manifest_sha256, sizeof(raw_manifest_sha256)) !=
+         0) ||
         (strcmp(request->package_id, manifest->package_id) != 0) ||
         ((manifest->component_mask & request->component_mask) != request->component_mask))
     {

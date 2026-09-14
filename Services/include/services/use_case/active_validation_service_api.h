@@ -17,20 +17,18 @@ struct active_validation_service;
  * @param[in] active_record 已从 Boot Control 读取的候选有效记录。
  * @return FIRMWARE_STATUS_OK 后，调用者必须持续调用 Process 至终态。
  */
-firmware_status_t ActiveValidationService_Start(
-    struct active_validation_service *service,
-    const boot_active_record_t *active_record);
+firmware_status_t ActiveValidationService_Start(struct active_validation_service *service,
+                                                const boot_active_record_t *active_record);
 
 /** @brief 推进一步有限长度的存储读取、哈希或状态转换。 */
-void ActiveValidationService_Process(
-    struct active_validation_service *service);
+void ActiveValidationService_Process(struct active_validation_service *service);
 
 /** @brief 返回校验生命周期状态；NULL 服务视为失败。 */
-service_run_state_t ActiveValidationService_GetState(
-    const struct active_validation_service *service);
+service_run_state_t
+ActiveValidationService_GetState(const struct active_validation_service *service);
 
 /** @brief 返回最近一次校验的结果快照；生命周期由服务对象管理。 */
-const service_result_t *ActiveValidationService_GetResult(
-    const struct active_validation_service *service);
+const service_result_t *
+ActiveValidationService_GetResult(const struct active_validation_service *service);
 
 #endif

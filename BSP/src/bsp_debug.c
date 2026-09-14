@@ -32,10 +32,10 @@ firmware_status_t BSP_DebugWrite(const uint8_t *data, size_t size)
     {
         size_t remaining = size - offset;
         /* HAL 的长度参数为 16 位，因此较大的 Record 必须拆成有界 Chunk。 */
-        uint16_t chunk = (remaining > UINT16_MAX) ? UINT16_MAX : (uint16_t)remaining;
+        uint16_t chunk = (remaining > UINT16_MAX) ? UINT16_MAX : (uint16_t) remaining;
 
-        if (HAL_UART_Transmit(&huart1, (uint8_t *)&data[offset], chunk,
-                              BSP_DEBUG_TIMEOUT_MS) != HAL_OK)
+        if (HAL_UART_Transmit(&huart1, (uint8_t *) &data[offset], chunk, BSP_DEBUG_TIMEOUT_MS) !=
+            HAL_OK)
         {
             return FIRMWARE_STATUS_IO_ERROR;
         }

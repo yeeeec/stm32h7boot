@@ -148,8 +148,8 @@ firmware_status_t LaunchService_Execute(launch_service_t *service,
                     BOOT_ERROR_XIP_SETUP, LAUNCH_STAGE_READ_VECTOR);
     }
     /* 从固定 APP 偏移读取 MSP 和 Reset_Handler；无需先建立 XIP。 */
-    status = service->storage->read(service->storage->context, BOOT_APP_FLASH_OFFSET,
-                                    vector_bytes, sizeof(vector_bytes));
+    status = service->storage->read(service->storage->context, BOOT_APP_FLASH_OFFSET, vector_bytes,
+                                    sizeof(vector_bytes));
     if (!FirmwareStatus_IsOk(status))
     {
         return Fail(service, status, BOOT_ERROR_MEDIA_UNAVAILABLE, LAUNCH_STAGE_READ_VECTOR);

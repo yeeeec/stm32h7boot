@@ -29,14 +29,10 @@ typedef enum
  * Port callbacks are synchronous. They must not retain transaction arguments
  * after returning and must translate controller errors to firmware_status_t.
  */
-typedef firmware_status_t (*sdram_send_command_fn)(
-    void *context,
-    sdram_command_t command,
-    uint32_t auto_refresh_count,
-    uint32_t mode_register);
-typedef firmware_status_t (*sdram_set_refresh_rate_fn)(
-    void *context,
-    uint32_t refresh_rate);
+typedef firmware_status_t (*sdram_send_command_fn)(void *context, sdram_command_t command,
+                                                   uint32_t auto_refresh_count,
+                                                   uint32_t mode_register);
+typedef firmware_status_t (*sdram_set_refresh_rate_fn)(void *context, uint32_t refresh_rate);
 typedef void (*sdram_delay_ms_fn)(void *context, uint32_t delay_ms);
 
 typedef struct
@@ -67,9 +63,7 @@ typedef struct sdram
     int initialized;
 } sdram_t;
 
-firmware_status_t Sdram_Init(
-    sdram_t *device,
-    const sdram_port_t *port,
-    const sdram_config_t *config);
+firmware_status_t Sdram_Init(sdram_t *device, const sdram_port_t *port,
+                             const sdram_config_t *config);
 
 #endif

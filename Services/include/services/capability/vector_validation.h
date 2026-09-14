@@ -41,11 +41,10 @@ typedef struct
  * @param[in] sram_region_count 数组元素数。
  * @return FIRMWARE_STATUS_OK 表示可安全尝试跳转。
  */
-firmware_status_t VectorValidation_Validate(
-    const vector_table_values_t *vectors,
-    const boot_region_t *app_region,
-    uint32_t app_image_size,
-    const memory_region_t *sram_regions,
-    uint32_t sram_region_count);
+firmware_status_t VectorValidation_Validate(const vector_table_values_t *vectors,
+                                            const boot_region_t *app_region,
+                                            uint32_t app_image_size,
+                                            const memory_region_t *sram_regions,
+                                            uint32_t sram_region_count);
 
 #endif

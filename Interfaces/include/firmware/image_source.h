@@ -21,16 +21,12 @@ typedef struct
 } firmware_image_info_t;
 
 /** 查询镜像尺寸；接口绑定期间结果必须保持稳定。 */
-typedef firmware_status_t (*firmware_image_source_get_info_fn)(
-    void *context,
-    firmware_image_info_t *info);
+typedef firmware_status_t (*firmware_image_source_get_info_fn)(void *context,
+                                                               firmware_image_info_t *info);
 
 /** 从镜像的字节偏移读取一个有界范围。 */
-typedef firmware_status_t (*firmware_image_source_read_fn)(
-    void *context,
-    uint32_t offset,
-    uint8_t *data,
-    uint32_t size);
+typedef firmware_status_t (*firmware_image_source_read_fn)(void *context, uint32_t offset,
+                                                           uint8_t *data, uint32_t size);
 
 /**
  * @brief 外部 MCU 固件镜像的只读访问 Contract。

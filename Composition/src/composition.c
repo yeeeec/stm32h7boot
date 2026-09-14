@@ -227,7 +227,7 @@ static firmware_status_t InitializeSecondaryMcuProgrammer(void)
 }
 
 static firmware_status_t InitializeExternalFlash(const async_block_device_t **external_flash,
-                                                  async_block_device_info_t *info)
+                                                 async_block_device_info_t *info)
 {
     firmware_status_t status;
 
@@ -263,7 +263,7 @@ static firmware_status_t InitializeExternalFlash(const async_block_device_t **ex
 static firmware_status_t InitializeCapabilityServices(void)
 {
     firmware_status_t status;
-    manifest_service_dependencies_t manifest_dependencies = {&manifest_hash_interface};
+    manifest_service_dependencies_t manifest_dependencies      = {&manifest_hash_interface};
     update_request_service_dependencies_t request_dependencies = {&manifest_hash_interface};
     boot_control_service_dependencies_t boot_control_dependencies;
 
@@ -290,7 +290,7 @@ static firmware_status_t InitializeCapabilityServices(void)
         LOG_ERROR("composition", "EEPROM adapter init failed: %d", (int) status);
         return status;
     }
-    boot_control_dependencies.store = At24BootControlAdapter_Interface(&eeprom_adapter);
+    boot_control_dependencies.store    = At24BootControlAdapter_Interface(&eeprom_adapter);
     boot_control_dependencies.checksum = Crc32IsoHdlc_Interface(&crc32_provider);
     status = BootControlService_Init(&boot_control_service, &boot_control_dependencies);
     if (!FirmwareStatus_IsOk(status))
@@ -379,12 +379,12 @@ static firmware_status_t InitializeUpdateServices(const async_block_device_t *ex
     update_dependencies.hash                   = &manifest_hash_interface;
     update_dependencies.clock                  = STM32ClockAdapter_Interface(&clock_adapter);
     update_dependencies.storage                = external_flash;
-    update_dependencies.xip_controller       = Stm32QspiXipAdapter_Interface(&xip_adapter);
-    update_dependencies.runtime_layout       = BootRuntimeLayout_Get();
-    update_dependencies.manifest_buffer      = manifest_buffer;
-    update_dependencies.manifest_buffer_size = sizeof(manifest_buffer);
-    update_dependencies.io_buffer            = service_io_buffer;
-    update_dependencies.io_buffer_size       = sizeof(service_io_buffer);
+    update_dependencies.xip_controller         = Stm32QspiXipAdapter_Interface(&xip_adapter);
+    update_dependencies.runtime_layout         = BootRuntimeLayout_Get();
+    update_dependencies.manifest_buffer        = manifest_buffer;
+    update_dependencies.manifest_buffer_size   = sizeof(manifest_buffer);
+    update_dependencies.io_buffer              = service_io_buffer;
+    update_dependencies.io_buffer_size         = sizeof(service_io_buffer);
     status = UpdateService_Init(&update_service, &update_dependencies);
     if (!FirmwareStatus_IsOk(status))
     {
@@ -425,9 +425,8 @@ static firmware_status_t PublishApplicationDependencies(void)
                 0U,
                 {0U},
             },
-        .package_source = FatFsPackageSourceAdapter_Interface(&package_source_adapter),
-        .update_request_store =
-            FatFsUpdateRequestStoreAdapter_Interface(&request_store_adapter),
+        .package_source         = FatFsPackageSourceAdapter_Interface(&package_source_adapter),
+        .update_request_store   = FatFsUpdateRequestStoreAdapter_Interface(&request_store_adapter),
         .update_request_service = &update_request_service,
         .system_reset           = Stm32SystemResetAdapter_Interface(&system_reset_adapter),
         .bootloader_version     = {1U, 0U, 0U},
@@ -448,7 +447,7 @@ firmware_status_t Composition_Init(void)
         return FIRMWARE_STATUS_INVALID_STATE;
     }
     composition_init_attempted = 1;
-    status = InitializeLogging();
+    status                     = InitializeLogging();
     if (!FirmwareStatus_IsOk(status))
     {
         return status;

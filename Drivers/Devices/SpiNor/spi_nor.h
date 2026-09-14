@@ -29,19 +29,14 @@ typedef struct
  * command handles transactions without a data phase; receive and transmit
  * handle exactly size bytes after sending the command/address phase.
  */
-typedef firmware_status_t (*spi_nor_command_fn)(
-    void *context,
-    const spi_nor_transaction_t *transaction);
-typedef firmware_status_t (*spi_nor_receive_fn)(
-    void *context,
-    const spi_nor_transaction_t *transaction,
-    uint8_t *data,
-    uint32_t size);
-typedef firmware_status_t (*spi_nor_transmit_fn)(
-    void *context,
-    const spi_nor_transaction_t *transaction,
-    const uint8_t *data,
-    uint32_t size);
+typedef firmware_status_t (*spi_nor_command_fn)(void *context,
+                                                const spi_nor_transaction_t *transaction);
+typedef firmware_status_t (*spi_nor_receive_fn)(void *context,
+                                                const spi_nor_transaction_t *transaction,
+                                                uint8_t *data, uint32_t size);
+typedef firmware_status_t (*spi_nor_transmit_fn)(void *context,
+                                                 const spi_nor_transaction_t *transaction,
+                                                 const uint8_t *data, uint32_t size);
 typedef uint32_t (*spi_nor_now_ms_fn)(void *context);
 typedef void (*spi_nor_delay_ms_fn)(void *context, uint32_t delay_ms);
 typedef void (*spi_nor_poll_hook_fn)(void *context);
@@ -109,29 +104,18 @@ typedef struct spi_nor
  * and enter four-byte address mode when capacity exceeds 16 MiB.
  * The device object must be zero-initialized and remain valid for all calls.
  */
-firmware_status_t SpiNor_Init(
-    spi_nor_t *device,
-    const spi_nor_port_t *port,
-    const spi_nor_config_t *config);
-firmware_status_t SpiNor_GetInfo(
-    const spi_nor_t *device,
-    spi_nor_info_t *info);
+firmware_status_t SpiNor_Init(spi_nor_t *device, const spi_nor_port_t *port,
+                              const spi_nor_config_t *config);
+firmware_status_t SpiNor_GetInfo(const spi_nor_t *device, spi_nor_info_t *info);
 /* Read accepts arbitrary in-range addresses and splits large bus transfers. */
-firmware_status_t SpiNor_Read(
-    spi_nor_t *device,
-    uint32_t address,
-    void *data,
-    uint32_t size);
+firmware_status_t SpiNor_Read(spi_nor_t *device, uint32_t address, void *data, uint32_t size);
 /**
  * Program arbitrary in-range data using page-sized transactions.
  * The caller must erase the destination beforehand; programming can only
  * change erased bits from one to zero.
  */
-firmware_status_t SpiNor_Program(
-    spi_nor_t *device,
-    uint32_t address,
-    const void *data,
-    uint32_t size);
+firmware_status_t SpiNor_Program(spi_nor_t *device, uint32_t address, const void *data,
+                                 uint32_t size);
 
 /**
  * @brief Start one page-bounded program operation without waiting.
@@ -145,16 +129,10 @@ firmware_status_t SpiNor_Program(
  * @return FIRMWARE_STATUS_INVALID_STATE while another operation is busy.
  * @return A range, alignment, or transport failure otherwise.
  */
-firmware_status_t SpiNor_ProgramStart(
-    spi_nor_t *device,
-    uint32_t address,
-    const void *data,
-    uint32_t size);
+firmware_status_t SpiNor_ProgramStart(spi_nor_t *device, uint32_t address, const void *data,
+                                      uint32_t size);
 /* Address and size must both be aligned to info.erase_size. */
-firmware_status_t SpiNor_Erase(
-    spi_nor_t *device,
-    uint32_t address,
-    uint32_t size);
+firmware_status_t SpiNor_Erase(spi_nor_t *device, uint32_t address, uint32_t size);
 
 /**
  * @brief Start one erase-unit operation without waiting for completion.
@@ -167,17 +145,13 @@ firmware_status_t SpiNor_Erase(
  * @return FIRMWARE_STATUS_INVALID_STATE while another erase is busy.
  * @return A range or transport failure otherwise.
  */
-firmware_status_t SpiNor_EraseStart(
-    spi_nor_t *device,
-    uint32_t address,
-    uint32_t size);
+firmware_status_t SpiNor_EraseStart(spi_nor_t *device, uint32_t address, uint32_t size);
 
 /** Poll a started erase once without delaying or busy-waiting. */
 firmware_status_t SpiNor_OperationPoll(spi_nor_t *device);
 
 /** Return the most recent asynchronous operation state and terminal status. */
-firmware_status_t SpiNor_GetOperationResult(
-    const spi_nor_t *device,
-    spi_nor_operation_result_t *result);
+firmware_status_t SpiNor_GetOperationResult(const spi_nor_t *device,
+                                            spi_nor_operation_result_t *result);
 
 #endif

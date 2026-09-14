@@ -24,12 +24,9 @@ static const log_sink_t *logging_sink;
 static const system_clock_t *logging_clock;
 static int logging_configured;
 
-firmware_status_t Logging_Configure(
-    const log_sink_t *sink,
-    const system_clock_t *clock)
+firmware_status_t Logging_Configure(const log_sink_t *sink, const system_clock_t *clock)
 {
-    if ((sink == NULL) || (sink->write == NULL) ||
-        (clock == NULL) || (clock->now_ms == NULL))
+    if ((sink == NULL) || (sink->write == NULL) || (clock == NULL) || (clock->now_ms == NULL))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -38,8 +35,8 @@ firmware_status_t Logging_Configure(
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    logging_sink = sink;
-    logging_clock = clock;
+    logging_sink       = sink;
+    logging_clock      = clock;
     logging_configured = 1;
     return FIRMWARE_STATUS_OK;
 }
@@ -80,7 +77,7 @@ static const char *LevelColor(logging_level_t level)
             return "";
     }
 #else
-    (void)level;
+    (void) level;
     return "";
 #endif
 }
@@ -91,18 +88,14 @@ static size_t FormattedLength(int result, size_t capacity)
     {
         return 0U;
     }
-    if ((size_t)result >= capacity)
+    if ((size_t) result >= capacity)
     {
         return capacity - 1U;
     }
-    return (size_t)result;
+    return (size_t) result;
 }
 
-void Logging_Write(
-    logging_level_t level,
-    const char *tag,
-    const char *format,
-    ...)
+void Logging_Write(logging_level_t level, const char *tag, const char *format, ...)
 {
     char line[LOGGING_LINE_SIZE];
     char time[16];
@@ -119,30 +112,25 @@ void Logging_Write(
     int result;
     va_list arguments;
 
-    if ((logging_configured == 0) || (format == NULL) ||
-        ((int)level < FIRMWARE_LOG_LEVEL_ERROR) ||
-        ((int)level > FIRMWARE_LOG_LEVEL_DEBUG))
+    if ((logging_configured == 0) || (format == NULL) || ((int) level < FIRMWARE_LOG_LEVEL_ERROR) ||
+        ((int) level > FIRMWARE_LOG_LEVEL_DEBUG))
     {
         return;
     }
 
-    tick_ms = logging_clock->now_ms(logging_clock->context);
-    hours = tick_ms / 3600000U;
-    minutes = (tick_ms / 60000U) % 60U;
-    seconds = (tick_ms / 1000U) % 60U;
+    tick_ms      = logging_clock->now_ms(logging_clock->context);
+    hours        = tick_ms / 3600000U;
+    minutes      = (tick_ms / 60000U) % 60U;
+    seconds      = (tick_ms / 1000U) % 60U;
     milliseconds = tick_ms % 1000U;
-    (void)snprintf(time, sizeof(time), "%02lu:%02lu:%02lu.%03lu",
-                   (unsigned long)hours,
-                   (unsigned long)minutes,
-                   (unsigned long)seconds,
-                   (unsigned long)milliseconds);
+    (void) snprintf(time, sizeof(time), "%02lu:%02lu:%02lu.%03lu", (unsigned long) hours,
+                    (unsigned long) minutes, (unsigned long) seconds, (unsigned long) milliseconds);
 
-    color = LevelColor(level);
-    suffix = (color[0] == '\0') ? "\r\n" : LOGGING_COLOR_RESET "\r\n";
+    color         = LevelColor(level);
+    suffix        = (color[0] == '\0') ? "\r\n" : LOGGING_COLOR_RESET "\r\n";
     suffix_length = strlen(suffix);
 
-    result = snprintf(line, sizeof(line), "%s[%s][%s][%s] ",
-                      color, time, LevelName(level),
+    result = snprintf(line, sizeof(line), "%s[%s][%s][%s] ", color, time, LevelName(level),
                       (tag == NULL) ? "SYS" : tag);
     if (result < 0)
     {
@@ -166,8 +154,7 @@ void Logging_Write(
 
     memcpy(&line[used], suffix, suffix_length);
     used += suffix_length;
-    (void)logging_sink->write(
-        logging_sink->context, (const uint8_t *)line, used);
+    (void) logging_sink->write(logging_sink->context, (const uint8_t *) line, used);
 }
 
 #endif

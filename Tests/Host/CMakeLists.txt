@@ -68,6 +68,11 @@ target_include_directories(secondary_mcu_update_service_test PRIVATE
     ../../Services/internal
     ../../Interfaces/include
     ../../Shared/include
+    ../../Utilities/Logger/include
+)
+
+target_compile_definitions(secondary_mcu_update_service_test PRIVATE
+    FIRMWARE_LOG_ENABLE=0
 )
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
