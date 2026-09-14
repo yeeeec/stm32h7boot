@@ -4,7 +4,6 @@ add_library(board_bsp STATIC
     src/bsp_debug.c
     src/bsp_eeprom.c
     src/bsp_external_flash.c
-    src/bsp_sdram.c
     src/bsp_stm32_rom_boot.c
 )
 

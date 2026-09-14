@@ -10,7 +10,6 @@
 
 #include "bsp/bsp_eeprom.h"
 #include "bsp/bsp_external_flash.h"
-#include "bsp/bsp_sdram.h"
 #include "usart.h"
 
 #define BSP_EEPROM_ADDRESS_7BIT       0x50U
@@ -31,13 +30,7 @@ firmware_status_t BSP_Init(void)
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-
-    status = BSP_SdramInit();
-    if (!FirmwareStatus_IsOk(status))
-    {
-        return status;
-    }
-
+    
     status = BSP_ExternalFlashInit();
     if (!FirmwareStatus_IsOk(status))
     {
