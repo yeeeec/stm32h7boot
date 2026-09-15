@@ -8,4 +8,5 @@ target_include_directories(update PUBLIC
 
 target_link_libraries(update
     PUBLIC firmware_types
+    PRIVATE firmware_crypto
 )
