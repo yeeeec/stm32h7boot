@@ -60,7 +60,7 @@ RAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 512K
 RAM_D2 (xrw)      : ORIGIN = 0x30000000, LENGTH = 288K
 RAM_D3 (xrw)      : ORIGIN = 0x38000000, LENGTH = 64K
 ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 256K
+FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 2048K
 }
 
 /* Highest address of the user mode stack */
@@ -240,17 +240,6 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >DTCMRAM
-
-  /* Bounded service I/O buffers live in DMA-accessible D2 SRAM. */
-  .ram_d2 (NOLOAD) :
-  {
-    . = ALIGN(32);
-    *(.ram_d2)
-    *(.ram_d2*)
-    *(.storage_ram_d2)
-    *(.storage_ram_d2*)
-    . = ALIGN(32);
-  } >RAM_D2
 
 
 
