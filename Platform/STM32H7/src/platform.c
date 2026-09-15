@@ -11,7 +11,6 @@
 
 #include "platform/platform_reset_reason.h"
 #include "platform/platform_time.h"
-#include "platform/platform_watchdog.h"
 
 #include "iwdg.h"
 #include "stm32h7xx_hal.h"
@@ -30,7 +29,10 @@ static uint32_t ClockNowMs(void *context)
 static firmware_status_t RuntimeKickWatchdog(void *context)
 {
     (void) context;
-    return Platform_WatchdogRefresh();
+#if !defined(DEBUG)
+    (void) HAL_IWDG_Refresh(&hiwdg1);
+#endif
+    return FIRMWARE_STATUS_OK;
 }
 
 static void ConfigureMemoryProtectionAndCache(void)
@@ -66,10 +68,7 @@ firmware_status_t Platform_Init(void)
     ConfigureMemoryProtectionAndCache();
     MX_IWDG1_Init();
     Platform_ResetReasonCapture();
-    if (!FirmwareStatus_IsOk(Platform_WatchdogRefresh()))
-    {
-        return FIRMWARE_STATUS_IO_ERROR;
-    }
+    HAL_IWDG_Refresh(&hiwdg1);
     last_watchdog_refresh_ms = Platform_TimeNowMs();
     platform_initialized     = 1;
     return FIRMWARE_STATUS_OK;
@@ -88,12 +87,7 @@ firmware_status_t Platform_Process(void)
     /* 无符号减法保证调度比较可跨 Tick 回绕。 */
     if ((uint32_t) (now_ms - last_watchdog_refresh_ms) >= PLATFORM_WATCHDOG_REFRESH_INTERVAL_MS)
     {
-        firmware_status_t status = Platform_WatchdogRefresh();
-
-        if (!FirmwareStatus_IsOk(status))
-        {
-            return status;
-        }
+        HAL_IWDG_Refresh(&hiwdg1);
         /* 只有硬件接受 Refresh 后才推进调度时间点。 */
         last_watchdog_refresh_ms = now_ms;
     }
@@ -106,14 +100,7 @@ int Platform_IsInitialized(void)
     return platform_initialized;
 }
 
-firmware_status_t Platform_GetClockPort(clock_port_t *port)
-{
-    if (port == NULL)
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    *port = (clock_port_t) {.context = NULL, .now_ms = ClockNowMs};
-    return FIRMWARE_STATUS_OK;
-}
-
+/** 导出时钟和看门狗运行时能力端口。 */
 firmware_status_t Platform_GetRuntimePort(runtime_port_t *port)
 {
     if (port == NULL)
@@ -123,5 +110,13 @@ firmware_status_t Platform_GetRuntimePort(runtime_port_t *port)
         .now_ms        = ClockNowMs,
         .kick_watchdog = RuntimeKickWatchdog,
     };
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t Platform_GetClockPort(clock_port_t *port)
+{
+    if (port == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    *port = (clock_port_t) {.context = NULL, .now_ms = ClockNowMs};
     return FIRMWARE_STATUS_OK;
 }

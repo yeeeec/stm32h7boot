@@ -57,6 +57,7 @@ target_compile_definitions(cubemx_generated_stm32h7boot INTERFACE
 # Add project-owned architecture layers. The order mirrors the dependency
 # direction and keeps HAL/CubeMX include paths out of Services and Application.
 add_subdirectory(Shared)
+add_subdirectory(Middlewares/Third_Party)
 add_subdirectory(Interfaces)
 add_subdirectory(Drivers/Devices)
 add_subdirectory(Platform/STM32H7)
