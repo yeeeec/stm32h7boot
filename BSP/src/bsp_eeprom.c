@@ -152,7 +152,11 @@ firmware_status_t BSP_EepromWrite(uint32_t address, const void *data, uint32_t s
 
     if (eeprom.initialized == 0)
         return FIRMWARE_STATUS_INVALID_STATE;
-    if ((data == NULL) || (size == 0U))
+    /* Validate the complete request before starting page writes.  Without
+     * this guard an out-of-range request could partially modify the EEPROM
+     * and only fail when the final page is submitted. */
+    if ((data == NULL) || (size == 0U) || (address >= BSP_EEPROM_CAPACITY_BYTES) ||
+        (size > (BSP_EEPROM_CAPACITY_BYTES - address)))
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
 
     while (remaining != 0U)
