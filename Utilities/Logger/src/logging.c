@@ -20,9 +20,53 @@
 #define LOGGING_COLOR_CYAN   "\033[36m"
 #define LOGGING_COLOR_RESET  "\033[0m"
 
-static const log_sink_t *logging_sink;
-static const system_clock_t *logging_clock;
-static int logging_configured;
+static log_output_port_t logging_port;
+static int logging_initialized;
+
+/* Compatibility storage for the former Composition-only two-port API. */
+static log_sink_t legacy_sink;
+static system_clock_t legacy_clock;
+
+static firmware_status_t LegacyWrite(void *context, const uint8_t *data, size_t size)
+{
+    (void) context;
+    return legacy_sink.write(legacy_sink.context, data, size);
+}
+
+static uint32_t LegacyNowMs(void *context)
+{
+    (void) context;
+    return legacy_clock.now_ms(legacy_clock.context);
+}
+
+firmware_status_t Logging_Init(const log_output_port_t *port)
+{
+    if ((port == NULL) || (port->write == NULL) || (port->now_ms == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if (logging_initialized != 0)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    logging_port        = *port;
+    logging_initialized = 1;
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t Logging_SetOutputPort(const log_output_port_t *port)
+{
+    if ((port == NULL) || (port->write == NULL) || (port->now_ms == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if (logging_initialized == 0)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    logging_port = *port;
+    return FIRMWARE_STATUS_OK;
+}
 
 firmware_status_t Logging_Configure(const log_sink_t *sink, const system_clock_t *clock)
 {
@@ -30,15 +74,17 @@ firmware_status_t Logging_Configure(const log_sink_t *sink, const system_clock_t
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if (logging_configured != 0)
+    if (logging_initialized != 0)
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
-    logging_sink       = sink;
-    logging_clock      = clock;
-    logging_configured = 1;
-    return FIRMWARE_STATUS_OK;
+    legacy_sink  = *sink;
+    legacy_clock = *clock;
+    {
+        const log_output_port_t port = {NULL, LegacyWrite, LegacyNowMs};
+        return Logging_Init(&port);
+    }
 }
 
 #if FIRMWARE_LOG_ENABLE
@@ -112,13 +158,13 @@ void Logging_Write(logging_level_t level, const char *tag, const char *format, .
     int result;
     va_list arguments;
 
-    if ((logging_configured == 0) || (format == NULL) || ((int) level < FIRMWARE_LOG_LEVEL_ERROR) ||
+    if ((logging_initialized == 0) || (format == NULL) || ((int) level < FIRMWARE_LOG_LEVEL_ERROR) ||
         ((int) level > FIRMWARE_LOG_LEVEL_DEBUG))
     {
         return;
     }
 
-    tick_ms      = logging_clock->now_ms(logging_clock->context);
+    tick_ms      = logging_port.now_ms(logging_port.context);
     hours        = tick_ms / 3600000U;
     minutes      = (tick_ms / 60000U) % 60U;
     seconds      = (tick_ms / 1000U) % 60U;
@@ -154,7 +200,7 @@ void Logging_Write(logging_level_t level, const char *tag, const char *format, .
 
     memcpy(&line[used], suffix, suffix_length);
     used += suffix_length;
-    (void) logging_sink->write(logging_sink->context, (const uint8_t *) line, used);
+    (void) logging_port.write(logging_port.context, (const uint8_t *) line, used);
 }
 
 #endif

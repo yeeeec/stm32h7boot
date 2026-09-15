@@ -8,6 +8,11 @@
  */
 #include "bsp/bsp.h"
 
+#include "fatfs.h"
+#include "gpio.h"
+#include "i2c.h"
+#include "quadspi.h"
+#include "sdmmc.h"
 #include "bsp/bsp_eeprom.h"
 #include "bsp/bsp_external_flash.h"
 #include "usart.h"
@@ -26,11 +31,20 @@ firmware_status_t BSP_Init(void)
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
+    /* All CubeMX handles used by the boot flow are initialized here. */
+    MX_GPIO_Init();
+    MX_QUADSPI_Init();
+    MX_I2C1_Init();
+    MX_USART1_UART_Init();
+    MX_USART2_UART_Init();
+    MX_SDMMC1_SD_Init();
+    MX_FATFS_Init();
+
     if (huart1.gState == HAL_UART_STATE_RESET)
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    
+
     status = BSP_ExternalFlashInit();
     if (!FirmwareStatus_IsOk(status))
     {

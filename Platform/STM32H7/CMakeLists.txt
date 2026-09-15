@@ -7,6 +7,8 @@ add_library(platform_stm32h7 STATIC
     src/platform_reset_reason.c
     src/platform_time.c
     src/platform_watchdog.c
+    src/platform_log.c
+    src/platform_parameters.c
 )
 
 target_include_directories(platform_stm32h7 PUBLIC
@@ -15,5 +17,5 @@ target_include_directories(platform_stm32h7 PUBLIC
 
 target_link_libraries(platform_stm32h7
     PUBLIC firmware_types
-    PRIVATE cubemx_generated_stm32h7boot
+    PRIVATE cubemx_generated_stm32h7boot board_bsp
 )

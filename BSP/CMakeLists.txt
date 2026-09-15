@@ -11,12 +11,17 @@ target_include_directories(board_bsp PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
+target_include_directories(board_bsp PRIVATE
+    ${CMAKE_SOURCE_DIR}/FATFS/App
+    ${CMAKE_SOURCE_DIR}/FATFS/Target
+    ${CMAKE_SOURCE_DIR}/Middlewares/Third_Party/FatFs/src
+)
+
 target_link_libraries(board_bsp
     PUBLIC firmware_types
     PRIVATE
         cubemx_generated_stm32h7boot
         driver_at24
-        driver_sdram
         driver_spi_nor
         driver_stm32_rom_boot
 )

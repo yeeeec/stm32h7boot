@@ -1,22 +1,40 @@
 #ifndef FIRMWARE_STATUS_H
 #define FIRMWARE_STATUS_H
 
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 typedef enum
 {
-    FIRMWARE_STATUS_OK               = 0,
-    FIRMWARE_STATUS_INVALID_ARGUMENT = 1,
-    FIRMWARE_STATUS_INVALID_STATE    = 2,
-    FIRMWARE_STATUS_IO_ERROR         = 3,
-    FIRMWARE_STATUS_TIMEOUT          = 4,
-    FIRMWARE_STATUS_NOT_SUPPORTED    = 5,
-    FIRMWARE_STATUS_OUT_OF_RANGE     = 6,
-    FIRMWARE_STATUS_NOT_FOUND        = 7,
-    FIRMWARE_STATUS_BUFFER_TOO_SMALL = 8
+    /* Keep the numeric ABI identical to stm32h7app/Shared. */
+    FIRMWARE_STATUS_OK = 0,
+    FIRMWARE_STATUS_INVALID_ARGUMENT,
+    FIRMWARE_STATUS_INVALID_STATE,
+    FIRMWARE_STATUS_NOT_SUPPORTED,
+    FIRMWARE_STATUS_IO_ERROR,
+    FIRMWARE_STATUS_TIMEOUT,
+    FIRMWARE_STATUS_BUSY,
+    FIRMWARE_STATUS_NOT_FOUND,
+    FIRMWARE_STATUS_OUT_OF_RANGE,
+    FIRMWARE_STATUS_BUFFER_TOO_SMALL,
+    FIRMWARE_STATUS_OVERFLOW,
+    FIRMWARE_STATUS_AUTHENTICATION_FAILED
 } firmware_status_t;
 
 static inline int FirmwareStatus_IsOk(firmware_status_t status)
 {
     return status == FIRMWARE_STATUS_OK;
 }
+
+static inline int FirmwareStatus_IsError(firmware_status_t status)
+{
+    return status != FIRMWARE_STATUS_OK;
+}
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

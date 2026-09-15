@@ -13,6 +13,7 @@
 
 #include "at24.h"
 #include "i2c.h"
+#include "stm32h7xx_hal.h"
 
 #define BSP_EEPROM_TRANSFER_TIMEOUT_MS 100U
 
@@ -111,4 +112,69 @@ firmware_status_t BSP_EepromInit(const bsp_eeprom_config_t *config)
 struct at24 *BSP_EepromDevice(void)
 {
     return (eeprom.initialized != 0) ? &eeprom : NULL;
+}
+
+firmware_status_t BSP_EepromProbe(void)
+{
+    if (eeprom.initialized == 0)
+        return FIRMWARE_STATUS_INVALID_STATE;
+    return At24_Probe(&eeprom);
+}
+
+firmware_status_t BSP_EepromRead(uint32_t address, void *data, uint32_t size)
+{
+    if (eeprom.initialized == 0)
+        return FIRMWARE_STATUS_INVALID_STATE;
+    return At24_Read(&eeprom, address, data, size);
+}
+
+static firmware_status_t WaitForPageWrite(void)
+{
+    at24_operation_result_t result;
+
+    for (;;)
+    {
+        firmware_status_t status = At24_OperationPoll(&eeprom);
+        if (!FirmwareStatus_IsOk(status))
+            return status;
+        (void) At24_GetOperationResult(&eeprom, &result);
+        if ((result.state == AT24_OPERATION_SUCCEEDED) ||
+            (result.state == AT24_OPERATION_FAILED))
+            return result.status;
+        HAL_Delay(1U);
+    }
+}
+
+firmware_status_t BSP_EepromWrite(uint32_t address, const void *data, uint32_t size)
+{
+    const uint8_t *source = (const uint8_t *) data;
+    uint32_t remaining = size;
+
+    if (eeprom.initialized == 0)
+        return FIRMWARE_STATUS_INVALID_STATE;
+    if ((data == NULL) || (size == 0U))
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+
+    while (remaining != 0U)
+    {
+        const uint32_t page_offset = address % AT24C128_PAGE_SIZE_BYTES;
+        const uint32_t page_space = AT24C128_PAGE_SIZE_BYTES - page_offset;
+        const uint32_t chunk = remaining < page_space ? remaining : page_space;
+        firmware_status_t status = At24_WritePageStart(&eeprom, address, source, chunk);
+
+        if (!FirmwareStatus_IsOk(status))
+            return status;
+        status = WaitForPageWrite();
+        if (!FirmwareStatus_IsOk(status))
+            return status;
+        address += chunk;
+        source += chunk;
+        remaining -= chunk;
+    }
+    return FIRMWARE_STATUS_OK;
+}
+
+int BSP_EepromIsInitialized(void)
+{
+    return eeprom.initialized != 0;
 }

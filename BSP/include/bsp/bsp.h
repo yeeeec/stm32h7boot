@@ -8,6 +8,10 @@
 #ifndef BSP_H
 #define BSP_H
 
+/* Bare-metal boot BSP owns CubeMX peripheral startup and concrete device
+ * bindings. Display/SDRAM/USB/timer/HW-CRC resources belong to the app and are
+ * deliberately not initialized by this target. */
+
 #include "firmware/status.h"
 
 /**

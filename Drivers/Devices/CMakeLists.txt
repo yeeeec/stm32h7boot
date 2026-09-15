@@ -1,12 +1,15 @@
 # Device drivers are declared in this directory so firmware targets only need
 # one add_subdirectory(Drivers/Devices). Each driver remains a separate target
 # and receives only shared, hardware-independent types.
+# SDRAM is an application/display resource and is intentionally not linked into
+# the bare-metal boot image. Keep the standalone target for host tests and
+# future application targets without making it a boot dependency.
 add_library(driver_sdram STATIC
     Sdram/sdram.c
 )
 
 target_include_directories(driver_sdram PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/Sdram/
+    ${CMAKE_CURRENT_SOURCE_DIR}/Sdram
 )
 
 target_link_libraries(driver_sdram PUBLIC firmware_types)

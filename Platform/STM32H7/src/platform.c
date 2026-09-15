@@ -7,15 +7,54 @@
  * 不会有中断在后台刷新 Watchdog。
  */
 #include "platform/platform.h"
+#include "platform/platform_ports.h"
 
 #include "platform/platform_reset_reason.h"
 #include "platform/platform_time.h"
 #include "platform/platform_watchdog.h"
 
+#include "iwdg.h"
+#include "stm32h7xx_hal.h"
+
 #define PLATFORM_WATCHDOG_REFRESH_INTERVAL_MS 100U
 
 static int platform_initialized;
 static uint32_t last_watchdog_refresh_ms;
+
+static uint32_t ClockNowMs(void *context)
+{
+    (void) context;
+    return Platform_TimeNowMs();
+}
+
+static firmware_status_t RuntimeKickWatchdog(void *context)
+{
+    (void) context;
+    return Platform_WatchdogRefresh();
+}
+
+static void ConfigureMemoryProtectionAndCache(void)
+{
+    MPU_Region_InitTypeDef region = {0};
+
+    HAL_MPU_Disable();
+    region.Enable           = MPU_REGION_ENABLE;
+    region.Number           = MPU_REGION_NUMBER0;
+    region.BaseAddress      = 0x90000000UL;
+    region.Size             = MPU_REGION_SIZE_32MB;
+    region.SubRegionDisable = 0U;
+    region.TypeExtField     = MPU_TEX_LEVEL0;
+    region.AccessPermission = MPU_REGION_FULL_ACCESS;
+    region.DisableExec      = MPU_INSTRUCTION_ACCESS_ENABLE;
+    region.IsShareable      = MPU_ACCESS_NOT_SHAREABLE;
+    region.IsCacheable      = MPU_ACCESS_CACHEABLE;
+    region.IsBufferable     = MPU_ACCESS_NOT_BUFFERABLE;
+    HAL_MPU_ConfigRegion(&region);
+    HAL_MPU_Enable(MPU_HFNMI_PRIVDEF);
+
+    SCB_EnableICache();
+    SCB_EnableDCache();
+}
 
 firmware_status_t Platform_Init(void)
 {
@@ -24,6 +63,8 @@ firmware_status_t Platform_Init(void)
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
+    ConfigureMemoryProtectionAndCache();
+    MX_IWDG1_Init();
     Platform_ResetReasonCapture();
     if (!FirmwareStatus_IsOk(Platform_WatchdogRefresh()))
     {
@@ -63,4 +104,24 @@ firmware_status_t Platform_Process(void)
 int Platform_IsInitialized(void)
 {
     return platform_initialized;
+}
+
+firmware_status_t Platform_GetClockPort(clock_port_t *port)
+{
+    if (port == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    *port = (clock_port_t) {.context = NULL, .now_ms = ClockNowMs};
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t Platform_GetRuntimePort(runtime_port_t *port)
+{
+    if (port == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    *port = (runtime_port_t) {
+        .context       = NULL,
+        .now_ms        = ClockNowMs,
+        .kick_watchdog = RuntimeKickWatchdog,
+    };
+    return FIRMWARE_STATUS_OK;
 }

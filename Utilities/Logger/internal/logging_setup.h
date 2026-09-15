@@ -1,6 +1,6 @@
 /**
  * @file logging_setup.h
- * @brief Composition-only dependency binding for the logger frontend.
+ * @brief Legacy two-port binding retained for existing Composition code.
  */
 #ifndef FIRMWARE_LOGGING_SETUP_H
 #define FIRMWARE_LOGGING_SETUP_H

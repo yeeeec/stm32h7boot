@@ -6,6 +6,8 @@
 
 #include <string.h>
 
+#include "crypto/crypto.h"
+
 static const uint32_t round_constants[64] = {
     0x428A2F98UL, 0x71374491UL, 0xB5C0FBCFUL, 0xE9B5DBA5UL, 0x3956C25BUL, 0x59F111F1UL,
     0x923F82A4UL, 0xAB1C5ED5UL, 0xD807AA98UL, 0x12835B01UL, 0x243185BEUL, 0x550C7DC3UL,
@@ -177,4 +179,60 @@ firmware_status_t Sha256_Finish(const sha256_context_t *context,
         WriteBigEndian(&digest[index * 4U], final_context.state[index]);
     }
     return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t Crypto_Sha256Init(crypto_sha256_context_t *context)
+{
+    return Sha256_Reset(context);
+}
+
+firmware_status_t Crypto_Sha256Update(crypto_sha256_context_t *context,
+                                      const uint8_t *data, size_t size)
+{
+    return Sha256_Update(context, data, size);
+}
+
+firmware_status_t Crypto_Sha256Finish(crypto_sha256_context_t *context,
+                                      uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE])
+{
+    firmware_status_t status = Sha256_Finish(context, digest);
+    if (FirmwareStatus_IsOk(status))
+    {
+        Crypto_SecureZero(context, sizeof(*context));
+    }
+    return status;
+}
+
+void Crypto_Sha256Abort(crypto_sha256_context_t *context)
+{
+    if (context != NULL)
+    {
+        Crypto_SecureZero(context, sizeof(*context));
+    }
+}
+
+firmware_status_t Crypto_Sha256(const uint8_t *data, size_t size,
+                                uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE])
+{
+    crypto_sha256_context_t context;
+    firmware_status_t status;
+
+    if (((data == NULL) && (size != 0U)) || (digest == NULL))
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    status = Crypto_Sha256Init(&context);
+    if (FirmwareStatus_IsOk(status))
+    {
+        status = Crypto_Sha256Update(&context, data, size);
+    }
+    if (FirmwareStatus_IsOk(status))
+    {
+        status = Crypto_Sha256Finish(&context, digest);
+    }
+    else
+    {
+        Crypto_Sha256Abort(&context);
+    }
+    return status;
 }

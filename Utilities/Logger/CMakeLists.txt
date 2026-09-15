@@ -24,7 +24,8 @@ else()
 endif()
 
 # The frontend owns formatting and filtering only. Hardware output and time are
-# supplied through firmware interfaces by the Composition layer.
+# supplied through a small synchronous port; bare-metal BSPs may bind it
+# directly, while the legacy Composition binding remains source-compatible.
 add_library(firmware_logger STATIC
     src/logging.c
 )
@@ -43,4 +44,4 @@ target_compile_definitions(firmware_logger PUBLIC
     FIRMWARE_LOG_USE_COLOR=$<IF:$<BOOL:${FIRMWARE_LOG_USE_COLOR}>,1,0>
 )
 
-target_link_libraries(firmware_logger PRIVATE firmware_interfaces)
+target_link_libraries(firmware_logger PUBLIC firmware_interfaces)

@@ -8,6 +8,11 @@
 #ifndef FIRMWARE_LOGGING_H
 #define FIRMWARE_LOGGING_H
 
+#include <stddef.h>
+#include <stdint.h>
+
+#include "firmware/status.h"
+#include "ports/log_output.h"
 #ifndef FIRMWARE_LOG_ENABLE
 #define FIRMWARE_LOG_ENABLE 1
 #endif
@@ -29,6 +34,12 @@ typedef enum
     LOGGING_LEVEL_INFO  = FIRMWARE_LOG_LEVEL_INFO,
     LOGGING_LEVEL_DEBUG = FIRMWARE_LOG_LEVEL_DEBUG
 } logging_level_t;
+
+/** Initialize logging with a synchronous writer and monotonic clock. */
+firmware_status_t Logging_Init(const log_output_port_t *port);
+
+/** Replace the output port after initialization. */
+firmware_status_t Logging_SetOutputPort(const log_output_port_t *port);
 
 #if defined(__GNUC__) || defined(__clang__)
 #define LOGGING_PRINTF_FORMAT(format_index, argument_index)                                        \

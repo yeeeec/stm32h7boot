@@ -1,4 +1,6 @@
 add_library(firmware_checksum STATIC
+    src/crc8.c
+    src/crc32.c
     src/crc32_iso_hdlc.c
 )
 

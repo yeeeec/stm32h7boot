@@ -8,6 +8,9 @@
 #ifndef PLATFORM_H
 #define PLATFORM_H
 
+/* Platform owns processor lifecycle primitives (MPU/cache, reset reason,
+ * watchdog and tick); board peripherals remain in BSP. */
+
 #include "firmware/status.h"
 
 /**

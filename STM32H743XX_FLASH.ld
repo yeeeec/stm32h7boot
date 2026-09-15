@@ -247,6 +247,8 @@ SECTIONS
     . = ALIGN(32);
     *(.ram_d2)
     *(.ram_d2*)
+    *(.storage_ram_d2)
+    *(.storage_ram_d2*)
     . = ALIGN(32);
   } >RAM_D2
 

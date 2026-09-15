@@ -11,6 +11,9 @@
 
 struct at24;
 
+#define BSP_EEPROM_CAPACITY_BYTES (16UL * 1024UL)
+#define BSP_EEPROM_PAGE_SIZE_BYTES 64U
+
 /** 绑定已安装 EEPROM 时同步消费的配置。 */
 typedef struct
 {
@@ -43,5 +46,12 @@ firmware_status_t BSP_EepromInit(const bsp_eeprom_config_t *config);
  * @note 调用者不得释放或重新初始化返回对象。
  */
 struct at24 *BSP_EepromDevice(void);
+
+/* Synchronous convenience calls retained for simple bare-metal users. They
+ * execute the same AT24 driver instance returned by BSP_EepromDevice(). */
+firmware_status_t BSP_EepromProbe(void);
+firmware_status_t BSP_EepromRead(uint32_t address, void *data, uint32_t size);
+firmware_status_t BSP_EepromWrite(uint32_t address, const void *data, uint32_t size);
+int BSP_EepromIsInitialized(void);
 
 #endif
