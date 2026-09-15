@@ -17,7 +17,7 @@ AlignConsecutiveDeclarations: false
 AlignTrailingComments: true
 
 # 2. 大括号与换行 (K&R 风格)
-BreakBeforeBraces: Attach
+BreakBeforeBraces: Allman
 # 不允许短函数写在单行
 AllowShortFunctionsOnASingleLine: None
 # 不允许短 if 语句写在单行（强制换行，便于调试）

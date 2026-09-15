@@ -37,6 +37,19 @@ add_executable(${CMAKE_PROJECT_NAME})
 # Add STM32CubeMX generated sources
 add_subdirectory(cmake/stm32cubemx)
 
+
+# Add project-owned architecture layers. The order mirrors the dependency
+# direction and keeps HAL/CubeMX include paths out of Services and Application.
+add_subdirectory(Shared)
+add_subdirectory(Middlewares/Third_Party)
+add_subdirectory(Drivers/Devices)
+add_subdirectory(BSP)
+add_subdirectory(Platform/STM32H7)
+add_subdirectory(Utilities/Logger)
+add_subdirectory(Utilities/Checksum)
+# add_subdirectory(Services)
+# add_subdirectory(Application)
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -65,4 +78,5 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
 
     # Add user defined libraries
+    # firmware_application
 )

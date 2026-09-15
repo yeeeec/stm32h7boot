@@ -22,6 +22,7 @@
 #include "fatfs.h"
 #include "quadspi.h"
 #include "sdmmc.h"
+#include "tim.h"
 #include "usart.h"
 #include "gpio.h"
 
@@ -104,6 +105,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_DMA_Init();
+  MX_TIM1_Init();
   MX_QUADSPI_Init();
   MX_FATFS_Init();
   MX_SDMMC1_SD_Init();
