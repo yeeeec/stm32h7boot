@@ -4,7 +4,6 @@
 #include <stdint.h>
 
 #include "firmware/status.h"
-#include "ports/log_output.h"
 
 #ifdef __cplusplus
 extern "C"
