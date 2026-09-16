@@ -1,7 +1,16 @@
 set(BOARD_BSP_SOURCES
     src/bsp.c
-    src/bsp_debug.c
-    src/bsp_display.c
+
+    src/bsp_i2c.c
+    src/bsp_eeprom.c
+
+    src/bsp_log_uart.c
+    src/bsp_isp_uart.c
+
+    src/bsp_qspi_flash.c
+    src/bsp_sd.c
+
+    src/bsp_isp_gpio.c
 )
 
 add_library(board_bsp STATIC ${BOARD_BSP_SOURCES})
@@ -18,6 +27,4 @@ target_link_libraries(board_bsp PRIVATE stm32cubemx)
 
 target_link_libraries(board_bsp PRIVATE
     driver_at24
-    driver_gt911
-    driver_sdram
 )

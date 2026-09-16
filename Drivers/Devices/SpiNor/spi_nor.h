@@ -1,157 +1,132 @@
 /**
  * @file spi_nor.h
- * @brief Hardware-independent JEDEC SPI-NOR read/program/erase driver.
+ * @brief Hardware-independent Winbond W25Qx SPI-NOR driver.
  *
- * The driver emits standard single-line SPI-NOR commands through an injected
- * port. It never includes HAL headers and does not know the QSPI instance,
- * board wiring, partitions, image formats, or update policy.
+ * The default target is W25Q256 (JEDEC ID EF 40 19). The driver accepts
+ * Winbond W25Q devices with density codes up to W25Q256 and uses the common
+ * 256-byte page, 4-KiB sector and standard single-line command set.
  */
-#ifndef DEVICE_SPI_NOR_H
-#define DEVICE_SPI_NOR_H
+#ifndef SPI_NOR_H
+#define SPI_NOR_H
 
 #include <stdint.h>
 
-#include "firmware/status.h"
-
-#define SPI_NOR_JEDEC_ID_SIZE 3U
-
-/* Description of one command phase followed by optional transmit/receive data. */
-typedef struct
+#ifdef __cplusplus
+extern "C"
 {
-    uint8_t instruction;
-    uint8_t address_bytes;
-    uint8_t dummy_cycles;
-    uint32_t address;
-} spi_nor_transaction_t;
+#endif
 
-/*
- * All bus callbacks are synchronous and must copy data before returning.
- * command handles transactions without a data phase; receive and transmit
- * handle exactly size bytes after sending the command/address phase.
- */
-typedef firmware_status_t (*spi_nor_command_fn)(void *context,
-                                                const spi_nor_transaction_t *transaction);
-typedef firmware_status_t (*spi_nor_receive_fn)(void *context,
-                                                const spi_nor_transaction_t *transaction,
-                                                uint8_t *data, uint32_t size);
-typedef firmware_status_t (*spi_nor_transmit_fn)(void *context,
-                                                 const spi_nor_transaction_t *transaction,
-                                                 const uint8_t *data, uint32_t size);
-typedef uint32_t (*spi_nor_now_ms_fn)(void *context);
-typedef void (*spi_nor_delay_ms_fn)(void *context, uint32_t delay_ms);
-typedef void (*spi_nor_poll_hook_fn)(void *context);
+#define SPI_NOR_JEDEC_ID_SIZE          3U
+#define SPI_NOR_W25Q_MANUFACTURER_ID   0xEFU
+#define SPI_NOR_W25Q256_MEMORY_TYPE    0x40U
+#define SPI_NOR_W25Q256_CAPACITY_ID    0x19U
+#define SPI_NOR_W25Q256_CAPACITY_BYTES (32UL * 1024UL * 1024UL)
+#define SPI_NOR_W25Q_PAGE_SIZE_BYTES   256U
+#define SPI_NOR_W25Q_SECTOR_SIZE_BYTES 4096U
 
-typedef struct
-{
-    /* Passed unchanged to every callback; ownership remains with the caller. */
-    void *context;
-    spi_nor_command_fn command;
-    spi_nor_receive_fn receive;
-    spi_nor_transmit_fn transmit;
-    spi_nor_now_ms_fn now_ms;
-    spi_nor_delay_ms_fn delay_ms;
-    /* Optional hook for watchdog/service polling during long erase waits. */
-    spi_nor_poll_hook_fn poll_hook;
-    /* Maximum bytes accepted by one receive/transmit callback invocation. */
-    uint32_t max_transfer_size;
-} spi_nor_port_t;
+    typedef enum
+    {
+        SPI_NOR_STATUS_OK = 0,
+        SPI_NOR_STATUS_INVALID_ARGUMENT,
+        SPI_NOR_STATUS_INVALID_STATE,
+        SPI_NOR_STATUS_OUT_OF_RANGE,
+        SPI_NOR_STATUS_IO_ERROR,
+        SPI_NOR_STATUS_TIMEOUT,
+        SPI_NOR_STATUS_NOT_SUPPORTED
+    } spi_nor_status_t;
 
-typedef struct
-{
-    /* A zero value selects the driver's conservative default timeout. */
-    uint32_t program_timeout_ms;
-    uint32_t erase_timeout_ms;
-} spi_nor_config_t;
+    typedef struct
+    {
+        uint8_t instruction;
+        uint8_t address_bytes;
+        uint8_t dummy_cycles;
+        uint32_t address;
+    } spi_nor_transaction_t;
 
-typedef struct
-{
-    uint8_t jedec_id[SPI_NOR_JEDEC_ID_SIZE];
-    uint32_t capacity_bytes;
-    uint32_t page_size;
-    uint32_t erase_size;
-} spi_nor_info_t;
+    typedef spi_nor_status_t (*spi_nor_command_fn)(void *context,
+                                                   const spi_nor_transaction_t *transaction);
+    typedef spi_nor_status_t (*spi_nor_receive_fn)(void *context,
+                                                   const spi_nor_transaction_t *transaction,
+                                                   uint8_t *data, uint32_t size);
+    typedef spi_nor_status_t (*spi_nor_transmit_fn)(void *context,
+                                                    const spi_nor_transaction_t *transaction,
+                                                    const uint8_t *data, uint32_t size);
+    typedef uint32_t (*spi_nor_now_ms_fn)(void *context);
+    typedef void (*spi_nor_delay_ms_fn)(void *context, uint32_t delay_ms);
 
-typedef enum
-{
-    SPI_NOR_OPERATION_IDLE = 0,
-    SPI_NOR_OPERATION_BUSY,
-    SPI_NOR_OPERATION_SUCCEEDED,
-    SPI_NOR_OPERATION_FAILED
-} spi_nor_operation_state_t;
+    typedef struct
+    {
+        void *context;
+        spi_nor_command_fn command;
+        spi_nor_receive_fn receive;
+        spi_nor_transmit_fn transmit;
+        spi_nor_now_ms_fn now_ms;
+        spi_nor_delay_ms_fn delay_ms;
+        uint32_t max_transfer_size;
+    } spi_nor_port_t;
 
-typedef struct
-{
-    spi_nor_operation_state_t state;
-    firmware_status_t status;
-} spi_nor_operation_result_t;
+    typedef struct
+    {
+        /** Zero selects the W25Q256-oriented conservative default. */
+        uint32_t program_timeout_ms;
+        uint32_t erase_timeout_ms;
+    } spi_nor_config_t;
 
-typedef struct spi_nor
-{
-    spi_nor_port_t port;
-    spi_nor_info_t info;
-    uint32_t program_timeout_ms;
-    uint32_t erase_timeout_ms;
-    uint32_t operation_started_ms;
-    uint32_t operation_timeout_ms;
-    firmware_status_t operation_status;
-    spi_nor_operation_state_t operation_state;
-    uint8_t address_bytes;
-    int initialized;
-} spi_nor_t;
+    typedef struct
+    {
+        uint8_t jedec_id[SPI_NOR_JEDEC_ID_SIZE];
+        uint32_t capacity_bytes;
+        uint32_t page_size;
+        uint32_t erase_size;
+    } spi_nor_info_t;
 
-/**
- * Reset and identify a device, derive capacity from the JEDEC density byte,
- * and enter four-byte address mode when capacity exceeds 16 MiB.
- * The device object must be zero-initialized and remain valid for all calls.
- */
-firmware_status_t SpiNor_Init(spi_nor_t *device, const spi_nor_port_t *port,
-                              const spi_nor_config_t *config);
-firmware_status_t SpiNor_GetInfo(const spi_nor_t *device, spi_nor_info_t *info);
-/* Read accepts arbitrary in-range addresses and splits large bus transfers. */
-firmware_status_t SpiNor_Read(spi_nor_t *device, uint32_t address, void *data, uint32_t size);
-/**
- * Program arbitrary in-range data using page-sized transactions.
- * The caller must erase the destination beforehand; programming can only
- * change erased bits from one to zero.
- */
-firmware_status_t SpiNor_Program(spi_nor_t *device, uint32_t address, const void *data,
-                                 uint32_t size);
+    typedef enum
+    {
+        SPI_NOR_OPERATION_IDLE = 0,
+        SPI_NOR_OPERATION_BUSY,
+        SPI_NOR_OPERATION_SUCCEEDED,
+        SPI_NOR_OPERATION_FAILED
+    } spi_nor_operation_state_t;
 
-/**
- * @brief Start one page-bounded program operation without waiting.
- *
- * @param[in,out] device Initialized device retaining operation state.
- * @param[in] address Destination byte offset.
- * @param[in] data Source copied to the QSPI peripheral before this call returns.
- * @param[in] size Nonzero size that must fit in the current program page.
- *
- * @return FIRMWARE_STATUS_OK when the page-program command is accepted.
- * @return FIRMWARE_STATUS_INVALID_STATE while another operation is busy.
- * @return A range, alignment, or transport failure otherwise.
- */
-firmware_status_t SpiNor_ProgramStart(spi_nor_t *device, uint32_t address, const void *data,
-                                      uint32_t size);
-/* Address and size must both be aligned to info.erase_size. */
-firmware_status_t SpiNor_Erase(spi_nor_t *device, uint32_t address, uint32_t size);
+    typedef struct
+    {
+        spi_nor_operation_state_t state;
+        spi_nor_status_t status;
+    } spi_nor_operation_result_t;
 
-/**
- * @brief Start one erase-unit operation without waiting for completion.
- *
- * @param[in,out] device Initialized device retaining operation state.
- * @param[in] address Erase-aligned byte offset.
- * @param[in] size Must equal the detected erase size.
- *
- * @return FIRMWARE_STATUS_OK when the erase command is accepted.
- * @return FIRMWARE_STATUS_INVALID_STATE while another erase is busy.
- * @return A range or transport failure otherwise.
- */
-firmware_status_t SpiNor_EraseStart(spi_nor_t *device, uint32_t address, uint32_t size);
+    typedef struct
+    {
+        spi_nor_port_t port;
+        spi_nor_info_t info;
+        uint32_t program_timeout_ms;
+        uint32_t erase_timeout_ms;
+        uint32_t operation_started_ms;
+        uint32_t operation_timeout_ms;
+        spi_nor_status_t operation_status;
+        spi_nor_operation_state_t operation_state;
+        uint8_t address_bytes;
+        int initialized;
+    } spi_nor_t;
 
-/** Poll a started erase once without delaying or busy-waiting. */
-firmware_status_t SpiNor_OperationPoll(spi_nor_t *device);
+    spi_nor_status_t SpiNor_Init(spi_nor_t *device, const spi_nor_port_t *port,
+                                 const spi_nor_config_t *config);
+    spi_nor_status_t SpiNor_GetInfo(const spi_nor_t *device, spi_nor_info_t *info);
+    spi_nor_status_t SpiNor_Read(spi_nor_t *device, uint32_t address, void *data, uint32_t size);
 
-/** Return the most recent asynchronous operation state and terminal status. */
-firmware_status_t SpiNor_GetOperationResult(const spi_nor_t *device,
-                                            spi_nor_operation_result_t *result);
+    /** Start one page-bounded, transfer-size-bounded program operation. */
+    spi_nor_status_t SpiNor_ProgramStart(spi_nor_t *device, uint32_t address, const void *data,
+                                         uint32_t size);
+
+    /** Start one 4-KiB sector erase operation. */
+    spi_nor_status_t SpiNor_EraseStart(spi_nor_t *device, uint32_t address, uint32_t size);
+
+    /** Poll the current program or erase operation once without blocking. */
+    spi_nor_status_t SpiNor_OperationPoll(spi_nor_t *device);
+    spi_nor_status_t SpiNor_GetOperationResult(const spi_nor_t *device,
+                                               spi_nor_operation_result_t *result);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
