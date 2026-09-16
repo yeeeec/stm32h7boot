@@ -40,6 +40,11 @@ add_subdirectory(cmake/stm32cubemx)
 add_subdirectory(BSP)
 add_subdirectory(Shared)
 add_subdirectory(Drivers/Devices)
+add_subdirectory(Platform/STM32H7)
+add_subdirectory(Middlewares/Third_Party)
+add_subdirectory(Utilities/Logger)
+add_subdirectory(Utilities/Crypto)
+add_subdirectory(Utilities/Checksum)
 
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -72,4 +77,5 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     firmware_types
     device_drivers
     board_bsp
+    platform_stm32h7
 )
