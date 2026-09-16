@@ -8,7 +8,6 @@ set(BOARD_BSP_SOURCES
     src/bsp_isp_uart.c
 
     src/bsp_qspi_flash.c
-    src/bsp_sd.c
 
     src/bsp_isp_gpio.c
 )
@@ -26,5 +25,5 @@ target_link_libraries(board_bsp PUBLIC firmware_types)
 target_link_libraries(board_bsp PRIVATE stm32cubemx)
 
 target_link_libraries(board_bsp PRIVATE
-    driver_at24
+    device_drivers
 )
