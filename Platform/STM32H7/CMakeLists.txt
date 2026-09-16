@@ -4,6 +4,12 @@ set(PLATFORM_STM32H7_SOURCES
     src/platform_log.c
     src/platform_storage.c
     src/storage_backend_fatfs.c
+    src/platform_storage_facade.c
+    src/platform_flash.c
+    src/platform_hash.c
+    src/platform_boot_control.c
+    src/platform_reset.c
+    src/platform_watchdog.c
 )
 
 add_library(platform_stm32h7 STATIC ${PLATFORM_STM32H7_SOURCES})
@@ -24,6 +30,7 @@ target_link_libraries(platform_stm32h7 PRIVATE
     board_bsp
     stm32cubemx
     firmware_storage_common
+    firmware_crypto
 )
 
 target_link_libraries(platform_stm32h7 PRIVATE fw::segger_rtt)

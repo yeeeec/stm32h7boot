@@ -16,6 +16,9 @@ extern "C"
     firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
                                            update_manifest_t *manifest);
 
+    /* Validate product/target/component policy after parsing. */
+    firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifest);
+
     /* Emit the canonical signing payload with signing.signature excluded. */
     firmware_status_t UpdateManifest_Canonicalize(const update_manifest_t *manifest, char *buffer,
                                                   size_t capacity, size_t *length);

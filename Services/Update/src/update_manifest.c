@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include "crypto/sha256.h"
+#include "firmware/boot_config.h"
 
 /* 解析游标不拥有输入缓冲区，整个解析过程不申请堆内存。 */
 typedef struct
@@ -475,7 +476,10 @@ static int ReadSigning(JsonCursor *cursor, update_manifest_t *manifest)
         if (!Consume(cursor, ','))
             return 0;
     }
-    return (seen & 119U) == 119U;
+    if ((seen & 119U) != 119U)
+        return 0;
+    manifest->has_signing = 1U;
+    return 1;
 }
 
 /** 检查升级包 ID 是否满足安全字符集和长度限制。 */
@@ -509,6 +513,47 @@ int UpdatePackage_IsValidComponentFileName(const char *value)
             return 0;
     }
     return i != 0U && i < UPDATE_COMPONENT_FILE_MAX;
+}
+
+firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifest)
+{
+    size_t i;
+    uint32_t expected = 0U;
+    if (manifest == NULL || strcmp(manifest->product, BOOT_PRODUCT_NAME) != 0 ||
+        strcmp(manifest->hardware, BOOT_HARDWARE_NAME) != 0 || manifest->component_count == 0U)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    for (i = 0U; i < manifest->component_count; ++i)
+    {
+        const update_manifest_component_t *component = &manifest->components[i];
+        const char *file                             = NULL;
+        if (component->size == 0U || strcmp(component->format, "raw-bin-v1") != 0 ||
+            !IsSha256Hex(component->sha256))
+            return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        if (component->mask == 1U)
+        {
+            file = BOOT_APP_FILE;
+            if (component->size > BOOT_APP_MAX_SIZE)
+                return FIRMWARE_STATUS_OUT_OF_RANGE;
+        }
+        else if (component->mask == 2U)
+        {
+            file = BOOT_GUI_FILE;
+            if (component->size > BOOT_GUI_MAX_SIZE)
+                return FIRMWARE_STATUS_OUT_OF_RANGE;
+        }
+        else if (component->mask == 4U)
+        {
+            file = BOOT_THERAPY_FILE;
+            if (component->size > BOOT_THERAPY_MAX_SIZE)
+                return FIRMWARE_STATUS_OUT_OF_RANGE;
+        }
+        else
+            return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        if (strcmp(component->file, file) != 0 || (expected & component->mask) != 0U)
+            return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        expected |= component->mask;
+    }
+    return FIRMWARE_STATUS_OK;
 }
 
 /** 解析完整 manifest 并执行 schema、范围和规范性校验。 */
@@ -576,17 +621,18 @@ firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     SkipSpace(&cursor);
-    if (cursor.position != cursor.length || seen != 63U || manifest->component_count == 0U)
+    if (cursor.position != cursor.length || (seen & 31U) != 31U || manifest->component_count == 0U)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     if (!IsCanonicalAsciiValue(manifest->product, sizeof(manifest->product)) ||
         !IsCanonicalAsciiValue(manifest->hardware, sizeof(manifest->hardware)) ||
-        !IsCanonicalAsciiValue(manifest->algorithm, sizeof(manifest->algorithm)) ||
-        !IsCanonicalAsciiValue(manifest->key_id, sizeof(manifest->key_id)) ||
-        !IsCanonicalAsciiValue(manifest->payload_format, sizeof(manifest->payload_format)) ||
-        !IsCanonicalAsciiValue(manifest->signature_encoding,
-                               sizeof(manifest->signature_encoding)) ||
-        !IsCanonicalAsciiValue(manifest->signature, sizeof(manifest->signature)) ||
-        !IsCanonicalAsciiValue(manifest->created_at, sizeof(manifest->created_at)))
+        (manifest->has_signing != 0U &&
+         (!IsCanonicalAsciiValue(manifest->algorithm, sizeof(manifest->algorithm)) ||
+          !IsCanonicalAsciiValue(manifest->key_id, sizeof(manifest->key_id)) ||
+          !IsCanonicalAsciiValue(manifest->payload_format, sizeof(manifest->payload_format)) ||
+          !IsCanonicalAsciiValue(manifest->signature_encoding,
+                                 sizeof(manifest->signature_encoding)) ||
+          !IsCanonicalAsciiValue(manifest->signature, sizeof(manifest->signature)) ||
+          !IsCanonicalAsciiValue(manifest->created_at, sizeof(manifest->created_at)))))
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     for (size_t i = 0U; i < manifest->component_count; ++i)
     {
@@ -595,7 +641,7 @@ firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
             !IsSha256Hex(manifest->components[i].sha256))
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    return FIRMWARE_STATUS_OK;
+    return UpdateManifest_ValidateTarget(manifest);
 }
 
 /** 按 major/minor/patch/build 字段比较两个版本。 */
@@ -769,17 +815,21 @@ static firmware_status_t WriteCanonical(const update_manifest_t *manifest, Canon
     status = AppendVersion(writer, &manifest->release, 1);
     if (FirmwareStatus_IsError(status))
         return status;
-    APPEND_TEXT(",\"signing\":{\"algorithm\":\"");
-    APPEND_TEXT(manifest->algorithm);
-    APPEND_TEXT("\",\"created_at\":\"");
-    APPEND_TEXT(manifest->created_at);
-    APPEND_TEXT("\",\"format_version\":1,\"key_id\":\"");
-    APPEND_TEXT(manifest->key_id);
-    APPEND_TEXT("\",\"payload_format\":\"");
-    APPEND_TEXT(manifest->payload_format);
-    APPEND_TEXT("\",\"signature_encoding\":\"");
-    APPEND_TEXT(manifest->signature_encoding);
-    APPEND_TEXT("\"},\"target\":{\"hardware\":\"");
+    if (manifest->has_signing != 0U)
+    {
+        APPEND_TEXT(",\"signing\":{\"algorithm\":\"");
+        APPEND_TEXT(manifest->algorithm);
+        APPEND_TEXT("\",\"created_at\":\"");
+        APPEND_TEXT(manifest->created_at);
+        APPEND_TEXT("\",\"format_version\":1,\"key_id\":\"");
+        APPEND_TEXT(manifest->key_id);
+        APPEND_TEXT("\",\"payload_format\":\"");
+        APPEND_TEXT(manifest->payload_format);
+        APPEND_TEXT("\",\"signature_encoding\":\"");
+        APPEND_TEXT(manifest->signature_encoding);
+        APPEND_TEXT("\"}");
+    }
+    APPEND_TEXT(",\"target\":{\"hardware\":\"");
     APPEND_TEXT(manifest->hardware);
     APPEND_TEXT("\",\"minimum_bootloader_version\":");
     status = AppendMinimumBootloaderVersion(writer, manifest);

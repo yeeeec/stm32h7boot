@@ -18,6 +18,9 @@ extern "C"
     firmware_status_t StorageSd_Unmount(void);
     firmware_status_t StorageSd_Mkdir(const char *path);
     firmware_status_t StorageSd_Open(const char *path, storage_open_mode_t mode, uint32_t *handle);
+    firmware_status_t StorageSd_Read(uint32_t handle, uint32_t offset, void *buffer, size_t size,
+                                     size_t *bytes_read);
+    firmware_status_t StorageSd_Stat(const char *path, storage_file_info_t *info);
     firmware_status_t StorageSd_Write(uint32_t handle, const void *buffer, size_t size,
                                       size_t *bytes_written);
     firmware_status_t StorageSd_Sync(uint32_t handle);

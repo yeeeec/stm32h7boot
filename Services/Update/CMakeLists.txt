@@ -1,5 +1,12 @@
 add_library(update STATIC
     src/update_manifest.c
+    src/update_request.c
+    src/version_policy.c
+    src/image_installer.c
+    src/current_manager.c
+    src/app_launcher.c
+    src/update_manager.c
+    src/recovery_manager.c
 )
 
 target_include_directories(update PUBLIC

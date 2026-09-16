@@ -10,5 +10,4 @@ target_include_directories(firmware_crypto PUBLIC
 
 target_link_libraries(firmware_crypto
     PUBLIC firmware_types
-    PRIVATE third_party_mbedcrypto
 )

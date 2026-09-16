@@ -53,9 +53,14 @@ extern "C"
         char signature_encoding[24];
         char signature[UPDATE_SIGNATURE_MAX];
         char created_at[32];
+        uint8_t has_signing;
         update_manifest_component_t components[UPDATE_MANIFEST_MAX_COMPONENTS];
         uint32_t component_count;
     } update_manifest_t;
+
+    /* Names used by the product SRS; aliases keep the C API descriptive while
+     * retaining the existing lower-case project convention. */
+    typedef update_manifest_t FirmwareManifest_t;
 
 #ifdef __cplusplus
 }
