@@ -18,12 +18,10 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "dma.h"
 #include "fatfs.h"
 #include "gpio.h"
 #include "quadspi.h"
 #include "sdmmc.h"
-#include "tim.h"
 #include "usart.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -54,7 +52,6 @@
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
-static void MPU_Config(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -75,17 +72,6 @@ int main(void)
 
     /* USER CODE END 1 */
 
-    /* MPU Configuration--------------------------------------------------------*/
-    MPU_Config();
-
-    /* Enable the CPU Cache */
-
-    /* Enable I-Cache---------------------------------------------------------*/
-    SCB_EnableICache();
-
-    /* Enable D-Cache---------------------------------------------------------*/
-    SCB_EnableDCache();
-
     /* MCU Configuration--------------------------------------------------------*/
 
     /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
@@ -104,12 +90,9 @@ int main(void)
 
     /* Initialize all configured peripherals */
     MX_GPIO_Init();
-    MX_DMA_Init();
-    MX_TIM1_Init();
     MX_QUADSPI_Init();
-    /* SD/FatFs are intentionally lazy.  The fast EEPROM path must not touch
-       removable media; PlatformStorage initializes them only when an UPDATE
-       request is actually pending. */
+    MX_FATFS_Init();
+    MX_SDMMC1_SD_Init();
     MX_USART1_UART_Init();
     MX_USART2_UART_Init();
     /* USER CODE BEGIN 2 */
@@ -191,69 +174,6 @@ void SystemClock_Config(void)
 /* USER CODE BEGIN 4 */
 
 /* USER CODE END 4 */
-
-/* MPU Configuration */
-
-void MPU_Config(void)
-{
-    MPU_Region_InitTypeDef MPU_InitStruct = {0};
-
-    /* Disables the MPU */
-    HAL_MPU_Disable();
-
-    /** Initializes and configures the Region and the memory to be protected
-     */
-    MPU_InitStruct.Enable           = MPU_REGION_ENABLE;
-    MPU_InitStruct.Number           = MPU_REGION_NUMBER0;
-    MPU_InitStruct.BaseAddress      = 0x90000000;
-    MPU_InitStruct.Size             = MPU_REGION_SIZE_16MB;
-    MPU_InitStruct.SubRegionDisable = 0;
-    MPU_InitStruct.TypeExtField     = MPU_TEX_LEVEL0;
-    MPU_InitStruct.AccessPermission = MPU_REGION_FULL_ACCESS;
-    MPU_InitStruct.DisableExec      = MPU_INSTRUCTION_ACCESS_ENABLE;
-    MPU_InitStruct.IsShareable      = MPU_ACCESS_NOT_SHAREABLE;
-    MPU_InitStruct.IsCacheable      = MPU_ACCESS_CACHEABLE;
-    MPU_InitStruct.IsBufferable     = MPU_ACCESS_NOT_BUFFERABLE;
-
-    HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-    /** Initializes and configures the Region and the memory to be protected
-     */
-    MPU_InitStruct.Number           = MPU_REGION_NUMBER1;
-    MPU_InitStruct.BaseAddress      = 0xC0000000;
-    MPU_InitStruct.Size             = MPU_REGION_SIZE_32MB;
-    MPU_InitStruct.SubRegionDisable = 0x0;
-    MPU_InitStruct.DisableExec      = MPU_INSTRUCTION_ACCESS_DISABLE;
-
-    HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-    /** Initializes and configures the Region and the memory to be protected
-     */
-    MPU_InitStruct.Number      = MPU_REGION_NUMBER2;
-    MPU_InitStruct.Size        = MPU_REGION_SIZE_4MB;
-    MPU_InitStruct.IsShareable = MPU_ACCESS_SHAREABLE;
-    MPU_InitStruct.IsCacheable = MPU_ACCESS_NOT_CACHEABLE;
-
-    HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-    /** Initializes and configures the Region and the memory to be protected
-     */
-    MPU_InitStruct.Number      = MPU_REGION_NUMBER3;
-    MPU_InitStruct.BaseAddress = 0x24000000;
-    MPU_InitStruct.Size        = MPU_REGION_SIZE_512KB;
-
-    HAL_MPU_ConfigRegion(&MPU_InitStruct);
-
-    /** Initializes and configures the Region and the memory to be protected
-     */
-    MPU_InitStruct.Number      = MPU_REGION_NUMBER4;
-    MPU_InitStruct.BaseAddress = 0x60000000;
-    MPU_InitStruct.Size        = MPU_REGION_SIZE_64MB;
-
-    HAL_MPU_ConfigRegion(&MPU_InitStruct);
-    /* Enables the MPU */
-    HAL_MPU_Enable(MPU_HFNMI_PRIVDEF);
-}
 
 /**
  * @brief  Period elapsed callback in non blocking mode
