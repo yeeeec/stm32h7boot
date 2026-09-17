@@ -49,15 +49,6 @@ static int IsStrictBase64(const char *data, size_t size)
     return 1;
 }
 
-static firmware_status_t MapVerifyResult(int result)
-{
-    if (result == 0)
-        return FIRMWARE_STATUS_OK;
-    if (result == MBEDTLS_ERR_ECP_VERIFY_FAILED)
-        return FIRMWARE_STATUS_AUTHENTICATION_FAILED;
-    return FIRMWARE_STATUS_INVALID_ARGUMENT;
-}
-
 static int ReadStrictInteger(const uint8_t *signature, size_t size, size_t *position)
 {
     size_t length;
@@ -91,17 +82,16 @@ static int IsStrictDerSignature(const uint8_t *signature, size_t size)
            ReadStrictInteger(signature, size, &position) && position == size;
 }
 
-firmware_status_t
-Crypto_EcdsaP256VerifyDer(const uint8_t public_key[CRYPTO_ECDSA_P256_PUBLIC_KEY_SIZE],
-                          const uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE], const uint8_t *signature,
-                          size_t signature_size)
+int Crypto_EcdsaP256VerifyDer(const uint8_t public_key[CRYPTO_ECDSA_P256_PUBLIC_KEY_SIZE],
+                              const uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE],
+                              const uint8_t *signature, size_t signature_size)
 {
     mbedtls_ecdsa_context context;
     int result;
 
     if ((public_key == NULL) || (digest == NULL) || (signature == NULL) ||
         (public_key[0] != 0x04U) || !IsStrictDerSignature(signature, signature_size))
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        return 1;
 
     mbedtls_ecdsa_init(&context);
     result = mbedtls_ecp_group_load(&context.grp, MBEDTLS_ECP_DP_SECP256R1);
@@ -114,26 +104,25 @@ Crypto_EcdsaP256VerifyDer(const uint8_t public_key[CRYPTO_ECDSA_P256_PUBLIC_KEY_
         result = mbedtls_ecdsa_read_signature(&context, digest, CRYPTO_SHA256_DIGEST_SIZE,
                                               signature, signature_size);
     mbedtls_ecdsa_free(&context);
-    return MapVerifyResult(result);
+    return result;
 }
 
-firmware_status_t
-Crypto_EcdsaP256VerifyBase64Der(const uint8_t public_key[CRYPTO_ECDSA_P256_PUBLIC_KEY_SIZE],
-                                const uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE],
-                                const char *signature, size_t signature_size)
+int Crypto_EcdsaP256VerifyBase64Der(const uint8_t public_key[CRYPTO_ECDSA_P256_PUBLIC_KEY_SIZE],
+                                    const uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE],
+                                    const char *signature, size_t signature_size)
 {
     uint8_t der[CRYPTO_ECDSA_P256_DER_MAX_SIZE];
     size_t der_size = 0U;
-    firmware_status_t status;
+    int status;
 
     if (!IsStrictBase64(signature, signature_size))
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        return 1;
     if ((mbedtls_base64_decode(der, sizeof(der), &der_size, (const unsigned char *) signature,
                                signature_size) != 0) ||
         (der_size == 0U))
     {
         Crypto_SecureZero(der, sizeof(der));
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        return 1;
     }
     status = Crypto_EcdsaP256VerifyDer(public_key, digest, der, der_size);
     Crypto_SecureZero(der, sizeof(der));

@@ -15,12 +15,12 @@ static mbedtls_sha256_context *Native(crypto_sha256_context_t *context)
     return (mbedtls_sha256_context *) (void *) context->native.bytes;
 }
 
-firmware_status_t Crypto_Sha256Init(crypto_sha256_context_t *context)
+int Crypto_Sha256Init(crypto_sha256_context_t *context)
 {
     mbedtls_sha256_context *native;
 
     if (context == NULL)
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        return 1;
     (void) memset(context, 0, sizeof(*context));
     native = Native(context);
     mbedtls_sha256_init(native);
@@ -28,36 +28,32 @@ firmware_status_t Crypto_Sha256Init(crypto_sha256_context_t *context)
     {
         mbedtls_sha256_free(native);
         Crypto_SecureZero(context, sizeof(*context));
-        return FIRMWARE_STATUS_INVALID_STATE;
+        return 2;
     }
     context->state = CRYPTO_SHA256_STATE_ACTIVE;
-    return FIRMWARE_STATUS_OK;
+    return 0;
 }
 
-firmware_status_t Crypto_Sha256Update(crypto_sha256_context_t *context, const uint8_t *data,
-                                      size_t size)
+int Crypto_Sha256Update(crypto_sha256_context_t *context, const uint8_t *data, size_t size)
 {
     if ((context == NULL) || (context->state != CRYPTO_SHA256_STATE_ACTIVE) ||
         ((data == NULL) && (size != 0U)))
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        return 1;
     if (size == 0U)
-        return FIRMWARE_STATUS_OK;
-    return mbedtls_sha256_update_ret(Native(context), data, size) == 0
-               ? FIRMWARE_STATUS_OK
-               : FIRMWARE_STATUS_INVALID_STATE;
+        return 0;
+    return mbedtls_sha256_update_ret(Native(context), data, size) == 0 ? 0 : 2;
 }
 
-firmware_status_t Crypto_Sha256Finish(crypto_sha256_context_t *context,
-                                      uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE])
+int Crypto_Sha256Finish(crypto_sha256_context_t *context, uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE])
 {
     int result;
 
     if ((context == NULL) || (digest == NULL) || (context->state != CRYPTO_SHA256_STATE_ACTIVE))
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        return 1;
     result = mbedtls_sha256_finish_ret(Native(context), digest);
     mbedtls_sha256_free(Native(context));
     Crypto_SecureZero(context, sizeof(*context));
-    return result == 0 ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_INVALID_STATE;
+    return result == 0 ? 0 : 2;
 }
 
 void Crypto_Sha256Abort(crypto_sha256_context_t *context)
@@ -69,18 +65,17 @@ void Crypto_Sha256Abort(crypto_sha256_context_t *context)
     Crypto_SecureZero(context, sizeof(*context));
 }
 
-firmware_status_t Crypto_Sha256(const uint8_t *data, size_t size,
-                                uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE])
+int Crypto_Sha256(const uint8_t *data, size_t size, uint8_t digest[CRYPTO_SHA256_DIGEST_SIZE])
 {
     crypto_sha256_context_t context;
-    firmware_status_t status;
+    int status;
 
     if (((data == NULL) && (size != 0U)) || (digest == NULL))
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        return 1;
     status = Crypto_Sha256Init(&context);
-    if (FirmwareStatus_IsOk(status))
+    if (status != 0)
         status = Crypto_Sha256Update(&context, data, size);
-    if (FirmwareStatus_IsOk(status))
+    if (status != 0)
         return Crypto_Sha256Finish(&context, digest);
     Crypto_Sha256Abort(&context);
     return status;
