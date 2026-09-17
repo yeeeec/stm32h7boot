@@ -1,6 +1,7 @@
 #include "update/image_installer.h"
 
 #include <string.h>
+#include <limits.h>
 
 #include "crypto/sha256.h"
 
@@ -45,7 +46,18 @@ ImageInstallResult_t ImageInstaller_InstallWithPort(const ImageInstallPlan_t *pl
         (void) port->source_close(port->context, handle);
         return IMAGE_INSTALL_SIZE;
     }
-    status = port->target_erase(port->context, plan->target_address, plan->expected_size);
+    {
+        const uint32_t erase_size = (plan->expected_size + (IMAGE_INSTALLER_BLOCK_SIZE - 1U)) &
+                                    ~(IMAGE_INSTALLER_BLOCK_SIZE - 1U);
+        if (erase_size < plan->expected_size ||
+            erase_size > plan->target_max_size ||
+            plan->target_address > UINT32_MAX - erase_size)
+        {
+            (void) port->source_close(port->context, handle);
+            return IMAGE_INSTALL_SIZE;
+        }
+        status = port->target_erase(port->context, plan->target_address, erase_size);
+    }
     if (FirmwareStatus_IsError(status))
     {
         (void) port->source_close(port->context, handle);

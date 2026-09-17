@@ -12,8 +12,6 @@ extern "C"
 {
 #endif
 
-    typedef storage_boot_update_request_t UpdateRequest_t;
-
     /* Parse the bounded JSON request.  The parser accepts no unknown or duplicate
      * fields and never allocates memory. */
     firmware_status_t UpdateRequest_Parse(const uint8_t *data, size_t size,

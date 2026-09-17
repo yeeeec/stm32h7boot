@@ -1,6 +1,8 @@
 #include "update/version_policy.h"
 #include "update/update_manifest.h"
 
+static int s_enable_version_policy = 0;
+
 update_version_decision_t VersionPolicy_Check(const update_version_t *update,
                                               const update_version_t *current, int current_exists)
 {
@@ -12,6 +14,12 @@ update_version_decision_t VersionPolicy_Check(const update_version_t *update,
         return UPDATE_VERSION_REJECT;
     return UpdateVersion_Compare(update, current) >= 0 ? UPDATE_VERSION_ALLOW
                                                        : UPDATE_VERSION_REJECT;
+}
+
+firmware_status_t VersionPolicy_SetEnable(int enable)
+{
+    s_enable_version_policy = enable;
+    return FIRMWARE_STATUS_OK;
 }
 
 firmware_status_t VersionPolicy_ValidateMinimumBootloader(const update_version_t *required,

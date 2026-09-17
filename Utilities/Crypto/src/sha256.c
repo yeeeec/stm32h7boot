@@ -73,10 +73,11 @@ int Crypto_Sha256(const uint8_t *data, size_t size, uint8_t digest[CRYPTO_SHA256
     if (((data == NULL) && (size != 0U)) || (digest == NULL))
         return 1;
     status = Crypto_Sha256Init(&context);
-    if (status != 0)
+    if (status == 0)
         status = Crypto_Sha256Update(&context, data, size);
-    if (status != 0)
-        return Crypto_Sha256Finish(&context, digest);
-    Crypto_Sha256Abort(&context);
+    if (status == 0)
+        status = Crypto_Sha256Finish(&context, digest);
+    else
+        Crypto_Sha256Abort(&context);
     return status;
 }

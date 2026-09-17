@@ -142,19 +142,12 @@ firmware_status_t PlatformBootControl_Init(void)
                                   .set_write_enabled = NULL};
     const at24_config_t config = {.device_address_7bit = PLATFORM_BOOT_CONTROL_I2C_ADDRESS,
                                   .write_timeout_ms    = PLATFORM_BOOT_CONTROL_WRITE_TIMEOUT};
-    // firmware_status_t status;
     at24_status_t driver_status;
 
     if (s_initialized != 0U)
     {
         return FIRMWARE_STATUS_OK;
     }
-
-    // status = BspI2c_Init();
-    // if (status != FIRMWARE_STATUS_OK)
-    // {
-    //     return status;
-    // }
 
     driver_status = At24_Init(&s_eeprom, &port, &config);
     if (driver_status != AT24_STATUS_OK)
@@ -171,7 +164,7 @@ firmware_status_t PlatformBootControl_Init(void)
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t PlatformBootControl_Read(platform_boot_control_t *control)
+firmware_status_t PlatformBootControl_Read(BootControl_t *control)
 {
     at24_status_t status;
     uint32_t expected_crc;
@@ -192,12 +185,11 @@ firmware_status_t PlatformBootControl_Read(platform_boot_control_t *control)
         return MapAt24Status(status);
     }
 
-    expected_crc = CalculateCrc32(control, offsetof(platform_boot_control_t, crc32));
+    expected_crc = CalculateCrc32(control, offsetof(BootControl_t, check));
     if ((control->magic != PLATFORM_BOOT_CONTROL_MAGIC) ||
         (control->format_version != PLATFORM_BOOT_CONTROL_FORMAT_VERSION) ||
-        ((control->request != (uint32_t) PLATFORM_BOOT_REQUEST_NONE) &&
-         (control->request != (uint32_t) PLATFORM_BOOT_REQUEST_UPDATE)) ||
-        (control->crc32 != expected_crc))
+        ((control->request != BOOT_REQUEST_NONE) && (control->request != BOOT_REQUEST_UPDATE)) ||
+        (control->check != expected_crc))
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
@@ -205,9 +197,9 @@ firmware_status_t PlatformBootControl_Read(platform_boot_control_t *control)
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t PlatformBootControl_Write(const platform_boot_control_t *control)
+firmware_status_t PlatformBootControl_Write(const BootControl_t *control)
 {
-    platform_boot_control_t stored;
+    BootControl_t stored;
     at24_status_t status;
 
     if (control == NULL)
@@ -218,8 +210,7 @@ firmware_status_t PlatformBootControl_Write(const platform_boot_control_t *contr
     {
         return FIRMWARE_STATUS_INVALID_STATE;
     }
-    if ((control->request != (uint32_t) PLATFORM_BOOT_REQUEST_NONE) &&
-        (control->request != (uint32_t) PLATFORM_BOOT_REQUEST_UPDATE))
+    if ((control->request != BOOT_REQUEST_NONE) && (control->request != BOOT_REQUEST_UPDATE))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
@@ -227,7 +218,7 @@ firmware_status_t PlatformBootControl_Write(const platform_boot_control_t *contr
     stored                = *control;
     stored.magic          = PLATFORM_BOOT_CONTROL_MAGIC;
     stored.format_version = PLATFORM_BOOT_CONTROL_FORMAT_VERSION;
-    stored.crc32          = CalculateCrc32(&stored, offsetof(platform_boot_control_t, crc32));
+    stored.check          = CalculateCrc32(&stored, offsetof(BootControl_t, check));
 
     status = At24_WritePageStart(&s_eeprom, PLATFORM_BOOT_CONTROL_EEPROM_OFFSET, &stored,
                                  (uint32_t) sizeof(stored));
@@ -240,8 +231,8 @@ firmware_status_t PlatformBootControl_Write(const platform_boot_control_t *contr
 
 firmware_status_t PlatformBootControl_Clear(void)
 {
-    platform_boot_control_t control = {0};
+    BootControl_t control = {0};
 
-    control.request = (uint32_t) PLATFORM_BOOT_REQUEST_NONE;
+    control.request = BOOT_REQUEST_NONE;
     return PlatformBootControl_Write(&control);
 }

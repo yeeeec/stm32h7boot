@@ -2,6 +2,7 @@
 
 #include <limits.h>
 #include <stddef.h>
+#include <stdio.h>
 
 #include "fatfs.h"
 #include "ff.h"
@@ -218,6 +219,30 @@ firmware_status_t PlatformStorage_OpenRead(const char *path, platform_file_handl
     return FIRMWARE_STATUS_BUSY;
 }
 
+firmware_status_t PlatformStorage_OpenWrite(const char *path, platform_file_handle_t *handle)
+{
+    uint32_t i;
+    FRESULT result;
+
+    if ((path == NULL) || (handle == NULL))
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    if (s_mounted == 0U)
+        return FIRMWARE_STATUS_INVALID_STATE;
+    for (i = 0U; i < PLATFORM_STORAGE_FILE_COUNT; ++i)
+    {
+        if (s_files[i].used == 0U)
+        {
+            result = f_open(&s_files[i].file, path, FA_WRITE | FA_CREATE_ALWAYS);
+            if (result != FR_OK)
+                return MapFatFsStatus(result);
+            s_files[i].used = 1U;
+            *handle         = i + 1U;
+            return FIRMWARE_STATUS_OK;
+        }
+    }
+    return FIRMWARE_STATUS_BUSY;
+}
+
 firmware_status_t PlatformStorage_Read(platform_file_handle_t handle, void *buffer, size_t size,
                                        size_t *bytes_read)
 {
@@ -235,6 +260,38 @@ firmware_status_t PlatformStorage_Read(platform_file_handle_t handle, void *buff
     result       = f_read(&slot->file, buffer, request_size, &actual_size);
     *bytes_read  = (size_t) actual_size;
     return MapFatFsStatus(result);
+}
+
+firmware_status_t PlatformStorage_Seek(platform_file_handle_t handle, uint32_t offset)
+{
+    file_slot_t *slot = GetFileSlot(handle);
+    if (slot == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    return MapFatFsStatus(f_lseek(&slot->file, (FSIZE_t) offset));
+}
+
+firmware_status_t PlatformStorage_Write(platform_file_handle_t handle, const void *buffer,
+                                        size_t size, size_t *bytes_written)
+{
+    file_slot_t *slot = GetFileSlot(handle);
+    UINT request_size;
+    UINT actual_size = 0U;
+    FRESULT result;
+
+    if ((slot == NULL) || (buffer == NULL) || (bytes_written == NULL) || (size == 0U))
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    request_size   = (size > (size_t) UINT_MAX) ? UINT_MAX : (UINT) size;
+    result         = f_write(&slot->file, buffer, request_size, &actual_size);
+    *bytes_written = (size_t) actual_size;
+    return MapFatFsStatus(result);
+}
+
+firmware_status_t PlatformStorage_Sync(platform_file_handle_t handle)
+{
+    file_slot_t *slot = GetFileSlot(handle);
+    if (slot == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    return MapFatFsStatus(f_sync(&slot->file));
 }
 
 firmware_status_t PlatformStorage_Close(platform_file_handle_t handle)
@@ -279,6 +336,78 @@ firmware_status_t PlatformStorage_Stat(const char *path, platform_file_info_t *i
     info->size         = (uint32_t) file_info.fsize;
     info->is_directory = ((file_info.fattrib & AM_DIR) != 0U) ? 1U : 0U;
     return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t PlatformStorage_Mkdir(const char *path)
+{
+    if ((path == NULL) || (s_mounted == 0U))
+        return (path == NULL) ? FIRMWARE_STATUS_INVALID_ARGUMENT : FIRMWARE_STATUS_INVALID_STATE;
+    return MapFatFsStatus(f_mkdir(path));
+}
+
+firmware_status_t PlatformStorage_Remove(const char *path)
+{
+    if ((path == NULL) || (s_mounted == 0U))
+        return (path == NULL) ? FIRMWARE_STATUS_INVALID_ARGUMENT : FIRMWARE_STATUS_INVALID_STATE;
+    return MapFatFsStatus(f_unlink(path));
+}
+
+firmware_status_t PlatformStorage_Rename(const char *old_path, const char *new_path)
+{
+    if ((old_path == NULL) || (new_path == NULL))
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    if (s_mounted == 0U)
+        return FIRMWARE_STATUS_INVALID_STATE;
+    return MapFatFsStatus(f_rename(old_path, new_path));
+}
+
+firmware_status_t PlatformStorage_RemoveTree(const char *path)
+{
+    platform_dir_handle_t directory;
+    platform_dir_entry_t entry;
+    char child[PLATFORM_STORAGE_NAME_MAX + 96U];
+    firmware_status_t status;
+
+    if (path == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    status = PlatformStorage_DirOpen(path, &directory);
+    if (status == FIRMWARE_STATUS_NOT_FOUND)
+        return FIRMWARE_STATUS_OK;
+    if (FirmwareStatus_IsError(status))
+        return status;
+    for (;;)
+    {
+        status = PlatformStorage_DirRead(directory, &entry);
+        if (status == FIRMWARE_STATUS_NOT_FOUND)
+            break;
+        if (FirmwareStatus_IsError(status))
+        {
+            (void) PlatformStorage_DirClose(directory);
+            return status;
+        }
+        if ((entry.name[0] == '.') &&
+            ((entry.name[1] == '\0') || ((entry.name[1] == '.') && (entry.name[2] == '\0'))))
+            continue;
+        {
+            int length = snprintf(child, sizeof(child), "%s/%s", path, entry.name);
+            if (length <= 0 || (size_t) length >= sizeof(child))
+            {
+                (void) PlatformStorage_DirClose(directory);
+                return FIRMWARE_STATUS_BUFFER_TOO_SMALL;
+            }
+        }
+        status =
+            entry.is_directory ? PlatformStorage_RemoveTree(child) : PlatformStorage_Remove(child);
+        if (FirmwareStatus_IsError(status))
+        {
+            (void) PlatformStorage_DirClose(directory);
+            return status;
+        }
+    }
+    status = PlatformStorage_DirClose(directory);
+    if (FirmwareStatus_IsError(status))
+        return status;
+    return PlatformStorage_Remove(path);
 }
 
 firmware_status_t PlatformStorage_DirOpen(const char *path, platform_dir_handle_t *handle)

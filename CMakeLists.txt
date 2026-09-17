@@ -45,6 +45,8 @@ add_subdirectory(Middlewares/Third_Party)
 add_subdirectory(Utilities/Logger)
 add_subdirectory(Utilities/Crypto)
 add_subdirectory(Utilities/Checksum)
+add_subdirectory(Services)
+add_subdirectory(Application)
 
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -74,9 +76,5 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
 
     # Add user defined libraries
-    firmware_types
-    device_drivers
-    board_bsp
-    platform_stm32h7
-    firmware_logger
+    firmware_application
 )

@@ -35,12 +35,26 @@ extern "C"
 
     firmware_status_t PlatformStorage_OpenRead(const char *path, platform_file_handle_t *handle);
 
+    firmware_status_t PlatformStorage_OpenWrite(const char *path, platform_file_handle_t *handle);
+
     firmware_status_t PlatformStorage_Read(platform_file_handle_t handle, void *buffer, size_t size,
                                            size_t *bytes_read);
+
+    firmware_status_t PlatformStorage_Seek(platform_file_handle_t handle, uint32_t offset);
+
+    firmware_status_t PlatformStorage_Write(platform_file_handle_t handle, const void *buffer,
+                                            size_t size, size_t *bytes_written);
+
+    firmware_status_t PlatformStorage_Sync(platform_file_handle_t handle);
 
     firmware_status_t PlatformStorage_Close(platform_file_handle_t handle);
 
     firmware_status_t PlatformStorage_Stat(const char *path, platform_file_info_t *info);
+
+    firmware_status_t PlatformStorage_Mkdir(const char *path);
+    firmware_status_t PlatformStorage_Remove(const char *path);
+    firmware_status_t PlatformStorage_Rename(const char *old_path, const char *new_path);
+    firmware_status_t PlatformStorage_RemoveTree(const char *path);
 
     firmware_status_t PlatformStorage_DirOpen(const char *path, platform_dir_handle_t *handle);
 

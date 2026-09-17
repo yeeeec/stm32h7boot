@@ -10,6 +10,15 @@ static boot_manager_result_t fatal(const boot_manager_io_t *io, BootError_t erro
     return BOOT_MANAGER_FATAL;
 }
 
+static boot_manager_result_t launch_existing(const boot_manager_io_t *io, BootError_t error)
+{
+    firmware_status_t status = io->storage_unmount(io->context);
+    if (FirmwareStatus_IsError(status))
+        return fatal(io, BOOT_ERR_STORAGE);
+    status = io->launch_app(io->context);
+    return FirmwareStatus_IsOk(status) ? BOOT_MANAGER_FAST_BOOT : fatal(io, error);
+}
+
 boot_manager_result_t BootManager_Run(const boot_manager_io_t *io)
 {
     BootControl_t control;
@@ -18,8 +27,8 @@ boot_manager_result_t BootManager_Run(const boot_manager_io_t *io)
     int runtime_modified = 0;
 
     if (io == NULL || io->read_boot_control == NULL || io->clear_boot_control == NULL ||
-        io->launch_app == NULL || io->storage_init_mount == NULL || io->load_request == NULL ||
-        io->perform_update == NULL)
+        io->launch_app == NULL || io->storage_init_mount == NULL || io->storage_unmount == NULL ||
+        io->load_request == NULL || io->perform_update == NULL)
         return BOOT_MANAGER_FATAL;
 
 #if BOOT_FAST_UPDATE_CHECK_ENABLE
@@ -47,14 +56,12 @@ boot_manager_result_t BootManager_Run(const boot_manager_io_t *io)
     if (status == FIRMWARE_STATUS_NOT_FOUND)
     {
         (void) io->clear_boot_control(io->context);
-        status = io->launch_app(io->context);
-        return FirmwareStatus_IsOk(status) ? BOOT_MANAGER_FAST_BOOT : fatal(io, BOOT_ERR_LAUNCH);
+        return launch_existing(io, BOOT_ERR_LAUNCH);
     }
     if (FirmwareStatus_IsError(status) || FirmwareStatus_IsError(UpdateRequest_Validate(&request)))
     {
         (void) io->clear_boot_control(io->context);
-        status = io->launch_app(io->context);
-        return FirmwareStatus_IsOk(status) ? BOOT_MANAGER_FAST_BOOT : fatal(io, BOOT_ERR_REQUEST);
+        return launch_existing(io, BOOT_ERR_REQUEST);
     }
 
     status = io->perform_update(io->context, &request, &runtime_modified);
@@ -74,8 +81,7 @@ boot_manager_result_t BootManager_Run(const boot_manager_io_t *io)
         /* Pre-install failure: the existing Runtime is untouched and may be
          * started after cancelling this request. */
         (void) io->clear_boot_control(io->context);
-        status = io->launch_app(io->context);
-        return FirmwareStatus_IsOk(status) ? BOOT_MANAGER_FAST_BOOT : fatal(io, BOOT_ERR_LAUNCH);
+        return launch_existing(io, BOOT_ERR_LAUNCH);
     }
     /* Runtime was modified (or no recovery source exists): do not jump into a
      * potentially corrupt image.  Request and EEPROM remain pending. */

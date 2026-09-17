@@ -2,8 +2,8 @@
 #define FIRMWARE_UPDATE_MANAGER_H
 
 #include "firmware/status.h"
-#include "ports/storage_types.h"
 #include "update/update_manifest.h"
+#include "update/update_request.h"
 
 #ifdef __cplusplus
 extern "C"

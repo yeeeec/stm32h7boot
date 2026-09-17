@@ -25,6 +25,7 @@ extern "C"
         firmware_status_t (*read_boot_control)(void *context, BootControl_t *control);
         firmware_status_t (*clear_boot_control)(void *context);
         firmware_status_t (*storage_init_mount)(void *context);
+        firmware_status_t (*storage_unmount)(void *context);
         firmware_status_t (*load_request)(void *context, storage_boot_update_request_t *request);
         firmware_status_t (*perform_update)(void *context,
                                             const storage_boot_update_request_t *request,

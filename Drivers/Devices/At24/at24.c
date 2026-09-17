@@ -68,7 +68,7 @@ at24_status_t At24_Probe(at24_t *device)
         return AT24_STATUS_INVALID_STATE;
     }
     ready = device->port.probe_ready(device->port.context, device->device_address_7bit);
-    return (ready != 0) ? AT24_STATUS_OK : AT24_STATUS_IO_ERROR;
+    return (ready == 0) ? AT24_STATUS_OK : AT24_STATUS_IO_ERROR;
 }
 
 at24_status_t At24_Read(at24_t *device, uint32_t address, void *data, uint32_t size)
@@ -139,7 +139,7 @@ at24_status_t At24_OperationPoll(at24_t *device)
     }
 
     ready = device->port.probe_ready(device->port.context, device->device_address_7bit);
-    if (ready != 0)
+    if (ready == 0)
     {
         status = SetWriteEnabled(device, 0);
         if (status != AT24_STATUS_OK)

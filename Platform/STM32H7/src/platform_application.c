@@ -11,10 +11,10 @@ typedef void (*application_entry_t)(void);
 
 static int IsValidStackPointer(uint32_t stack_pointer)
 {
-    const int in_dtcm     = (stack_pointer >= 0x20000000UL) && (stack_pointer < 0x20020000UL);
-    const int in_axi_sram = (stack_pointer >= 0x24000000UL) && (stack_pointer < 0x24080000UL);
-    const int in_d2_sram  = (stack_pointer >= 0x30000000UL) && (stack_pointer < 0x30048000UL);
-    const int in_sram4    = (stack_pointer >= 0x38000000UL) && (stack_pointer < 0x38010000UL);
+    const int in_dtcm     = (stack_pointer >= 0x20000000UL) && (stack_pointer <= 0x20020000UL);
+    const int in_axi_sram = (stack_pointer >= 0x24000000UL) && (stack_pointer <= 0x24080000UL);
+    const int in_d2_sram  = (stack_pointer >= 0x30000000UL) && (stack_pointer <= 0x30048000UL);
+    const int in_sram4    = (stack_pointer >= 0x38000000UL) && (stack_pointer <= 0x38010000UL);
 
     return (((stack_pointer & 0x7U) == 0U) && (in_dtcm || in_axi_sram || in_d2_sram || in_sram4));
 }

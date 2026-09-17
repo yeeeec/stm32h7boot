@@ -3,14 +3,17 @@
 #include "main.h"
 
 #ifndef PLATFORM_WATCHDOG_ENABLE
-#define PLATFORM_WATCHDOG_ENABLE 1
+#define PLATFORM_WATCHDOG_ENABLE 0
 #endif
 
 #if PLATFORM_WATCHDOG_ENABLE
 #include "iwdg.h"
 #endif
 
+#if PLATFORM_WATCHDOG_ENABLE
 static uint8_t s_watchdog_initialized;
+#else
+#endif
 
 uint32_t PlatformSystem_GetMs(void)
 {
@@ -32,7 +35,7 @@ firmware_status_t PlatformSystem_WatchdogInit(void)
     }
     return FIRMWARE_STATUS_OK;
 #else
-    return FIRMWARE_STATUS_NOT_SUPPORTED;
+    return FIRMWARE_STATUS_OK;
 #endif
 }
 
