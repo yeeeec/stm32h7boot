@@ -14,4 +14,5 @@ target_link_libraries(firmware_application PUBLIC
     update
     platform_stm32h7
     firmware_crypto
+    firmware_logger
 )

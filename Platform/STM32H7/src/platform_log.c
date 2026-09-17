@@ -60,10 +60,9 @@ firmware_status_t Platform_SetLogPort(log_output_kind_t kind)
         s_logging_port.context = NULL;
         s_logging_port.write   = UartWrite;
         s_logging_port.now_ms  = LogNowMs;
-        return FIRMWARE_STATUS_OK;
     }
 
-    if (kind == LOG_OUTPUT_RTT)
+    else if (kind == LOG_OUTPUT_RTT)
     {
         if (s_rtt_initialized == 0U)
         {
@@ -73,9 +72,11 @@ firmware_status_t Platform_SetLogPort(log_output_kind_t kind)
         s_logging_port.context = NULL;
         s_logging_port.write   = RttWrite;
         s_logging_port.now_ms  = LogNowMs;
-        return FIRMWARE_STATUS_OK;
+    }
+    else
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     Logging_SetOutputPort(&s_logging_port);
-
-    return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    return FIRMWARE_STATUS_OK;
 }

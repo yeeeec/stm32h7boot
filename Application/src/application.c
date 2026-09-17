@@ -19,6 +19,7 @@
 #include "update/update_manager.h"
 #include "update/update_manifest.h"
 #include "update/update_request.h"
+#include "logging.h"
 
 #define APPLICATION_FILE_BUFFER_SIZE UPDATE_MANIFEST_MAX_SIZE
 
@@ -579,6 +580,7 @@ firmware_status_t Application_Run(void)
     if (s_initialized == 0U)
         return FIRMWARE_STATUS_INVALID_STATE;
     {
+        LOG_DEBUG("bootloader", "enter bootmanager_run");
         boot_manager_result_t result = BootManager_Run(&io);
         if (result == BOOT_MANAGER_UPDATED || result == BOOT_MANAGER_RECOVERED)
         {

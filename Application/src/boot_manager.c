@@ -2,6 +2,7 @@
 
 #include "firmware/boot_config.h"
 #include "update/update_request.h"
+#include "logging.h"
 
 static boot_manager_result_t fatal(const boot_manager_io_t *io, BootError_t error)
 {
@@ -44,6 +45,7 @@ boot_manager_result_t BootManager_Run(const boot_manager_io_t *io)
     }
     if (control.request == BOOT_REQUEST_NONE)
     {
+        LOG_DEBUG("bootloader", "enter jump");
         status = io->launch_app(io->context);
         return FirmwareStatus_IsOk(status) ? BOOT_MANAGER_FAST_BOOT : fatal(io, BOOT_ERR_LAUNCH);
     }
