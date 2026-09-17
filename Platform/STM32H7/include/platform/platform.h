@@ -4,11 +4,12 @@
 #include "firmware/status.h"
 
 #ifdef __cplusplus
-extern "C" {
+extern "C"
+{
 #endif
 
-/* Initialize only the always-needed Platform bindings. */
-firmware_status_t Platform_Init(void);
+    /* Initialize only the always-needed Platform bindings. */
+    firmware_status_t Platform_Init(void);
 
 #ifdef __cplusplus
 }

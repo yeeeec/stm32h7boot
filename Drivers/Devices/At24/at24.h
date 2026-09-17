@@ -32,8 +32,7 @@ extern "C"
     typedef at24_status_t (*at24_write_fn)(void *context, uint8_t device_address_7bit,
                                            uint16_t memory_address, const uint8_t *data,
                                            uint32_t size);
-    typedef at24_status_t (*at24_probe_ready_fn)(void *context, uint8_t device_address_7bit,
-                                                 int *ready);
+    typedef at24_status_t (*at24_probe_ready_fn)(void *context, uint8_t device_address_7bit);
     typedef uint32_t (*at24_now_ms_fn)(void *context);
     typedef at24_status_t (*at24_set_write_enabled_fn)(void *context, int enabled);
 

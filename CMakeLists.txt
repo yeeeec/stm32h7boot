@@ -78,4 +78,5 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     device_drivers
     board_bsp
     platform_stm32h7
+    firmware_logger
 )

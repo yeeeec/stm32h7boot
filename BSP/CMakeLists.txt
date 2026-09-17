@@ -2,7 +2,6 @@ set(BOARD_BSP_SOURCES
     src/bsp.c
 
     src/bsp_i2c.c
-    src/bsp_eeprom.c
 
     src/bsp_log_uart.c
     src/bsp_isp_uart.c

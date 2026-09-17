@@ -3,7 +3,7 @@
 #include <stddef.h>
 
 #include "main.h"
-#include "platform_flash.h"
+#include "platform/platform_flash.h"
 
 #define PLATFORM_APPLICATION_VECTOR_ALIGNMENT 128U
 

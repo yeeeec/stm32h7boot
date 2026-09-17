@@ -21,31 +21,14 @@
 static int logging_initialized;
 static log_output_port_t logging_port;
 
-firmware_status_t Logging_Init(const log_output_port_t *port)
+int Logging_SetOutputPort(const log_output_port_t *port)
 {
     if ((port == NULL) || (port->write == NULL) || (port->now_ms == NULL))
-    {
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    }
-    if (logging_initialized != 0)
-    {
-        return FIRMWARE_STATUS_INVALID_STATE;
-    }
-
-    logging_port        = *port;
+        return 1;
     logging_initialized = 1;
-    return FIRMWARE_STATUS_OK;
-}
-
-firmware_status_t Logging_SetOutputPort(const log_output_port_t *port)
-{
-    if ((port == NULL) || (port->write == NULL) || (port->now_ms == NULL))
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    if (logging_initialized == 0)
-        return FIRMWARE_STATUS_INVALID_STATE;
 
     logging_port = *port;
-    return FIRMWARE_STATUS_OK;
+    return 0;
 }
 
 #if FIRMWARE_LOG_ENABLE

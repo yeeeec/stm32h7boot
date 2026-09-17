@@ -40,3 +40,5 @@ SpaceBeforeParens: ControlStatements
 IndentCaseLabels: true
 # 保持空行（最多连续 2 个空行）
 MaxEmptyLinesToKeep: 2
+# 关闭 #include 自动排序
+SortIncludes: Never

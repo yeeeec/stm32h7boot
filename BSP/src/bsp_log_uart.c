@@ -24,10 +24,8 @@ static firmware_status_t ConvertHalStatus(HAL_StatusTypeDef status)
     return FIRMWARE_STATUS_IO_ERROR;
 }
 
-firmware_status_t BspLogUart_Write(void *context, const uint8_t *data, size_t size)
+firmware_status_t BspLogUart_Write(const uint8_t *data, size_t size)
 {
-    (void) context;
-
     if ((data == NULL) || (size == 0U))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;

@@ -55,20 +55,20 @@ static at24_status_t EepromRead(void *context, uint8_t device_address_7bit, uint
                                 uint8_t *data, uint32_t size)
 {
     (void) context;
-    return MapFirmwareToAt24(BspI2c_ReadMemory(device_address_7bit, memory_address, data, size));
+    return MapFirmwareToAt24(BspI2c_Read(device_address_7bit, memory_address, data, size));
 }
 
 static at24_status_t EepromWrite(void *context, uint8_t device_address_7bit,
                                  uint16_t memory_address, const uint8_t *data, uint32_t size)
 {
     (void) context;
-    return MapFirmwareToAt24(BspI2c_WriteMemory(device_address_7bit, memory_address, data, size));
+    return MapFirmwareToAt24(BspI2c_Write(device_address_7bit, memory_address, data, size));
 }
 
-static at24_status_t EepromProbe(void *context, uint8_t device_address_7bit, int *ready)
+static at24_status_t EepromProbe(void *context, uint8_t device_address_7bit)
 {
     (void) context;
-    return MapFirmwareToAt24(BspI2c_Probe(device_address_7bit, ready));
+    return MapFirmwareToAt24(BspI2c_IsReady(device_address_7bit));
 }
 
 static uint32_t NowMs(void *context)
@@ -142,7 +142,7 @@ firmware_status_t PlatformBootControl_Init(void)
                                   .set_write_enabled = NULL};
     const at24_config_t config = {.device_address_7bit = PLATFORM_BOOT_CONTROL_I2C_ADDRESS,
                                   .write_timeout_ms    = PLATFORM_BOOT_CONTROL_WRITE_TIMEOUT};
-    firmware_status_t status;
+    // firmware_status_t status;
     at24_status_t driver_status;
 
     if (s_initialized != 0U)
@@ -150,11 +150,11 @@ firmware_status_t PlatformBootControl_Init(void)
         return FIRMWARE_STATUS_OK;
     }
 
-    status = BspI2c_Init();
-    if (status != FIRMWARE_STATUS_OK)
-    {
-        return status;
-    }
+    // status = BspI2c_Init();
+    // if (status != FIRMWARE_STATUS_OK)
+    // {
+    //     return status;
+    // }
 
     driver_status = At24_Init(&s_eeprom, &port, &config);
     if (driver_status != AT24_STATUS_OK)

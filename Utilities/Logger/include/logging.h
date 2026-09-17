@@ -11,9 +11,6 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "firmware/status.h"
-#include "ports/log_output.h"
-
 #ifndef FIRMWARE_LOG_ENABLE
 #define FIRMWARE_LOG_ENABLE 1
 #endif
@@ -36,11 +33,18 @@ typedef enum
     LOGGING_LEVEL_DEBUG = FIRMWARE_LOG_LEVEL_DEBUG
 } logging_level_t;
 
-/** Initialize logging with its required output and time capabilities. */
-firmware_status_t Logging_Init(const log_output_port_t *port);
+typedef int (*log_output_write_fn)(void *context, const uint8_t *data, size_t size);
+typedef uint32_t (*log_output_now_ms_fn)(void *context);
+
+typedef struct
+{
+    void *context;
+    log_output_write_fn write;
+    log_output_now_ms_fn now_ms;
+} log_output_port_t;
 
 /** Replace the selected output after initialization. The caller serializes access. */
-firmware_status_t Logging_SetOutputPort(const log_output_port_t *port);
+int Logging_SetOutputPort(const log_output_port_t *port);
 
 #if defined(__GNUC__) || defined(__clang__)
 #define LOGGING_PRINTF_FORMAT(format_index, argument_index)                                        \

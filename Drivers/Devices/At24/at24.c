@@ -58,7 +58,6 @@ at24_status_t At24_Init(at24_t *device, const at24_port_t *port, const at24_conf
 at24_status_t At24_Probe(at24_t *device)
 {
     int ready;
-    at24_status_t status;
 
     if (device == NULL)
     {
@@ -68,11 +67,7 @@ at24_status_t At24_Probe(at24_t *device)
     {
         return AT24_STATUS_INVALID_STATE;
     }
-    status = device->port.probe_ready(device->port.context, device->device_address_7bit, &ready);
-    if (status != AT24_STATUS_OK)
-    {
-        return status;
-    }
+    ready = device->port.probe_ready(device->port.context, device->device_address_7bit);
     return (ready != 0) ? AT24_STATUS_OK : AT24_STATUS_IO_ERROR;
 }
 
@@ -143,11 +138,7 @@ at24_status_t At24_OperationPoll(at24_t *device)
         return AT24_STATUS_OK;
     }
 
-    status = device->port.probe_ready(device->port.context, device->device_address_7bit, &ready);
-    if (status != AT24_STATUS_OK)
-    {
-        return FinishFailure(device, status);
-    }
+    ready = device->port.probe_ready(device->port.context, device->device_address_7bit);
     if (ready != 0)
     {
         status = SetWriteEnabled(device, 0);

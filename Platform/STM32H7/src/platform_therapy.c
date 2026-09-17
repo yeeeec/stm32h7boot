@@ -92,15 +92,17 @@ static stm32h743_rom_boot_status_t Receive(void *context, uint8_t *data, uint32_
 static stm32h743_rom_boot_status_t SetBoot0(void *context, int high)
 {
     (void) context;
-    return (BspIspGpio_SetBoot0(high) == BSP_ISP_GPIO_OK) ? STM32H743_ROM_BOOT_STATUS_OK
-                                                          : STM32H743_ROM_BOOT_STATUS_INVALID_STATE;
+    return (BspIspGpio_SetBoot0(high) == FIRMWARE_STATUS_OK)
+               ? STM32H743_ROM_BOOT_STATUS_OK
+               : STM32H743_ROM_BOOT_STATUS_INVALID_STATE;
 }
 
 static stm32h743_rom_boot_status_t ResetTarget(void *context)
 {
     (void) context;
-    return (BspIspGpio_ResetTarget() == BSP_ISP_GPIO_OK) ? STM32H743_ROM_BOOT_STATUS_OK
-                                                         : STM32H743_ROM_BOOT_STATUS_INVALID_STATE;
+    return (BspIspGpio_ResetTarget() == FIRMWARE_STATUS_OK)
+               ? STM32H743_ROM_BOOT_STATUS_OK
+               : STM32H743_ROM_BOOT_STATUS_INVALID_STATE;
 }
 
 static void DelayMs(void *context, uint32_t delay_ms)
