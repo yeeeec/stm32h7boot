@@ -1,0 +1,44 @@
+# GD32 Embedded C Style Configuration
+Language: Cpp
+BasedOnStyle: LLVM
+
+# 1. 缩进与对齐
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+# 连续宏定义对齐（非常适合寄存器定义）
+AlignConsecutiveMacros: true
+# 连续赋值对齐（提高变量初始化块的可读性）
+AlignConsecutiveAssignments: true
+# 连续声明对齐
+AlignConsecutiveDeclarations: false
+# 尾随注释对齐
+AlignTrailingComments: true
+
+# 2. 大括号与换行 (K&R 风格)
+BreakBeforeBraces: Allman
+# 不允许短函数写在单行
+AllowShortFunctionsOnASingleLine: None
+# 不允许短 if 语句写在单行（强制换行，便于调试）
+AllowShortIfStatementsOnASingleLine: false
+# 不允许短循环写在单行
+AllowShortLoopsOnASingleLine: false
+
+# 3. 指针与空格
+# 指针符号靠右（uint8_t *ptr）
+PointerAlignment: Right
+# 在 C 风格强制转换后添加空格 (uint32_t) var
+SpaceAfterCStyleCast: true
+# 赋值运算符前后的空格
+SpaceBeforeAssignmentOperators: true
+# 括号前后的空格
+SpaceBeforeParens: ControlStatements
+
+# 5. 其他
+# 缩进 case 标签
+IndentCaseLabels: true
+# 保持空行（最多连续 2 个空行）
+MaxEmptyLinesToKeep: 2
+# 关闭 #include 自动排序
+SortIncludes: Never

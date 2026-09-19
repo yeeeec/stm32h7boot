@@ -2,18 +2,14 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug PC DAP",
+      "name": "Debug (OpenOCD + CMSIS-DAP)",
       "type": "cortex-debug",
       "request": "launch",
       "servertype": "openocd",
+      "serverpath": "openocd",
       "device": "STM32H743XI",
       "interface": "swd",
-      "runToEntryPoint": "main",
-      "gdbPath": "D:/program/arm-none-eabi/14.2 rel1/bin/arm-none-eabi-gdb.exe",
-      "serverpath": "D:/program/openocd/OpenOCD-20260121-0.12.0/bin/openocd.exe",
-      "searchDir": [
-        "D:/program/openocd/OpenOCD-20260121-0.12.0/share/openocd/scripts"
-      ],
+      "gdbPath": "arm-none-eabi-gdb",
       "configFiles": [
         "interface/cmsis-dap.cfg",
         "target/stm32h7x.cfg"
@@ -22,6 +18,7 @@
       "svdFile": "${workspaceFolder}/STM32H743.svd",
       "cwd": "${workspaceFolder}",
       "showDevDebugOutput": "raw",
+      "runToEntryPoint": "main",
       "liveWatch": {
         "enabled": true,
         "samplesPerSecond": 4
