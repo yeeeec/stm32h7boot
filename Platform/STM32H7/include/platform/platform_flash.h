@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "firmware/status.h"
+#include "platform/platform_memory_map.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -13,7 +14,7 @@ extern "C"
 #define PLATFORM_FLASH_CAPACITY_BYTES (32UL * 1024UL * 1024UL)
 #define PLATFORM_FLASH_PAGE_SIZE      256U
 #define PLATFORM_FLASH_ERASE_SIZE     4096U
-#define PLATFORM_FLASH_MAPPED_BASE    0x90000000UL
+#define PLATFORM_FLASH_MAPPED_BASE    PLATFORM_QSPI_MAPPED_BASE
 
     typedef struct
     {

@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include "firmware/status.h"
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -17,15 +19,12 @@ extern "C"
 #define AT24C128_ADDRESS_MIN_7BIT 0x50U
 #define AT24C128_ADDRESS_MAX_7BIT 0x57U
 
-    /** Status values owned by this driver. */
-    typedef enum
-    {
-        AT24_STATUS_OK = 0,
-        AT24_STATUS_INVALID_ARGUMENT,
-        AT24_STATUS_INVALID_STATE,
-        AT24_STATUS_IO_ERROR,
-        AT24_STATUS_TIMEOUT
-    } at24_status_t;
+    typedef firmware_status_t at24_status_t;
+#define AT24_STATUS_OK               FIRMWARE_STATUS_OK
+#define AT24_STATUS_INVALID_ARGUMENT FIRMWARE_STATUS_INVALID_ARGUMENT
+#define AT24_STATUS_INVALID_STATE    FIRMWARE_STATUS_INVALID_STATE
+#define AT24_STATUS_IO_ERROR         FIRMWARE_STATUS_IO_ERROR
+#define AT24_STATUS_TIMEOUT          FIRMWARE_STATUS_TIMEOUT
 
     typedef at24_status_t (*at24_read_fn)(void *context, uint8_t device_address_7bit,
                                           uint16_t memory_address, uint8_t *data, uint32_t size);

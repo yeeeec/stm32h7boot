@@ -2,9 +2,7 @@
 
 #include "main.h"
 
-#ifndef PLATFORM_WATCHDOG_ENABLE
-#define PLATFORM_WATCHDOG_ENABLE 0
-#endif
+#include "platform/platform_config.h"
 
 #if PLATFORM_WATCHDOG_ENABLE
 #include "iwdg.h"
@@ -57,4 +55,39 @@ void PlatformSystem_Reset(void)
     for (;;)
     {
     }
+}
+
+uint32_t PlatformSystem_GetResetCause(void)
+{
+    uint32_t cause = 0U;
+    if (__HAL_RCC_GET_FLAG(RCC_FLAG_SFTRST) != 0U)
+    {
+        cause |= PLATFORM_RESET_CAUSE_SOFTWARE;
+    }
+    if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDG1RST) != 0U)
+    {
+        cause |= PLATFORM_RESET_CAUSE_WATCHDOG;
+    }
+    if (__HAL_RCC_GET_FLAG(RCC_FLAG_WWDG1RST) != 0U)
+    {
+        cause |= PLATFORM_RESET_CAUSE_WATCHDOG;
+    }
+    if (__HAL_RCC_GET_FLAG(RCC_FLAG_PORRST) != 0U)
+    {
+        cause |= PLATFORM_RESET_CAUSE_POWER_ON;
+    }
+    if (__HAL_RCC_GET_FLAG(RCC_FLAG_BORRST) != 0U)
+    {
+        cause |= PLATFORM_RESET_CAUSE_BROWN_OUT;
+    }
+    if (__HAL_RCC_GET_FLAG(RCC_FLAG_PINRST) != 0U)
+    {
+        cause |= PLATFORM_RESET_CAUSE_PIN;
+    }
+    return cause;
+}
+
+void PlatformSystem_ClearResetCause(void)
+{
+    __HAL_RCC_CLEAR_RESET_FLAGS();
 }

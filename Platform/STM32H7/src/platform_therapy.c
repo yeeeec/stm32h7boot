@@ -2,8 +2,8 @@
 
 #include <stddef.h>
 
-#include "bsp/bsp_isp_gpio.h"
-#include "bsp/bsp_isp_uart.h"
+#include "bsp/bsp_therapy_gpio.h"
+#include "bsp/bsp_therapy_uart.h"
 #include "platform/platform_system.h"
 #include "stm32h743_rom_boot.h"
 
@@ -67,40 +67,41 @@ static firmware_status_t MapRomBootStatus(stm32h743_rom_boot_status_t status)
 
 static stm32h743_rom_boot_status_t ConfigureUart(void *context, stm32h743_rom_boot_uart_mode_t mode)
 {
-    bsp_isp_uart_mode_t bsp_mode;
+    bsp_therapy_uart_mode_t bsp_mode;
 
     (void) context;
-    bsp_mode = (mode == STM32H743_ROM_BOOT_UART_ROM_8E1) ? BSP_ISP_UART_ROM_MODE
-                                                         : BSP_ISP_UART_APPLICATION_MODE;
-    return MapFirmwareToRomBoot(BspIspUart_Configure(bsp_mode));
+    bsp_mode = (mode == STM32H743_ROM_BOOT_UART_ROM_8E1)
+                   ? BSP_THERAPY_UART_ROM_MODE
+                   : BSP_THERAPY_UART_APPLICATION_MODE;
+    return MapFirmwareToRomBoot(BspTherapyUart_Configure(bsp_mode));
 }
 
 static stm32h743_rom_boot_status_t Transmit(void *context, const uint8_t *data, uint32_t size,
                                             uint32_t timeout_ms)
 {
     (void) context;
-    return MapFirmwareToRomBoot(BspIspUart_Transmit(data, size, timeout_ms));
+    return MapFirmwareToRomBoot(BspTherapyUart_Transmit(data, size, timeout_ms));
 }
 
 static stm32h743_rom_boot_status_t Receive(void *context, uint8_t *data, uint32_t size,
                                            uint32_t timeout_ms)
 {
     (void) context;
-    return MapFirmwareToRomBoot(BspIspUart_Receive(data, size, timeout_ms));
+    return MapFirmwareToRomBoot(BspTherapyUart_Receive(data, size, timeout_ms));
 }
 
 static stm32h743_rom_boot_status_t SetBoot0(void *context, int high)
 {
     (void) context;
-    return (BspIspGpio_SetBoot0(high) == FIRMWARE_STATUS_OK)
+    return (BspTherapy_SetBoot0(high) == FIRMWARE_STATUS_OK)
                ? STM32H743_ROM_BOOT_STATUS_OK
                : STM32H743_ROM_BOOT_STATUS_INVALID_STATE;
 }
 
-static stm32h743_rom_boot_status_t ResetTarget(void *context)
+static stm32h743_rom_boot_status_t SetReset(void *context, int asserted)
 {
     (void) context;
-    return (BspIspGpio_ResetTarget() == FIRMWARE_STATUS_OK)
+    return (BspTherapy_SetReset(asserted) == FIRMWARE_STATUS_OK)
                ? STM32H743_ROM_BOOT_STATUS_OK
                : STM32H743_ROM_BOOT_STATUS_INVALID_STATE;
 }
@@ -108,7 +109,13 @@ static stm32h743_rom_boot_status_t ResetTarget(void *context)
 static void DelayMs(void *context, uint32_t delay_ms)
 {
     (void) context;
-    PlatformSystem_DelayMs(delay_ms);
+    while (delay_ms != 0U)
+    {
+        uint32_t chunk = (delay_ms > 10U) ? 10U : delay_ms;
+        PlatformSystem_DelayMs(chunk);
+        PlatformSystem_WatchdogRefresh();
+        delay_ms -= chunk;
+    }
 }
 
 firmware_status_t PlatformTherapy_Init(void)
@@ -118,7 +125,7 @@ firmware_status_t PlatformTherapy_Init(void)
                                                 .transmit       = Transmit,
                                                 .receive        = Receive,
                                                 .set_boot0      = SetBoot0,
-                                                .reset_target   = ResetTarget,
+                                                 .set_reset      = SetReset,
                                                 .delay_ms       = DelayMs};
     const stm32h743_rom_boot_config_t config = {
         .command_timeout_ms       = PLATFORM_THERAPY_COMMAND_TIMEOUT_MS,
@@ -133,7 +140,10 @@ firmware_status_t PlatformTherapy_Init(void)
         return FIRMWARE_STATUS_OK;
     }
 
-    BspIspGpio_Init();
+    if (BspTherapyGpio_Init() != FIRMWARE_STATUS_OK)
+    {
+        return FIRMWARE_STATUS_IO_ERROR;
+    }
     status = Stm32H743RomBoot_Init(&s_target, &port, &config);
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
     {
@@ -148,6 +158,7 @@ firmware_status_t PlatformTherapy_BeginUpdate(platform_therapy_info_t *info)
 {
     stm32h743_rom_boot_info_t driver_info;
     stm32h743_rom_boot_status_t status;
+    int entered = 0;
 
     if (s_initialized == 0U)
     {
@@ -157,10 +168,15 @@ firmware_status_t PlatformTherapy_BeginUpdate(platform_therapy_info_t *info)
     status = Stm32H743RomBoot_Enter(&s_target);
     if (status == STM32H743_ROM_BOOT_STATUS_OK)
     {
+        entered = 1;
         status = Stm32H743RomBoot_GetInfo(&s_target, &driver_info);
     }
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
     {
+        if (entered != 0)
+        {
+            (void) Stm32H743RomBoot_Leave(&s_target);
+        }
         return MapRomBootStatus(status);
     }
 

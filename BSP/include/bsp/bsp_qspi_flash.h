@@ -18,6 +18,13 @@ extern "C"
         uint32_t address;
     } bsp_qspi_flash_transaction_t;
 
+    firmware_status_t BspQspiFlash_Init(void);
+
+    firmware_status_t BspQspiFlash_EnterMemoryMapped(
+        const bsp_qspi_flash_transaction_t *read_transaction);
+
+    firmware_status_t BspQspiFlash_ExitMemoryMapped(void);
+
     /*
      * CubeMX must initialize hqspi before these functions are called.
      * address_bytes supports 0, 3, or 4 bytes.

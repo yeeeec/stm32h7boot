@@ -11,6 +11,8 @@
 
 #include <stdint.h>
 
+#include "firmware/status.h"
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -24,16 +26,14 @@ extern "C"
 #define SPI_NOR_W25Q_PAGE_SIZE_BYTES   256U
 #define SPI_NOR_W25Q_SECTOR_SIZE_BYTES 4096U
 
-    typedef enum
-    {
-        SPI_NOR_STATUS_OK = 0,
-        SPI_NOR_STATUS_INVALID_ARGUMENT,
-        SPI_NOR_STATUS_INVALID_STATE,
-        SPI_NOR_STATUS_OUT_OF_RANGE,
-        SPI_NOR_STATUS_IO_ERROR,
-        SPI_NOR_STATUS_TIMEOUT,
-        SPI_NOR_STATUS_NOT_SUPPORTED
-    } spi_nor_status_t;
+    typedef firmware_status_t spi_nor_status_t;
+#define SPI_NOR_STATUS_OK               FIRMWARE_STATUS_OK
+#define SPI_NOR_STATUS_INVALID_ARGUMENT FIRMWARE_STATUS_INVALID_ARGUMENT
+#define SPI_NOR_STATUS_INVALID_STATE    FIRMWARE_STATUS_INVALID_STATE
+#define SPI_NOR_STATUS_OUT_OF_RANGE     FIRMWARE_STATUS_OUT_OF_RANGE
+#define SPI_NOR_STATUS_IO_ERROR         FIRMWARE_STATUS_IO_ERROR
+#define SPI_NOR_STATUS_TIMEOUT          FIRMWARE_STATUS_TIMEOUT
+#define SPI_NOR_STATUS_NOT_SUPPORTED    FIRMWARE_STATUS_NOT_SUPPORTED
 
     typedef struct
     {
@@ -111,6 +111,8 @@ extern "C"
     spi_nor_status_t SpiNor_Init(spi_nor_t *device, const spi_nor_port_t *port,
                                  const spi_nor_config_t *config);
     spi_nor_status_t SpiNor_GetInfo(const spi_nor_t *device, spi_nor_info_t *info);
+    spi_nor_status_t SpiNor_GetMemoryMappedReadTransaction(
+        const spi_nor_t *device, spi_nor_transaction_t *transaction);
     spi_nor_status_t SpiNor_Read(spi_nor_t *device, uint32_t address, void *data, uint32_t size);
 
     /** Start one page-bounded, transfer-size-bounded program operation. */

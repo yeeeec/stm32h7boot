@@ -3,8 +3,8 @@
  * @brief STM32H743XIH6 System-Memory UART bootloader host driver.
  *
  * Fixed target: device ID 0x0450, 2-MiB internal Flash, 16 x 128-KiB
- * sectors. The board binding shall use USART1 PA9/PA10 in 8-E-1 mode and
- * shall implement the target BOOT0/reset sequence required by AN2606.
+ * sectors. Board-specific UART and GPIO details are supplied through the
+ * port callbacks and are intentionally not part of this driver contract.
  */
 #ifndef STM32H743_ROM_BOOT_H
 #define STM32H743_ROM_BOOT_H
@@ -55,7 +55,8 @@ typedef stm32h743_rom_boot_status_t (*stm32h743_rom_boot_transmit_fn)(
 typedef stm32h743_rom_boot_status_t (*stm32h743_rom_boot_receive_fn)(
     void *context, uint8_t *data, uint32_t size, uint32_t timeout_ms);
 typedef stm32h743_rom_boot_status_t (*stm32h743_rom_boot_set_boot0_fn)(void *context, int high);
-typedef stm32h743_rom_boot_status_t (*stm32h743_rom_boot_reset_target_fn)(void *context);
+typedef stm32h743_rom_boot_status_t (*stm32h743_rom_boot_set_reset_fn)(void *context,
+                                                                       int asserted);
 typedef void (*stm32h743_rom_boot_delay_ms_fn)(void *context, uint32_t delay_ms);
 
 typedef struct
@@ -65,7 +66,7 @@ typedef struct
     stm32h743_rom_boot_transmit_fn transmit;
     stm32h743_rom_boot_receive_fn receive;
     stm32h743_rom_boot_set_boot0_fn set_boot0;
-    stm32h743_rom_boot_reset_target_fn reset_target;
+    stm32h743_rom_boot_set_reset_fn set_reset;
     stm32h743_rom_boot_delay_ms_fn delay_ms;
 } stm32h743_rom_boot_port_t;
 

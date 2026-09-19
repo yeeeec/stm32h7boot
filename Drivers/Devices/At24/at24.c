@@ -57,7 +57,7 @@ at24_status_t At24_Init(at24_t *device, const at24_port_t *port, const at24_conf
 
 at24_status_t At24_Probe(at24_t *device)
 {
-    int ready;
+    at24_status_t ready;
 
     if (device == NULL)
     {
@@ -68,7 +68,7 @@ at24_status_t At24_Probe(at24_t *device)
         return AT24_STATUS_INVALID_STATE;
     }
     ready = device->port.probe_ready(device->port.context, device->device_address_7bit);
-    return (ready == 0) ? AT24_STATUS_OK : AT24_STATUS_IO_ERROR;
+    return ready;
 }
 
 at24_status_t At24_Read(at24_t *device, uint32_t address, void *data, uint32_t size)
@@ -123,7 +123,7 @@ at24_status_t At24_WritePageStart(at24_t *device, uint32_t address, const void *
 at24_status_t At24_OperationPoll(at24_t *device)
 {
     at24_status_t status;
-    int ready;
+    at24_status_t ready;
 
     if (device == NULL)
     {
@@ -139,7 +139,7 @@ at24_status_t At24_OperationPoll(at24_t *device)
     }
 
     ready = device->port.probe_ready(device->port.context, device->device_address_7bit);
-    if (ready == 0)
+    if (ready == AT24_STATUS_OK)
     {
         status = SetWriteEnabled(device, 0);
         if (status != AT24_STATUS_OK)
@@ -151,6 +151,11 @@ at24_status_t At24_OperationPoll(at24_t *device)
         device->operation_state  = AT24_OPERATION_SUCCEEDED;
         device->operation_status = AT24_STATUS_OK;
         return AT24_STATUS_OK;
+    }
+
+    if ((ready != FIRMWARE_STATUS_NOT_FOUND) && (ready != FIRMWARE_STATUS_BUSY))
+    {
+        return FinishFailure(device, ready);
     }
 
     /* Unsigned subtraction remains valid when the millisecond tick wraps. */

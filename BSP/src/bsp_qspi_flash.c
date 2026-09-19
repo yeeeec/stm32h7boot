@@ -6,6 +6,9 @@
 
 #define BSP_QSPI_FLASH_TIMEOUT_MS 1000U
 
+static uint8_t s_initialized;
+static uint8_t s_memory_mapped;
+
 static firmware_status_t BspQspiFlash_MapHalStatus(HAL_StatusTypeDef status)
 {
     switch (status)
@@ -68,11 +71,81 @@ static firmware_status_t BspQspiFlash_BuildCommand(const bsp_qspi_flash_transact
     return FIRMWARE_STATUS_OK;
 }
 
+firmware_status_t BspQspiFlash_Init(void)
+{
+    if (s_initialized != 0U)
+    {
+        return FIRMWARE_STATUS_OK;
+    }
+    MX_QUADSPI_Init();
+    s_initialized = 1U;
+    return FIRMWARE_STATUS_OK;
+}
+
+firmware_status_t BspQspiFlash_EnterMemoryMapped(
+    const bsp_qspi_flash_transaction_t *read_transaction)
+{
+    QSPI_CommandTypeDef command;
+    QSPI_MemoryMappedTypeDef memory_mapped = {0};
+    firmware_status_t status;
+
+    if (read_transaction == NULL)
+    {
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
+    if (s_initialized == 0U)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if (s_memory_mapped != 0U)
+    {
+        return FIRMWARE_STATUS_OK;
+    }
+    status = BspQspiFlash_BuildCommand(read_transaction, QSPI_DATA_1_LINE, 0U, &command);
+    if (status != FIRMWARE_STATUS_OK)
+    {
+        return status;
+    }
+    memory_mapped.TimeOutActivation = QSPI_TIMEOUT_COUNTER_DISABLE;
+    memory_mapped.TimeOutPeriod = 0U;
+    status = BspQspiFlash_MapHalStatus(
+        HAL_QSPI_MemoryMapped(&hqspi, &command, &memory_mapped));
+    if (status == FIRMWARE_STATUS_OK)
+    {
+        s_memory_mapped = 1U;
+    }
+    return status;
+}
+
+firmware_status_t BspQspiFlash_ExitMemoryMapped(void)
+{
+    firmware_status_t status;
+
+    if (s_initialized == 0U)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
+    if (s_memory_mapped == 0U)
+    {
+        return FIRMWARE_STATUS_OK;
+    }
+    status = BspQspiFlash_MapHalStatus(HAL_QSPI_Abort(&hqspi));
+    if (status == FIRMWARE_STATUS_OK)
+    {
+        s_memory_mapped = 0U;
+    }
+    return status;
+}
+
 firmware_status_t BspQspiFlash_Command(const bsp_qspi_flash_transaction_t *transaction)
 {
     QSPI_CommandTypeDef command;
     firmware_status_t status;
 
+    if ((s_initialized == 0U) || (s_memory_mapped != 0U))
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
     status = BspQspiFlash_BuildCommand(transaction, QSPI_DATA_NONE, 0U, &command);
     if (status != FIRMWARE_STATUS_OK)
     {
@@ -93,6 +166,10 @@ firmware_status_t BspQspiFlash_Receive(const bsp_qspi_flash_transaction_t *trans
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
+    if (s_initialized == 0U || s_memory_mapped != 0U)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
     status = BspQspiFlash_BuildCommand(transaction, QSPI_DATA_1_LINE, size, &command);
     if (status != FIRMWARE_STATUS_OK)
     {
@@ -120,6 +197,10 @@ firmware_status_t BspQspiFlash_Transmit(const bsp_qspi_flash_transaction_t *tran
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
+    if (s_initialized == 0U || s_memory_mapped != 0U)
+    {
+        return FIRMWARE_STATUS_INVALID_STATE;
+    }
     status = BspQspiFlash_BuildCommand(transaction, QSPI_DATA_1_LINE, size, &command);
     if (status != FIRMWARE_STATUS_OK)
     {

@@ -186,7 +186,12 @@ static stm32h743_rom_boot_status_t RestoreApplication(stm32h743_rom_boot_t *devi
     {
         first = status;
     }
-    status = device->port.reset_target(device->port.context);
+    status = device->port.set_reset(device->port.context, 1);
+    if (status == STM32H743_ROM_BOOT_STATUS_OK)
+    {
+        device->port.delay_ms(device->port.context, device->config.reset_settle_ms);
+        status = device->port.set_reset(device->port.context, 0);
+    }
     if ((status != STM32H743_ROM_BOOT_STATUS_OK) &&
         (first == STM32H743_ROM_BOOT_STATUS_OK))
     {
@@ -203,7 +208,7 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Init(
     if ((device == NULL) || (port == NULL) || (config == NULL) ||
         (port->configure_uart == NULL) || (port->transmit == NULL) ||
         (port->receive == NULL) || (port->set_boot0 == NULL) ||
-        (port->reset_target == NULL) || (port->delay_ms == NULL) ||
+        (port->set_reset == NULL) || (port->delay_ms == NULL) ||
         (config->command_timeout_ms == 0U) || (config->write_timeout_ms == 0U) ||
         (config->erase_timeout_ms == 0U) || (config->reset_settle_ms == 0U))
     {
@@ -247,7 +252,14 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Enter(stm32h743_rom_boot_t *device)
         (void)RestoreApplication(device);
         return status;
     }
-    status = device->port.reset_target(device->port.context);
+    status = device->port.set_reset(device->port.context, 1);
+    if (status != STM32H743_ROM_BOOT_STATUS_OK)
+    {
+        (void)RestoreApplication(device);
+        return status;
+    }
+    device->port.delay_ms(device->port.context, device->config.reset_settle_ms);
+    status = device->port.set_reset(device->port.context, 0);
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
     {
         (void)RestoreApplication(device);

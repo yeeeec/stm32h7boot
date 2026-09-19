@@ -205,6 +205,21 @@ spi_nor_status_t SpiNor_GetInfo(const spi_nor_t *device, spi_nor_info_t *info)
     return SPI_NOR_STATUS_OK;
 }
 
+spi_nor_status_t SpiNor_GetMemoryMappedReadTransaction(
+    const spi_nor_t *device, spi_nor_transaction_t *transaction)
+{
+    if ((device == NULL) || (transaction == NULL))
+    {
+        return SPI_NOR_STATUS_INVALID_ARGUMENT;
+    }
+    if (device->initialized == 0)
+    {
+        return SPI_NOR_STATUS_INVALID_STATE;
+    }
+    *transaction = Transaction(W25Q_COMMAND_FAST_READ, 0U, device->address_bytes, 8U);
+    return SPI_NOR_STATUS_OK;
+}
+
 spi_nor_status_t SpiNor_Read(spi_nor_t *device, uint32_t address, void *data, uint32_t size)
 {
     uint8_t *destination = (uint8_t *) data;
