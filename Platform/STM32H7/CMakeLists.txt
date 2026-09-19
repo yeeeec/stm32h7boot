@@ -2,12 +2,12 @@ set(PLATFORM_STM32H7_SOURCES
     src/platform.c
     src/platform_flash.c
     src/platform_storage.c
+    src/platform_nv_storage.c
+    src/platform_retained_memory.c
     src/platform_system.c
+    src/platform_cpu.c
     src/platform_therapy.c
-    src/platform_runtime.c
     src/platform_log.c
-    src/platform_boot_mailbox.c
-    src/platform_update_journal.c
 )
 
 add_library(platform_stm32h7 STATIC ${PLATFORM_STM32H7_SOURCES})

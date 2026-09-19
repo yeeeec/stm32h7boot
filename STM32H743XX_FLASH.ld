@@ -55,7 +55,8 @@ ENTRY(Reset_Handler)
 /* Specify the memory areas */
 MEMORY
 {
-DTCMRAM (xrw)      : ORIGIN = 0x20000000, LENGTH = 128K
+DTCMRAM (xrw)      : ORIGIN = 0x20000040, LENGTH = 128K - 64
+RETAINED (xrw)     : ORIGIN = 0x20000000, LENGTH = 64
 RAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 512K
 RAM_D2 (xrw)      : ORIGIN = 0x30000000, LENGTH = 288K
 RAM_D3 (xrw)      : ORIGIN = 0x38000000, LENGTH = 64K
@@ -226,6 +227,16 @@ SECTIONS
       PROVIDE( __bss_end = .);
   } >DTCMRAM
   PROVIDE( __non_tls_bss_start = ADDR(.bss) );
+
+  /* Retained RAM is deliberately outside the startup zero-initialization range. */
+  .noinit (NOLOAD) : ALIGN(4)
+  {
+    . = ALIGN(4);
+    __noinit_start__ = .;
+    KEEP(*(.noinit*))
+    . = ALIGN(4);
+    __noinit_end__ = .;
+  } >RETAINED
 
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
