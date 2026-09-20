@@ -27,6 +27,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "ff_gen_drv.h"
 #include "sd_diskio.h"
+#include "main.h"
 
 /* Private typedef -----------------------------------------------------------*/
 /* Private define ------------------------------------------------------------*/
@@ -153,8 +154,14 @@ DRESULT SD_read(BYTE lun, BYTE *buff, DWORD sector, UINT count)
                        count, SD_TIMEOUT) == MSD_OK)
   {
     /* wait until the read operation is finished */
-    while(BSP_SD_GetCardState()!= MSD_OK)
     {
+      uint32_t started = HAL_GetTick();
+      while(BSP_SD_GetCardState()!= MSD_OK)
+      {
+        if ((HAL_GetTick() - started) >= SD_TIMEOUT)
+          return RES_ERROR;
+        HAL_Delay(1U);
+      }
     }
     res = RES_OK;
   }
@@ -184,8 +191,14 @@ DRESULT SD_write(BYTE lun, const BYTE *buff, DWORD sector, UINT count)
                         count, SD_TIMEOUT) == MSD_OK)
   {
 	/* wait until the Write operation is finished */
-    while(BSP_SD_GetCardState() != MSD_OK)
     {
+      uint32_t started = HAL_GetTick();
+      while(BSP_SD_GetCardState() != MSD_OK)
+      {
+        if ((HAL_GetTick() - started) >= SD_TIMEOUT)
+          return RES_ERROR;
+        HAL_Delay(1U);
+      }
     }
     res = RES_OK;
   }

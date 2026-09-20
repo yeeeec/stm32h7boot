@@ -6,14 +6,14 @@
 #include "bsp/bsp_at24_bus.h"
 #include "platform/platform_system.h"
 
-#define PLATFORM_NV_STORAGE_I2C_ADDRESS 0x50U
+#define PLATFORM_NV_STORAGE_I2C_ADDRESS      0x50U
 #define PLATFORM_NV_STORAGE_WRITE_TIMEOUT_MS 50U
 
 static at24_t s_eeprom;
 static uint8_t s_initialized;
 
-static at24_status_t EepromRead(void *context, uint8_t address, uint16_t offset,
-                                uint8_t *data, uint32_t size)
+static at24_status_t EepromRead(void *context, uint8_t address, uint16_t offset, uint8_t *data,
+                                uint32_t size)
 {
     (void) context;
     return BspAt24Bus_Read(address, offset, data, size);
@@ -40,14 +40,14 @@ static uint32_t NowMs(void *context)
 
 firmware_status_t PlatformNvStorage_Init(void)
 {
-    const at24_port_t port = {.context = NULL,
-                              .read = EepromRead,
-                              .write = EepromWrite,
-                              .probe_ready = EepromProbe,
-                              .now_ms = NowMs,
-                              .set_write_enabled = NULL};
+    const at24_port_t port     = {.context           = NULL,
+                                  .read              = EepromRead,
+                                  .write             = EepromWrite,
+                                  .probe_ready       = EepromProbe,
+                                  .now_ms            = NowMs,
+                                  .set_write_enabled = NULL};
     const at24_config_t config = {.device_address_7bit = PLATFORM_NV_STORAGE_I2C_ADDRESS,
-                                  .write_timeout_ms = PLATFORM_NV_STORAGE_WRITE_TIMEOUT_MS};
+                                  .write_timeout_ms    = PLATFORM_NV_STORAGE_WRITE_TIMEOUT_MS};
     at24_status_t status;
 
     if (s_initialized != 0U)
@@ -60,7 +60,7 @@ firmware_status_t PlatformNvStorage_Init(void)
         return status;
     }
     s_initialized = 1U;
-    status = At24_Probe(&s_eeprom);
+    status        = At24_Probe(&s_eeprom);
     if (status != AT24_STATUS_OK)
     {
         return status;
@@ -86,7 +86,7 @@ firmware_status_t PlatformNvStorage_Read(uint32_t offset, void *data, size_t siz
 firmware_status_t PlatformNvStorage_Write(uint32_t offset, const void *data, size_t size)
 {
     const uint8_t *source = (const uint8_t *) data;
-    uint32_t remaining = (uint32_t) size;
+    uint32_t remaining    = (uint32_t) size;
     firmware_status_t status;
 
     if ((data == NULL) || (size == 0U) || (size > UINT32_MAX))
@@ -100,9 +100,8 @@ firmware_status_t PlatformNvStorage_Write(uint32_t offset, const void *data, siz
     }
     while (remaining != 0U)
     {
-        uint32_t page_remaining = AT24C128_PAGE_SIZE_BYTES -
-                                   (offset % AT24C128_PAGE_SIZE_BYTES);
-        uint32_t chunk = (remaining < page_remaining) ? remaining : page_remaining;
+        uint32_t page_remaining = AT24C128_PAGE_SIZE_BYTES - (offset % AT24C128_PAGE_SIZE_BYTES);
+        uint32_t chunk          = (remaining < page_remaining) ? remaining : page_remaining;
         at24_operation_result_t result;
 
         status = At24_WritePageStart(&s_eeprom, offset, source, chunk);

@@ -70,9 +70,8 @@ static stm32h743_rom_boot_status_t ConfigureUart(void *context, stm32h743_rom_bo
     bsp_therapy_uart_mode_t bsp_mode;
 
     (void) context;
-    bsp_mode = (mode == STM32H743_ROM_BOOT_UART_ROM_8E1)
-                   ? BSP_THERAPY_UART_ROM_MODE
-                   : BSP_THERAPY_UART_APPLICATION_MODE;
+    bsp_mode = (mode == STM32H743_ROM_BOOT_UART_ROM_8E1) ? BSP_THERAPY_UART_ROM_MODE
+                                                         : BSP_THERAPY_UART_APPLICATION_MODE;
     return MapFirmwareToRomBoot(BspTherapyUart_Configure(bsp_mode));
 }
 
@@ -125,7 +124,7 @@ firmware_status_t PlatformTherapy_Init(void)
                                                 .transmit       = Transmit,
                                                 .receive        = Receive,
                                                 .set_boot0      = SetBoot0,
-                                                 .set_reset      = SetReset,
+                                                .set_reset      = SetReset,
                                                 .delay_ms       = DelayMs};
     const stm32h743_rom_boot_config_t config = {
         .command_timeout_ms       = PLATFORM_THERAPY_COMMAND_TIMEOUT_MS,
@@ -169,7 +168,7 @@ firmware_status_t PlatformTherapy_BeginUpdate(platform_therapy_info_t *info)
     if (status == STM32H743_ROM_BOOT_STATUS_OK)
     {
         entered = 1;
-        status = Stm32H743RomBoot_GetInfo(&s_target, &driver_info);
+        status  = Stm32H743RomBoot_GetInfo(&s_target, &driver_info);
     }
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
     {

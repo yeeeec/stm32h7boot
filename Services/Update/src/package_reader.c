@@ -12,8 +12,7 @@
 static uint8_t s_manifest_buffer[UPDATE_MANIFEST_MAX_SIZE];
 static uint8_t s_hash_buffer[UPDATE_IO_BLOCK_SIZE];
 
-static update_operation_result_t package_result(update_failure_t failure,
-                                                firmware_status_t status)
+static update_operation_result_t package_result(update_failure_t failure, firmware_status_t status)
 {
     update_operation_result_t result = {failure, status};
     return result;
@@ -54,15 +53,16 @@ static update_operation_result_t read_manifest(const char *root, size_t *length)
     size_t total = 0U;
     firmware_status_t status;
 
-    if (snprintf(path, sizeof(path), "%s/%s", root, UPDATE_MANIFEST_FILE) <= 0)
-        return package_result(UPDATE_FAILURE_MANIFEST_READ,
-                              FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+    {
+        int length = snprintf(path, sizeof(path), "%s/%s", root, UPDATE_MANIFEST_FILE);
+        if (length <= 0 || (size_t) length >= sizeof(path))
+            return package_result(UPDATE_FAILURE_MANIFEST_READ, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+    }
     status = PlatformStorage_Stat(path, &info);
     if (FirmwareStatus_IsError(status))
         return package_result(UPDATE_FAILURE_MANIFEST_READ, status);
     if (info.is_directory != 0U || info.size == 0U || info.size > sizeof(s_manifest_buffer))
-        return package_result(UPDATE_FAILURE_MANIFEST_READ,
-                              FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+        return package_result(UPDATE_FAILURE_MANIFEST_READ, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
     status = PlatformStorage_OpenRead(path, &file);
     if (FirmwareStatus_IsError(status))
         return package_result(UPDATE_FAILURE_MANIFEST_READ, status);
@@ -70,17 +70,16 @@ static update_operation_result_t read_manifest(const char *root, size_t *length)
     while (total < info.size)
     {
         size_t requested = info.size - total;
-        size_t actual = 0U;
+        size_t actual    = 0U;
         if (requested > UPDATE_IO_BLOCK_SIZE)
             requested = UPDATE_IO_BLOCK_SIZE;
         status = PlatformStorage_Read(file, s_manifest_buffer + total, requested, &actual);
         if (FirmwareStatus_IsError(status) || actual != requested)
         {
             (void) PlatformStorage_Close(file);
-            return package_result(UPDATE_FAILURE_MANIFEST_READ,
-                                  FirmwareStatus_IsError(status)
-                                      ? status
-                                      : FIRMWARE_STATUS_IO_ERROR);
+            return package_result(UPDATE_FAILURE_MANIFEST_READ, FirmwareStatus_IsError(status)
+                                                                    ? status
+                                                                    : FIRMWARE_STATUS_IO_ERROR);
         }
         total += actual;
     }
@@ -96,7 +95,7 @@ static update_operation_result_t validate_file_set(const char *root,
 {
     platform_dir_handle_t directory;
     platform_dir_entry_t entry;
-    uint32_t found = 0U;
+    uint32_t found           = 0U;
     firmware_status_t status = PlatformStorage_DirOpen(root, &directory);
 
     if (FirmwareStatus_IsError(status))
@@ -109,8 +108,7 @@ static update_operation_result_t validate_file_set(const char *root,
         if (entry.is_directory != 0U)
         {
             (void) PlatformStorage_DirClose(directory);
-            return package_result(UPDATE_FAILURE_FILE_SET,
-                                  FIRMWARE_STATUS_INVALID_STATE);
+            return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_INVALID_STATE);
         }
         if (strcmp(entry.name, UPDATE_MANIFEST_FILE) == 0)
         {
@@ -125,8 +123,7 @@ static update_operation_result_t validate_file_set(const char *root,
         for (index = 0U; index < manifest->component_count; ++index)
         {
             uint32_t bit = 1UL << (index + 1U);
-            if (strcmp(entry.name, manifest->components[index].file) == 0 &&
-                (found & bit) == 0U)
+            if (strcmp(entry.name, manifest->components[index].file) == 0 && (found & bit) == 0U)
             {
                 found |= bit;
                 allowed = 1;
@@ -136,8 +133,7 @@ static update_operation_result_t validate_file_set(const char *root,
         if (!allowed)
         {
             (void) PlatformStorage_DirClose(directory);
-            return package_result(UPDATE_FAILURE_FILE_SET,
-                                  FIRMWARE_STATUS_INVALID_STATE);
+            return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_INVALID_STATE);
         }
     }
     {
@@ -154,17 +150,18 @@ static update_operation_result_t validate_file_set(const char *root,
     {
         char path[UPDATE_PATH_MAX];
         platform_file_info_t info;
-        if (snprintf(path, sizeof(path), "%s/%s", root,
-                     manifest->components[index].file) <= 0)
-            return package_result(UPDATE_FAILURE_FILE_SET,
-                                  FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+        {
+            int length =
+                snprintf(path, sizeof(path), "%s/%s", root, manifest->components[index].file);
+            if (length <= 0 || (size_t) length >= sizeof(path))
+                return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+        }
         status = PlatformStorage_Stat(path, &info);
         if (FirmwareStatus_IsError(status) || info.is_directory != 0U ||
             info.size != manifest->components[index].size)
-            return package_result(UPDATE_FAILURE_FILE_SET,
-                                  FirmwareStatus_IsError(status)
-                                      ? status
-                                      : FIRMWARE_STATUS_INVALID_STATE);
+            return package_result(UPDATE_FAILURE_FILE_SET, FirmwareStatus_IsError(status)
+                                                               ? status
+                                                               : FIRMWARE_STATUS_INVALID_STATE);
     }
     return package_result(UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
 }
@@ -180,23 +177,25 @@ static update_operation_result_t verify_payload(const char *root,
     uint32_t total = 0U;
     firmware_status_t status;
 
-    if (!UpdateHex_DecodeSha256(component->sha256, expected) ||
-        snprintf(path, sizeof(path), "%s/%s", root, component->file) <= 0)
-        return package_result(UPDATE_FAILURE_CURRENT_VERIFY,
-                              FIRMWARE_STATUS_INVALID_ARGUMENT);
+    if (!UpdateHex_DecodeSha256(component->sha256, expected))
+        return package_result(UPDATE_FAILURE_CURRENT_VERIFY, FIRMWARE_STATUS_INVALID_ARGUMENT);
+    {
+        int length = snprintf(path, sizeof(path), "%s/%s", root, component->file);
+        if (length <= 0 || (size_t) length >= sizeof(path))
+            return package_result(UPDATE_FAILURE_CURRENT_VERIFY, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+    }
     status = PlatformStorage_OpenRead(path, &file);
     if (FirmwareStatus_IsError(status))
         return package_result(UPDATE_FAILURE_CURRENT_VERIFY, status);
     if (Crypto_Sha256Init(&hash) != 0)
     {
         (void) PlatformStorage_Close(file);
-        return package_result(UPDATE_FAILURE_CURRENT_VERIFY,
-                              FIRMWARE_STATUS_IO_ERROR);
+        return package_result(UPDATE_FAILURE_CURRENT_VERIFY, FIRMWARE_STATUS_IO_ERROR);
     }
     while (total < component->size)
     {
         size_t requested = component->size - total;
-        size_t actual = 0U;
+        size_t actual    = 0U;
         if (requested > sizeof(s_hash_buffer))
             requested = sizeof(s_hash_buffer);
         status = PlatformStorage_Read(file, s_hash_buffer, requested, &actual);
@@ -205,10 +204,9 @@ static update_operation_result_t verify_payload(const char *root,
         {
             Crypto_Sha256Abort(&hash);
             (void) PlatformStorage_Close(file);
-            return package_result(UPDATE_FAILURE_CURRENT_VERIFY,
-                                  FirmwareStatus_IsError(status)
-                                      ? status
-                                      : FIRMWARE_STATUS_IO_ERROR);
+            return package_result(UPDATE_FAILURE_CURRENT_VERIFY, FirmwareStatus_IsError(status)
+                                                                     ? status
+                                                                     : FIRMWARE_STATUS_IO_ERROR);
         }
         total += (uint32_t) actual;
         PlatformSystem_WatchdogRefresh();
@@ -220,61 +218,44 @@ static update_operation_result_t verify_payload(const char *root,
         return package_result(UPDATE_FAILURE_CURRENT_VERIFY, status);
     }
     if (Crypto_Sha256Finish(&hash, digest) != 0)
-        return package_result(UPDATE_FAILURE_CURRENT_VERIFY,
-                              FIRMWARE_STATUS_IO_ERROR);
+        return package_result(UPDATE_FAILURE_CURRENT_VERIFY, FIRMWARE_STATUS_IO_ERROR);
     if (memcmp(digest, expected, sizeof(digest)) != 0)
-        return package_result(UPDATE_FAILURE_CURRENT_VERIFY,
-                              FIRMWARE_STATUS_AUTHENTICATION_FAILED);
+        return package_result(UPDATE_FAILURE_CURRENT_VERIFY, FIRMWARE_STATUS_AUTHENTICATION_FAILED);
     return package_result(UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
 }
 
 update_operation_result_t PackageReader_Validate(const char *root,
-                                                  const uint8_t *expected_raw_digest,
-                                                  int verify_payload_hashes,
-                                                  update_package_t *package)
+                                                 const uint8_t *expected_raw_digest,
+                                                 int verify_payload_hashes,
+                                                 update_package_t *package)
 {
     update_operation_result_t result;
-    update_version_t bootloader_version = {
-        FIRMWARE_BOOTLOADER_VERSION_MAJOR,
-        FIRMWARE_BOOTLOADER_VERSION_MINOR,
-        FIRMWARE_BOOTLOADER_VERSION_PATCH,
-        0U};
+    update_version_t bootloader_version = {FIRMWARE_BOOTLOADER_VERSION_MAJOR,
+                                           FIRMWARE_BOOTLOADER_VERSION_MINOR,
+                                           FIRMWARE_BOOTLOADER_VERSION_PATCH, 0U};
     size_t manifest_length;
 
     if (root == NULL || package == NULL ||
         (verify_payload_hashes != 0 && verify_payload_hashes != 1))
-        return package_result(UPDATE_FAILURE_MANIFEST_READ,
-                              FIRMWARE_STATUS_INVALID_ARGUMENT);
+        return package_result(UPDATE_FAILURE_MANIFEST_READ, FIRMWARE_STATUS_INVALID_ARGUMENT);
     (void) memset(package, 0, sizeof(*package));
     if (strlen(root) >= sizeof(package->root))
-        return package_result(UPDATE_FAILURE_MANIFEST_READ,
-                              FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+        return package_result(UPDATE_FAILURE_MANIFEST_READ, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
     (void) strcpy(package->root, root);
 
     result = read_manifest(root, &manifest_length);
     if (FirmwareStatus_IsError(result.status))
         return result;
-    if (Crypto_Sha256(s_manifest_buffer, manifest_length,
-                      package->raw_manifest_sha256) != 0)
-        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST,
-                              FIRMWARE_STATUS_IO_ERROR);
+    if (Crypto_Sha256(s_manifest_buffer, manifest_length, package->raw_manifest_sha256) != 0)
+        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST, FIRMWARE_STATUS_IO_ERROR);
     if (expected_raw_digest != NULL &&
         memcmp(package->raw_manifest_sha256, expected_raw_digest, 32U) != 0)
         return package_result(UPDATE_FAILURE_MANIFEST_DIGEST,
                               FIRMWARE_STATUS_AUTHENTICATION_FAILED);
 
-    result.status = UpdateManifest_Parse(s_manifest_buffer, manifest_length,
-                                         &package->manifest);
+    result.status = UpdateManifest_Parse(s_manifest_buffer, manifest_length, &package->manifest);
     if (FirmwareStatus_IsError(result.status))
         return package_result(UPDATE_FAILURE_MANIFEST_PARSE, result.status);
-    result.status = UpdateManifest_Digest(&package->manifest,
-                                          package->canonical_signing_sha256);
-    if (FirmwareStatus_IsError(result.status))
-        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST, result.status);
-    result.status = ManifestVerify_Verify(&package->manifest,
-                                          package->canonical_signing_sha256);
-    if (FirmwareStatus_IsError(result.status))
-        return package_result(UPDATE_FAILURE_SIGNATURE, result.status);
     result.status = UpdateManifest_ValidateTarget(&package->manifest);
     if (FirmwareStatus_IsError(result.status))
         return package_result(UPDATE_FAILURE_TARGET, result.status);

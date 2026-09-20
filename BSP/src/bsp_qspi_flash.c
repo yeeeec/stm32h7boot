@@ -82,8 +82,8 @@ firmware_status_t BspQspiFlash_Init(void)
     return FIRMWARE_STATUS_OK;
 }
 
-firmware_status_t BspQspiFlash_EnterMemoryMapped(
-    const bsp_qspi_flash_transaction_t *read_transaction)
+firmware_status_t
+BspQspiFlash_EnterMemoryMapped(const bsp_qspi_flash_transaction_t *read_transaction)
 {
     QSPI_CommandTypeDef command;
     QSPI_MemoryMappedTypeDef memory_mapped = {0};
@@ -107,9 +107,8 @@ firmware_status_t BspQspiFlash_EnterMemoryMapped(
         return status;
     }
     memory_mapped.TimeOutActivation = QSPI_TIMEOUT_COUNTER_DISABLE;
-    memory_mapped.TimeOutPeriod = 0U;
-    status = BspQspiFlash_MapHalStatus(
-        HAL_QSPI_MemoryMapped(&hqspi, &command, &memory_mapped));
+    memory_mapped.TimeOutPeriod     = 0U;
+    status = BspQspiFlash_MapHalStatus(HAL_QSPI_MemoryMapped(&hqspi, &command, &memory_mapped));
     if (status == FIRMWARE_STATUS_OK)
     {
         s_memory_mapped = 1U;

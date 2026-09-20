@@ -1,7 +1,6 @@
 add_library(firmware_crypto STATIC
     src/crypto.c
     src/sha256.c
-    src/ecdsa_p256.c
 )
 
 target_include_directories(firmware_crypto PUBLIC

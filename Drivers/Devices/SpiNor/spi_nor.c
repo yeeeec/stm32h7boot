@@ -205,8 +205,8 @@ spi_nor_status_t SpiNor_GetInfo(const spi_nor_t *device, spi_nor_info_t *info)
     return SPI_NOR_STATUS_OK;
 }
 
-spi_nor_status_t SpiNor_GetMemoryMappedReadTransaction(
-    const spi_nor_t *device, spi_nor_transaction_t *transaction)
+spi_nor_status_t SpiNor_GetMemoryMappedReadTransaction(const spi_nor_t *device,
+                                                       spi_nor_transaction_t *transaction)
 {
     if ((device == NULL) || (transaction == NULL))
     {

@@ -6,16 +6,16 @@
 
 #include <stddef.h>
 
-#define ROM_SYNC                 0x7FU
-#define ROM_ACK                  0x79U
-#define ROM_NACK                 0x1FU
-#define ROM_CMD_GET              0x00U
-#define ROM_CMD_GET_ID           0x02U
-#define ROM_CMD_READ_MEMORY      0x11U
-#define ROM_CMD_WRITE_MEMORY     0x31U
-#define ROM_CMD_EXTENDED_ERASE   0x44U
-#define ROM_VERSION_V91          0x91U
-#define ROM_ERASE_FRAME_SIZE     (2U + (STM32H743_ROM_BOOT_SECTOR_COUNT * 2U) + 1U)
+#define ROM_SYNC               0x7FU
+#define ROM_ACK                0x79U
+#define ROM_NACK               0x1FU
+#define ROM_CMD_GET            0x00U
+#define ROM_CMD_GET_ID         0x02U
+#define ROM_CMD_READ_MEMORY    0x11U
+#define ROM_CMD_WRITE_MEMORY   0x31U
+#define ROM_CMD_EXTENDED_ERASE 0x44U
+#define ROM_VERSION_V91        0x91U
+#define ROM_ERASE_FRAME_SIZE   (2U + (STM32H743_ROM_BOOT_SECTOR_COUNT * 2U) + 1U)
 
 static uint8_t XorBytes(const uint8_t *data, uint32_t size)
 {
@@ -30,18 +30,18 @@ static uint8_t XorBytes(const uint8_t *data, uint32_t size)
 
 static void PutBe32(uint8_t data[4], uint32_t value)
 {
-    data[0] = (uint8_t)(value >> 24U);
-    data[1] = (uint8_t)(value >> 16U);
-    data[2] = (uint8_t)(value >> 8U);
-    data[3] = (uint8_t)value;
+    data[0] = (uint8_t) (value >> 24U);
+    data[1] = (uint8_t) (value >> 16U);
+    data[2] = (uint8_t) (value >> 8U);
+    data[3] = (uint8_t) value;
 }
 
 static void ClearInfo(stm32h743_rom_boot_info_t *info)
 {
     uint32_t i;
     info->bootloader_version = 0U;
-    info->device_id = 0xFFFFU;
-    info->command_count = 0U;
+    info->device_id          = 0xFFFFU;
+    info->command_count      = 0U;
     for (i = 0U; i < STM32H743_ROM_BOOT_MAX_COMMAND_COUNT; ++i)
     {
         info->commands[i] = 0U;
@@ -77,14 +77,13 @@ static stm32h743_rom_boot_status_t Tx(stm32h743_rom_boot_t *device, const uint8_
     return device->port.transmit(device->port.context, data, size, timeout_ms);
 }
 
-static stm32h743_rom_boot_status_t Rx(stm32h743_rom_boot_t *device, uint8_t *data,
-                                      uint32_t size, uint32_t timeout_ms)
+static stm32h743_rom_boot_status_t Rx(stm32h743_rom_boot_t *device, uint8_t *data, uint32_t size,
+                                      uint32_t timeout_ms)
 {
     return device->port.receive(device->port.context, data, size, timeout_ms);
 }
 
-static stm32h743_rom_boot_status_t ReceiveAck(stm32h743_rom_boot_t *device,
-                                               uint32_t timeout_ms)
+static stm32h743_rom_boot_status_t ReceiveAck(stm32h743_rom_boot_t *device, uint32_t timeout_ms)
 {
     uint8_t response;
     stm32h743_rom_boot_status_t status = Rx(device, &response, 1U, timeout_ms);
@@ -100,10 +99,9 @@ static stm32h743_rom_boot_status_t ReceiveAck(stm32h743_rom_boot_t *device,
                                  : STM32H743_ROM_BOOT_STATUS_PROTOCOL_ERROR;
 }
 
-static stm32h743_rom_boot_status_t SendCommand(stm32h743_rom_boot_t *device,
-                                                uint8_t command)
+static stm32h743_rom_boot_status_t SendCommand(stm32h743_rom_boot_t *device, uint8_t command)
 {
-    uint8_t frame[2] = {command, (uint8_t)~command};
+    uint8_t frame[2] = {command, (uint8_t) ~command};
     stm32h743_rom_boot_status_t status =
         Tx(device, frame, sizeof(frame), device->config.command_timeout_ms);
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
@@ -113,14 +111,13 @@ static stm32h743_rom_boot_status_t SendCommand(stm32h743_rom_boot_t *device,
     return ReceiveAck(device, device->config.command_timeout_ms);
 }
 
-static stm32h743_rom_boot_status_t SendAddress(stm32h743_rom_boot_t *device,
-                                                uint32_t address)
+static stm32h743_rom_boot_status_t SendAddress(stm32h743_rom_boot_t *device, uint32_t address)
 {
     uint8_t frame[5];
     stm32h743_rom_boot_status_t status;
     PutBe32(frame, address);
     frame[4] = XorBytes(frame, 4U);
-    status = Tx(device, frame, sizeof(frame), device->config.command_timeout_ms);
+    status   = Tx(device, frame, sizeof(frame), device->config.command_timeout_ms);
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
     {
         return status;
@@ -128,8 +125,7 @@ static stm32h743_rom_boot_status_t SendAddress(stm32h743_rom_boot_t *device,
     return ReceiveAck(device, device->config.command_timeout_ms);
 }
 
-static stm32h743_rom_boot_status_t RequireSession(const stm32h743_rom_boot_t *device,
-                                                   int ready)
+static stm32h743_rom_boot_status_t RequireSession(const stm32h743_rom_boot_t *device, int ready)
 {
     if (device == NULL)
     {
@@ -179,10 +175,8 @@ static stm32h743_rom_boot_status_t RestoreApplication(stm32h743_rom_boot_t *devi
     {
         first = status;
     }
-    status = device->port.configure_uart(device->port.context,
-                                         STM32H743_ROM_BOOT_UART_APPLICATION);
-    if ((status != STM32H743_ROM_BOOT_STATUS_OK) &&
-        (first == STM32H743_ROM_BOOT_STATUS_OK))
+    status = device->port.configure_uart(device->port.context, STM32H743_ROM_BOOT_UART_APPLICATION);
+    if ((status != STM32H743_ROM_BOOT_STATUS_OK) && (first == STM32H743_ROM_BOOT_STATUS_OK))
     {
         first = status;
     }
@@ -192,8 +186,7 @@ static stm32h743_rom_boot_status_t RestoreApplication(stm32h743_rom_boot_t *devi
         device->port.delay_ms(device->port.context, device->config.reset_settle_ms);
         status = device->port.set_reset(device->port.context, 0);
     }
-    if ((status != STM32H743_ROM_BOOT_STATUS_OK) &&
-        (first == STM32H743_ROM_BOOT_STATUS_OK))
+    if ((status != STM32H743_ROM_BOOT_STATUS_OK) && (first == STM32H743_ROM_BOOT_STATUS_OK))
     {
         first = status;
     }
@@ -201,13 +194,12 @@ static stm32h743_rom_boot_status_t RestoreApplication(stm32h743_rom_boot_t *devi
     return first;
 }
 
-stm32h743_rom_boot_status_t Stm32H743RomBoot_Init(
-    stm32h743_rom_boot_t *device, const stm32h743_rom_boot_port_t *port,
-    const stm32h743_rom_boot_config_t *config)
+stm32h743_rom_boot_status_t Stm32H743RomBoot_Init(stm32h743_rom_boot_t *device,
+                                                  const stm32h743_rom_boot_port_t *port,
+                                                  const stm32h743_rom_boot_config_t *config)
 {
-    if ((device == NULL) || (port == NULL) || (config == NULL) ||
-        (port->configure_uart == NULL) || (port->transmit == NULL) ||
-        (port->receive == NULL) || (port->set_boot0 == NULL) ||
+    if ((device == NULL) || (port == NULL) || (config == NULL) || (port->configure_uart == NULL) ||
+        (port->transmit == NULL) || (port->receive == NULL) || (port->set_boot0 == NULL) ||
         (port->set_reset == NULL) || (port->delay_ms == NULL) ||
         (config->command_timeout_ms == 0U) || (config->write_timeout_ms == 0U) ||
         (config->erase_timeout_ms == 0U) || (config->reset_settle_ms == 0U))
@@ -218,10 +210,10 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Init(
     {
         return STM32H743_ROM_BOOT_STATUS_INVALID_STATE;
     }
-    device->port = *port;
+    device->port   = *port;
     device->config = *config;
     ClearInfo(&device->info);
-    device->session = STM32H743_ROM_BOOT_SESSION_CLOSED;
+    device->session     = STM32H743_ROM_BOOT_SESSION_CLOSED;
     device->initialized = 1;
     return STM32H743_ROM_BOOT_STATUS_OK;
 }
@@ -235,8 +227,7 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Enter(stm32h743_rom_boot_t *device)
     {
         return STM32H743_ROM_BOOT_STATUS_INVALID_ARGUMENT;
     }
-    if ((device->initialized == 0) ||
-        (device->session != STM32H743_ROM_BOOT_SESSION_CLOSED))
+    if ((device->initialized == 0) || (device->session != STM32H743_ROM_BOOT_SESSION_CLOSED))
     {
         return STM32H743_ROM_BOOT_STATUS_INVALID_STATE;
     }
@@ -249,20 +240,20 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Enter(stm32h743_rom_boot_t *device)
     status = device->port.set_boot0(device->port.context, 1);
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
     {
-        (void)RestoreApplication(device);
+        (void) RestoreApplication(device);
         return status;
     }
     status = device->port.set_reset(device->port.context, 1);
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
     {
-        (void)RestoreApplication(device);
+        (void) RestoreApplication(device);
         return status;
     }
     device->port.delay_ms(device->port.context, device->config.reset_settle_ms);
     status = device->port.set_reset(device->port.context, 0);
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
     {
-        (void)RestoreApplication(device);
+        (void) RestoreApplication(device);
         return status;
     }
     device->port.delay_ms(device->port.context, device->config.reset_settle_ms);
@@ -273,15 +264,15 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Enter(stm32h743_rom_boot_t *device)
     }
     if (status != STM32H743_ROM_BOOT_STATUS_OK)
     {
-        (void)RestoreApplication(device);
+        (void) RestoreApplication(device);
         return status;
     }
     device->session = STM32H743_ROM_BOOT_SESSION_SYNCED;
     return STM32H743_ROM_BOOT_STATUS_OK;
 }
 
-stm32h743_rom_boot_status_t Stm32H743RomBoot_GetInfo(
-    stm32h743_rom_boot_t *device, stm32h743_rom_boot_info_t *info)
+stm32h743_rom_boot_status_t Stm32H743RomBoot_GetInfo(stm32h743_rom_boot_t *device,
+                                                     stm32h743_rom_boot_info_t *info)
 {
     stm32h743_rom_boot_info_t parsed;
     uint8_t count_minus_one;
@@ -309,17 +300,17 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_GetInfo(
     {
         return Fault(device, status);
     }
-    response_count = (uint32_t)count_minus_one + 1U;
+    response_count = (uint32_t) count_minus_one + 1U;
     if (response_count > (STM32H743_ROM_BOOT_MAX_COMMAND_COUNT + 1U))
     {
         return Fault(device, STM32H743_ROM_BOOT_STATUS_PROTOCOL_ERROR);
     }
-    parsed.command_count = (uint8_t)(response_count - 1U);
+    parsed.command_count = (uint8_t) (response_count - 1U);
     status = Rx(device, &parsed.bootloader_version, 1U, device->config.command_timeout_ms);
     if ((status == STM32H743_ROM_BOOT_STATUS_OK) && (parsed.command_count != 0U))
     {
-        status = Rx(device, parsed.commands, parsed.command_count,
-                    device->config.command_timeout_ms);
+        status =
+            Rx(device, parsed.commands, parsed.command_count, device->config.command_timeout_ms);
     }
     if (status == STM32H743_ROM_BOOT_STATUS_OK)
     {
@@ -356,9 +347,9 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_GetInfo(
     {
         return Fault(device, status);
     }
-    parsed.device_id = (uint16_t)(((uint16_t)id[0] << 8U) | id[1]);
-    device->info = parsed;
-    *info = parsed;
+    parsed.device_id = (uint16_t) (((uint16_t) id[0] << 8U) | id[1]);
+    device->info     = parsed;
+    *info            = parsed;
     if (parsed.device_id != STM32H743_ROM_BOOT_DEVICE_ID)
     {
         return STM32H743_ROM_BOOT_STATUS_WRONG_DEVICE;
@@ -370,7 +361,7 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_GetInfo(
 static stm32h743_rom_boot_status_t ReadBlock(stm32h743_rom_boot_t *device, uint32_t address,
                                              uint8_t *data, uint32_t size)
 {
-    uint8_t length[2] = {(uint8_t)(size - 1U), (uint8_t)~(uint8_t)(size - 1U)};
+    uint8_t length[2]                  = {(uint8_t) (size - 1U), (uint8_t) ~(uint8_t) (size - 1U)};
     stm32h743_rom_boot_status_t status = SendCommand(device, ROM_CMD_READ_MEMORY);
     if (status == STM32H743_ROM_BOOT_STATUS_OK)
     {
@@ -391,10 +382,10 @@ static stm32h743_rom_boot_status_t ReadBlock(stm32h743_rom_boot_t *device, uint3
     return status;
 }
 
-stm32h743_rom_boot_status_t Stm32H743RomBoot_Read(
-    stm32h743_rom_boot_t *device, uint32_t address, void *data, uint32_t size)
+stm32h743_rom_boot_status_t Stm32H743RomBoot_Read(stm32h743_rom_boot_t *device, uint32_t address,
+                                                  void *data, uint32_t size)
 {
-    uint8_t *output = (uint8_t *)data;
+    uint8_t *output    = (uint8_t *) data;
     uint32_t remaining = size;
     stm32h743_rom_boot_status_t status;
 
@@ -416,7 +407,7 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Read(
         uint32_t chunk = (remaining > STM32H743_ROM_BOOT_MAX_TRANSFER)
                              ? STM32H743_ROM_BOOT_MAX_TRANSFER
                              : remaining;
-        status = ReadBlock(device, address, output, chunk);
+        status         = ReadBlock(device, address, output, chunk);
         if (status != STM32H743_ROM_BOOT_STATUS_OK)
         {
             return Fault(device, status);
@@ -428,8 +419,8 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Read(
     return STM32H743_ROM_BOOT_STATUS_OK;
 }
 
-stm32h743_rom_boot_status_t Stm32H743RomBoot_Erase(
-    stm32h743_rom_boot_t *device, uint32_t address, uint32_t size)
+stm32h743_rom_boot_status_t Stm32H743RomBoot_Erase(stm32h743_rom_boot_t *device, uint32_t address,
+                                                   uint32_t size)
 {
     uint8_t frame[ROM_ERASE_FRAME_SIZE];
     uint32_t first;
@@ -448,8 +439,7 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Erase(
         return status;
     }
     first = (address - STM32H743_ROM_BOOT_FLASH_BASE) / STM32H743_ROM_BOOT_SECTOR_SIZE;
-    last = (address + size - 1U - STM32H743_ROM_BOOT_FLASH_BASE) /
-           STM32H743_ROM_BOOT_SECTOR_SIZE;
+    last  = (address + size - 1U - STM32H743_ROM_BOOT_FLASH_BASE) / STM32H743_ROM_BOOT_SECTOR_SIZE;
     count = last - first + 1U;
     if ((device->info.bootloader_version == ROM_VERSION_V91) &&
         (last >= STM32H743_ROM_BOOT_BANK2_FIRST_SECTOR) &&
@@ -462,17 +452,17 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Erase(
     {
         return Fault(device, status);
     }
-    frame[0] = (uint8_t)((count - 1U) >> 8U);
-    frame[1] = (uint8_t)(count - 1U);
+    frame[0] = (uint8_t) ((count - 1U) >> 8U);
+    frame[1] = (uint8_t) (count - 1U);
     for (i = 0U; i < count; ++i)
     {
-        uint16_t sector = (uint16_t)(first + i);
-        frame[2U + i * 2U] = (uint8_t)(sector >> 8U);
-        frame[3U + i * 2U] = (uint8_t)sector;
+        uint16_t sector    = (uint16_t) (first + i);
+        frame[2U + i * 2U] = (uint8_t) (sector >> 8U);
+        frame[3U + i * 2U] = (uint8_t) sector;
     }
-    payload_size = 2U + count * 2U;
+    payload_size        = 2U + count * 2U;
     frame[payload_size] = XorBytes(frame, payload_size);
-    status = Tx(device, frame, payload_size + 1U, device->config.command_timeout_ms);
+    status              = Tx(device, frame, payload_size + 1U, device->config.command_timeout_ms);
     if (status == STM32H743_ROM_BOOT_STATUS_OK)
     {
         status = ReceiveAck(device, device->config.erase_timeout_ms);
@@ -484,8 +474,7 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Erase(
     if ((device->info.bootloader_version == ROM_VERSION_V91) &&
         (last >= STM32H743_ROM_BOOT_BANK2_FIRST_SECTOR))
     {
-        device->port.delay_ms(device->port.context,
-                              device->config.v91_bank2_erase_guard_ms);
+        device->port.delay_ms(device->port.context, device->config.v91_bank2_erase_guard_ms);
     }
     return STM32H743_ROM_BOOT_STATUS_OK;
 }
@@ -504,13 +493,13 @@ static stm32h743_rom_boot_status_t WriteBlock(stm32h743_rom_boot_t *device, uint
     {
         return status;
     }
-    frame[0] = (uint8_t)(size - 1U);
+    frame[0] = (uint8_t) (size - 1U);
     for (i = 0U; i < size; ++i)
     {
         frame[i + 1U] = data[i];
     }
     frame[size + 1U] = XorBytes(frame, size + 1U);
-    status = Tx(device, frame, size + 2U, device->config.command_timeout_ms);
+    status           = Tx(device, frame, size + 2U, device->config.command_timeout_ms);
     if (status == STM32H743_ROM_BOOT_STATUS_OK)
     {
         status = ReceiveAck(device, device->config.write_timeout_ms);
@@ -518,10 +507,10 @@ static stm32h743_rom_boot_status_t WriteBlock(stm32h743_rom_boot_t *device, uint
     return status;
 }
 
-stm32h743_rom_boot_status_t Stm32H743RomBoot_Write(
-    stm32h743_rom_boot_t *device, uint32_t address, const void *data, uint32_t size)
+stm32h743_rom_boot_status_t Stm32H743RomBoot_Write(stm32h743_rom_boot_t *device, uint32_t address,
+                                                   const void *data, uint32_t size)
 {
-    const uint8_t *input = (const uint8_t *)data;
+    const uint8_t *input = (const uint8_t *) data;
     uint8_t padded[STM32H743_ROM_BOOT_MAX_TRANSFER];
     uint32_t remaining = size;
     stm32h743_rom_boot_status_t status;
@@ -549,9 +538,9 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Write(
     }
     while (remaining != 0U)
     {
-        uint32_t actual = (remaining > STM32H743_ROM_BOOT_MAX_TRANSFER)
-                              ? STM32H743_ROM_BOOT_MAX_TRANSFER
-                              : remaining;
+        uint32_t actual    = (remaining > STM32H743_ROM_BOOT_MAX_TRANSFER)
+                                 ? STM32H743_ROM_BOOT_MAX_TRANSFER
+                                 : remaining;
         uint32_t wire_size = (actual + 3U) & ~3U;
         uint32_t i;
         for (i = 0U; i < actual; ++i)
@@ -574,10 +563,10 @@ stm32h743_rom_boot_status_t Stm32H743RomBoot_Write(
     return STM32H743_ROM_BOOT_STATUS_OK;
 }
 
-stm32h743_rom_boot_status_t Stm32H743RomBoot_Verify(
-    stm32h743_rom_boot_t *device, uint32_t address, const void *data, uint32_t size)
+stm32h743_rom_boot_status_t Stm32H743RomBoot_Verify(stm32h743_rom_boot_t *device, uint32_t address,
+                                                    const void *data, uint32_t size)
 {
-    const uint8_t *expected = (const uint8_t *)data;
+    const uint8_t *expected = (const uint8_t *) data;
     uint8_t readback[STM32H743_ROM_BOOT_MAX_TRANSFER];
     uint32_t remaining = size;
     stm32h743_rom_boot_status_t status;

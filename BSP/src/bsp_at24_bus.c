@@ -44,8 +44,8 @@ firmware_status_t BspAt24Bus_Read(uint8_t address_7bit, uint16_t memory_address,
         return status;
     }
     return ConvertStatus(HAL_I2C_Mem_Read(&AT24_I2C_HANDLE, (uint16_t) address_7bit << 1U,
-                                           memory_address, I2C_MEMADD_SIZE_16BIT, data,
-                                           (uint16_t) size, BSP_AT24_BUS_TIMEOUT_MS));
+                                          memory_address, I2C_MEMADD_SIZE_16BIT, data,
+                                          (uint16_t) size, BSP_AT24_BUS_TIMEOUT_MS));
 }
 
 firmware_status_t BspAt24Bus_Write(uint8_t address_7bit, uint16_t memory_address,
@@ -57,9 +57,8 @@ firmware_status_t BspAt24Bus_Write(uint8_t address_7bit, uint16_t memory_address
         return status;
     }
     return ConvertStatus(HAL_I2C_Mem_Write(&AT24_I2C_HANDLE, (uint16_t) address_7bit << 1U,
-                                            memory_address, I2C_MEMADD_SIZE_16BIT,
-                                            (uint8_t *) data, (uint16_t) size,
-                                            BSP_AT24_BUS_TIMEOUT_MS));
+                                           memory_address, I2C_MEMADD_SIZE_16BIT, (uint8_t *) data,
+                                           (uint16_t) size, BSP_AT24_BUS_TIMEOUT_MS));
 }
 
 firmware_status_t BspAt24Bus_Probe(uint8_t address_7bit)
@@ -68,7 +67,6 @@ firmware_status_t BspAt24Bus_Probe(uint8_t address_7bit)
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    return ConvertStatus(HAL_I2C_IsDeviceReady(&AT24_I2C_HANDLE,
-                                               (uint16_t) address_7bit << 1U, 1U,
+    return ConvertStatus(HAL_I2C_IsDeviceReady(&AT24_I2C_HANDLE, (uint16_t) address_7bit << 1U, 1U,
                                                BSP_AT24_BUS_TIMEOUT_MS));
 }

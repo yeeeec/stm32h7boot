@@ -14,8 +14,7 @@
 static uint8_t s_source_block[UPDATE_IO_BLOCK_SIZE];
 static uint8_t s_readback_block[UPDATE_IO_BLOCK_SIZE];
 
-static update_operation_result_t install_result(update_failure_t failure,
-                                                firmware_status_t status)
+static update_operation_result_t install_result(update_failure_t failure, firmware_status_t status)
 {
     update_operation_result_t result = {failure, status};
     return result;
@@ -30,15 +29,15 @@ static firmware_status_t target_limits(image_target_t target, uint32_t *address,
     switch (target)
     {
         case IMAGE_TARGET_APP:
-            *address = PLATFORM_APP_OFFSET;
+            *address      = PLATFORM_APP_OFFSET;
             *maximum_size = PLATFORM_APP_MAX_SIZE;
             return FIRMWARE_STATUS_OK;
         case IMAGE_TARGET_GUI:
-            *address = PLATFORM_GUI_OFFSET;
+            *address      = PLATFORM_GUI_OFFSET;
             *maximum_size = PLATFORM_GUI_MAX_SIZE;
             return FIRMWARE_STATUS_OK;
         case IMAGE_TARGET_THERAPY:
-            *address = PLATFORM_THERAPY_TARGET_ADDRESS;
+            *address      = PLATFORM_THERAPY_TARGET_ADDRESS;
             *maximum_size = PLATFORM_THERAPY_MAX_SIZE;
             return FIRMWARE_STATUS_OK;
         default:
@@ -52,8 +51,8 @@ static firmware_status_t target_erase(image_target_t target, uint32_t address, u
                                           : PlatformFlash_Erase(address, size);
 }
 
-static firmware_status_t target_write(image_target_t target, uint32_t address,
-                                      const void *data, uint32_t size)
+static firmware_status_t target_write(image_target_t target, uint32_t address, const void *data,
+                                      uint32_t size)
 {
     return target == IMAGE_TARGET_THERAPY ? PlatformTherapy_Write(address, data, size)
                                           : PlatformFlash_Write(address, data, size);
@@ -66,8 +65,8 @@ static firmware_status_t target_read(image_target_t target, uint32_t address, vo
                                           : PlatformFlash_Read(address, data, size);
 }
 
-update_operation_result_t ImageInstaller_Install(
-    const char *root, const update_manifest_component_t *component)
+update_operation_result_t ImageInstaller_Install(const char *root,
+                                                 const update_manifest_component_t *component)
 {
     char path[UPDATE_PATH_MAX];
     platform_file_info_t info;
@@ -79,26 +78,27 @@ update_operation_result_t ImageInstaller_Install(
     uint32_t maximum_size;
     uint32_t offset = 0U;
     uint32_t erase_size;
-    int file_open = 0;
-    int hash_started = 0;
-    int therapy_started = 0;
+    int file_open                    = 0;
+    int hash_started                 = 0;
+    int therapy_started              = 0;
     update_operation_result_t result = {UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK};
 
     if (root == NULL || component == NULL ||
-        target_limits(component->target, &target_address, &maximum_size) != FIRMWARE_STATUS_OK ||
-        snprintf(path, sizeof(path), "%s/%s", root, component->file) <= 0)
-        return install_result(UPDATE_FAILURE_INSTALL_SOURCE,
-                              FIRMWARE_STATUS_INVALID_ARGUMENT);
+        target_limits(component->target, &target_address, &maximum_size) != FIRMWARE_STATUS_OK)
+        return install_result(UPDATE_FAILURE_INSTALL_SOURCE, FIRMWARE_STATUS_INVALID_ARGUMENT);
+    {
+        int length = snprintf(path, sizeof(path), "%s/%s", root, component->file);
+        if (length <= 0 || (size_t) length >= sizeof(path))
+            return install_result(UPDATE_FAILURE_INSTALL_SOURCE, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+    }
     if (!UpdateHex_DecodeSha256(component->sha256, expected_digest))
-        return install_result(UPDATE_FAILURE_INSTALL_HASH,
-                              FIRMWARE_STATUS_INVALID_ARGUMENT);
+        return install_result(UPDATE_FAILURE_INSTALL_HASH, FIRMWARE_STATUS_INVALID_ARGUMENT);
 
     result.status = PlatformStorage_Stat(path, &info);
     if (FirmwareStatus_IsError(result.status) || info.is_directory != 0U)
-        return install_result(UPDATE_FAILURE_INSTALL_SOURCE,
-                              FirmwareStatus_IsError(result.status)
-                                  ? result.status
-                                  : FIRMWARE_STATUS_INVALID_STATE);
+        return install_result(UPDATE_FAILURE_INSTALL_SOURCE, FirmwareStatus_IsError(result.status)
+                                                                 ? result.status
+                                                                 : FIRMWARE_STATUS_INVALID_STATE);
     if (info.size == 0U || info.size != component->size || info.size > maximum_size)
         return install_result(UPDATE_FAILURE_INSTALL_SIZE, FIRMWARE_STATUS_OUT_OF_RANGE);
 
@@ -126,7 +126,7 @@ update_operation_result_t ImageInstaller_Install(
             goto cleanup;
         }
         therapy_started = 1;
-        erase_size = component->size;
+        erase_size      = component->size;
     }
     else
     {
@@ -138,8 +138,8 @@ update_operation_result_t ImageInstaller_Install(
             result.failure = UPDATE_FAILURE_INSTALL_ERASE;
             goto cleanup;
         }
-        erase_size = (component->size + PLATFORM_FLASH_ERASE_SIZE - 1U) &
-                     ~(PLATFORM_FLASH_ERASE_SIZE - 1U);
+        erase_size =
+            (component->size + PLATFORM_FLASH_ERASE_SIZE - 1U) & ~(PLATFORM_FLASH_ERASE_SIZE - 1U);
     }
 
     result.status = target_erase(component->target, target_address, erase_size);
@@ -152,7 +152,7 @@ update_operation_result_t ImageInstaller_Install(
     while (offset < component->size)
     {
         size_t requested = component->size - offset;
-        size_t received = 0U;
+        size_t received  = 0U;
 
         if (requested > sizeof(s_source_block))
             requested = sizeof(s_source_block);
@@ -170,15 +170,15 @@ update_operation_result_t ImageInstaller_Install(
             result.failure = UPDATE_FAILURE_INSTALL_HASH;
             goto cleanup;
         }
-        result.status = target_write(component->target, target_address + offset,
-                                     s_source_block, (uint32_t) received);
+        result.status = target_write(component->target, target_address + offset, s_source_block,
+                                     (uint32_t) received);
         if (FirmwareStatus_IsError(result.status))
         {
             result.failure = UPDATE_FAILURE_INSTALL_WRITE;
             goto cleanup;
         }
-        result.status = target_read(component->target, target_address + offset,
-                                    s_readback_block, (uint32_t) received);
+        result.status = target_read(component->target, target_address + offset, s_readback_block,
+                                    (uint32_t) received);
         if (FirmwareStatus_IsError(result.status) ||
             memcmp(s_source_block, s_readback_block, received) != 0)
         {
@@ -192,7 +192,7 @@ update_operation_result_t ImageInstaller_Install(
     }
 
     result.status = Crypto_Sha256Finish(&hash, installed_digest);
-    hash_started = 0;
+    hash_started  = 0;
     if (FirmwareStatus_IsError(result.status) ||
         memcmp(installed_digest, expected_digest, sizeof(installed_digest)) != 0)
     {
@@ -210,7 +210,7 @@ cleanup:
         if (FirmwareStatus_IsOk(result.status) && FirmwareStatus_IsError(close_status))
         {
             result.failure = UPDATE_FAILURE_INSTALL_CLOSE;
-            result.status = close_status;
+            result.status  = close_status;
         }
     }
     if (therapy_started != 0)
@@ -219,7 +219,7 @@ cleanup:
         if (FirmwareStatus_IsOk(result.status) && FirmwareStatus_IsError(end_status))
         {
             result.failure = UPDATE_FAILURE_THERAPY_EXIT;
-            result.status = end_status;
+            result.status  = end_status;
         }
     }
     return result;

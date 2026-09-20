@@ -20,8 +20,8 @@ extern "C"
 
     firmware_status_t BspQspiFlash_Init(void);
 
-    firmware_status_t BspQspiFlash_EnterMemoryMapped(
-        const bsp_qspi_flash_transaction_t *read_transaction);
+    firmware_status_t
+    BspQspiFlash_EnterMemoryMapped(const bsp_qspi_flash_transaction_t *read_transaction);
 
     firmware_status_t BspQspiFlash_ExitMemoryMapped(void);
 

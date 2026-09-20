@@ -15,10 +15,10 @@ firmware_status_t BspTherapyGpio_Init(void)
 
     __HAL_RCC_GPIOI_CLK_ENABLE();
     __HAL_RCC_GPIOC_CLK_ENABLE();
-    init.Mode = GPIO_MODE_OUTPUT_PP;
-    init.Pull = GPIO_NOPULL;
+    init.Mode  = GPIO_MODE_OUTPUT_PP;
+    init.Pull  = GPIO_NOPULL;
     init.Speed = GPIO_SPEED_FREQ_LOW;
-    init.Pin = THERAPY_BOOT0_PIN;
+    init.Pin   = THERAPY_BOOT0_PIN;
     HAL_GPIO_Init(THERAPY_BOOT0_GPIO_PORT, &init);
     init.Pin = THERAPY_RESET_PIN;
     HAL_GPIO_Init(THERAPY_RESET_GPIO_PORT, &init);

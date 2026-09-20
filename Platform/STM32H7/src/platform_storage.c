@@ -84,7 +84,7 @@ static file_slot_t *GetFileSlot(platform_file_handle_t handle)
     }
     index = (handle & 0xFFFFU);
     if ((index >= PLATFORM_STORAGE_FILE_COUNT) || (s_files[index].used == 0U) ||
-        ((uint16_t)(handle >> 16U) != s_files[index].generation))
+        ((uint16_t) (handle >> 16U) != s_files[index].generation))
     {
         return NULL;
     }
@@ -101,7 +101,7 @@ static dir_slot_t *GetDirSlot(platform_dir_handle_t handle)
     }
     index = (handle & 0xFFFFU);
     if ((index >= PLATFORM_STORAGE_DIR_COUNT) || (s_directories[index].used == 0U) ||
-        ((uint16_t)(handle >> 16U) != s_directories[index].generation))
+        ((uint16_t) (handle >> 16U) != s_directories[index].generation))
     {
         return NULL;
     }
@@ -214,10 +214,11 @@ firmware_status_t PlatformStorage_OpenRead(const char *path, platform_file_handl
             {
                 return MapFatFsStatus(result);
             }
-            s_files[i].used = 1U;
-            s_files[i].generation = (uint16_t)(s_files[i].generation + 1U);
-            if (s_files[i].generation == 0U) s_files[i].generation = 1U;
-            *handle = ((uint32_t)s_files[i].generation << 16U) | i;
+            s_files[i].used       = 1U;
+            s_files[i].generation = (uint16_t) (s_files[i].generation + 1U);
+            if (s_files[i].generation == 0U)
+                s_files[i].generation = 1U;
+            *handle = ((uint32_t) s_files[i].generation << 16U) | i;
             return FIRMWARE_STATUS_OK;
         }
     }
@@ -241,10 +242,11 @@ firmware_status_t PlatformStorage_OpenWrite(const char *path, platform_file_hand
             result = f_open(&s_files[i].file, path, FA_WRITE | FA_CREATE_ALWAYS);
             if (result != FR_OK)
                 return MapFatFsStatus(result);
-            s_files[i].used = 1U;
-            s_files[i].generation = (uint16_t)(s_files[i].generation + 1U);
-            if (s_files[i].generation == 0U) s_files[i].generation = 1U;
-            *handle = ((uint32_t)s_files[i].generation << 16U) | i;
+            s_files[i].used       = 1U;
+            s_files[i].generation = (uint16_t) (s_files[i].generation + 1U);
+            if (s_files[i].generation == 0U)
+                s_files[i].generation = 1U;
+            *handle = ((uint32_t) s_files[i].generation << 16U) | i;
             return FIRMWARE_STATUS_OK;
         }
     }
@@ -441,10 +443,11 @@ firmware_status_t PlatformStorage_DirOpen(const char *path, platform_dir_handle_
             {
                 return MapFatFsStatus(result);
             }
-            s_directories[i].used = 1U;
-            s_directories[i].generation = (uint16_t)(s_directories[i].generation + 1U);
-            if (s_directories[i].generation == 0U) s_directories[i].generation = 1U;
-            *handle = ((uint32_t)s_directories[i].generation << 16U) | i;
+            s_directories[i].used       = 1U;
+            s_directories[i].generation = (uint16_t) (s_directories[i].generation + 1U);
+            if (s_directories[i].generation == 0U)
+                s_directories[i].generation = 1U;
+            *handle = ((uint32_t) s_directories[i].generation << 16U) | i;
             return FIRMWARE_STATUS_OK;
         }
     }

@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "firmware/status.h"
+#include "firmware/update_journal.h"
 #include "update/update_types.h"
 
 #define UPDATE_MANIFEST_MAX_SIZE       8192U
@@ -71,61 +72,38 @@ typedef struct
     firmware_status_t status;
 } update_operation_result_t;
 
-typedef enum
-{
-    UPDATE_PHASE_NONE = 0,
-    UPDATE_PHASE_INSTALLING,
-    UPDATE_PHASE_COMMITTING
-} update_phase_t;
-
-typedef struct
-{
-    uint32_t magic;
-    uint32_t format_version;
-    uint32_t sequence;
-    uint32_t phase;
-    uint8_t manifest_sha256[32];
-    uint32_t crc32;
-} update_journal_record_t;
-
 firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
                                        update_manifest_t *manifest);
 firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifest);
-firmware_status_t UpdateManifest_Digest(const update_manifest_t *manifest, uint8_t digest[32]);
 int UpdateVersion_Compare(const update_version_t *left, const update_version_t *right);
 int UpdatePackage_IsValidId(const char *package_id);
 int UpdatePackage_IsValidComponentFileName(const char *file_name);
 
-firmware_status_t ManifestVerify_Verify(const update_manifest_t *manifest,
-                                        const uint8_t digest[32]);
-
 update_operation_result_t PackageReader_Validate(const char *root,
-                                                  const uint8_t *expected_raw_digest,
-                                                  int verify_payload_hashes,
-                                                  update_package_t *package);
+                                                 const uint8_t *expected_raw_digest,
+                                                 int verify_payload_hashes,
+                                                 update_package_t *package);
 
-update_operation_result_t ImageInstaller_Install(
-    const char *root, const update_manifest_component_t *component);
+update_operation_result_t ImageInstaller_Install(const char *root,
+                                                 const update_manifest_component_t *component);
 
 firmware_status_t CurrentStore_Verify(void);
 firmware_status_t CurrentStore_Read(update_package_t *package);
-firmware_status_t CurrentStore_Commit(const update_package_t *package);
-firmware_status_t CurrentStore_Reconcile(void);
-firmware_status_t CurrentStore_Restore(void);
+firmware_status_t CurrentStore_Commit(const update_package_t *package,
+                                      const uint8_t expected_manifest_sha256[32]);
+firmware_status_t CurrentStore_CleanupUpdate(void);
 
 firmware_status_t UpdateJournal_Read(update_journal_record_t *record);
-firmware_status_t UpdateJournal_Write(update_phase_t phase, const uint8_t manifest_sha256[32]);
-firmware_status_t UpdateJournal_Clear(void);
+firmware_status_t UpdateJournal_Write(const update_journal_record_t *record);
 
 typedef enum
 {
     UPDATE_VERSION_REJECT = 0,
-    UPDATE_VERSION_ALLOW = 1
+    UPDATE_VERSION_ALLOW  = 1
 } update_version_decision_t;
 
 update_version_decision_t VersionPolicy_Check(const update_version_t *update,
-                                               const update_version_t *current,
-                                               int current_exists);
+                                              const update_version_t *current, int current_exists);
 firmware_status_t VersionPolicy_ValidateMinimumBootloader(const update_version_t *required,
                                                           const update_version_t *running);
 

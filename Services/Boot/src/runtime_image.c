@@ -30,10 +30,10 @@ firmware_status_t RuntimeImage_Prepare(uint32_t *vector_address)
     if ((address & (PLATFORM_APP_VECTOR_ALIGNMENT - 1U)) != 0U)
         return FIRMWARE_STATUS_INVALID_STATE;
 
-    vectors = (const volatile uint32_t *) (uintptr_t) address;
-    stack_pointer = vectors[0];
+    vectors           = (const volatile uint32_t *) (uintptr_t) address;
+    stack_pointer     = vectors[0];
     reset_handler_raw = vectors[1];
-    reset_handler = reset_handler_raw & ~1UL;
+    reset_handler     = reset_handler_raw & ~1UL;
 
     if (!PlatformCpu_IsValidStackPointer(stack_pointer) || (stack_pointer & 7U) != 0U ||
         (reset_handler_raw & 1U) == 0U || reset_handler < address ||

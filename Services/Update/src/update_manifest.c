@@ -10,7 +10,6 @@
 
 #include <limits.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 
 #include "crypto/sha256.h"
@@ -52,7 +51,7 @@ static int HasTrailingObjectComma(const uint8_t *json, size_t length)
 {
     size_t position;
     int in_string = 0;
-    int escaped = 0;
+    int escaped   = 0;
 
     for (position = 0U; position < length; ++position)
     {
@@ -259,24 +258,32 @@ static int ReadVersion(JsonCursor *cursor, update_version_t *version)
 static int ReadVersionValue(JsonCursor *cursor, update_version_t *version, uint8_t *is_string)
 {
     char text[48];
-    char *end;
-    unsigned long values[3] = {0U, 0U, 0U};
+    uint32_t values[3] = {0U, 0U, 0U};
     size_t i;
     SkipSpace(cursor);
     if (cursor->position < cursor->length && cursor->data[cursor->position] == '"')
     {
         if (!CopyString(cursor, text, sizeof(text)))
             return 0;
-        end = text;
-        for (i = 0U; i < 3U; ++i)
         {
-            char *next;
-            if (*end < '0' || *end > '9')
-                return 0;
-            values[i] = strtoul(end, &next, 10);
-            if (values[i] > UINT32_MAX || next == end || (i < 2U ? *next != '.' : *next != '\0'))
-                return 0;
-            end = next + (i < 2U ? 1 : 0);
+            size_t position = 0U;
+            for (i = 0U; i < 3U; ++i)
+            {
+                uint32_t value = 0U;
+                size_t digits  = 0U;
+                while (text[position] >= '0' && text[position] <= '9')
+                {
+                    uint32_t digit = (uint32_t) (text[position] - '0');
+                    if (value > (UINT32_MAX - digit) / 10U)
+                        return 0;
+                    value = value * 10U + digit;
+                    ++position;
+                    ++digits;
+                }
+                if (digits == 0U || (i < 2U ? text[position++] != '.' : text[position] != '\0'))
+                    return 0;
+                values[i] = value;
+            }
         }
         version->major = (uint32_t) values[0];
         version->minor = (uint32_t) values[1];
@@ -427,9 +434,9 @@ static int ReadComponents(JsonCursor *cursor, update_manifest_t *manifest)
         component = &manifest->components[manifest->component_count];
         (void) memset(component, 0, sizeof(*component));
         (void) memcpy(component->name, key, strlen(key) + 1U);
-        component->target = mask == 1U ? IMAGE_TARGET_APP
+        component->target = mask == 1U   ? IMAGE_TARGET_APP
                             : mask == 2U ? IMAGE_TARGET_GUI
-                                        : IMAGE_TARGET_THERAPY;
+                                         : IMAGE_TARGET_THERAPY;
         if (!ReadComponent(cursor, component))
             return 0;
         seenMask |= mask;
@@ -567,21 +574,21 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
         uint32_t component_bit;
         if (component->target == IMAGE_TARGET_APP)
         {
-            file = UPDATE_APP_FILE;
+            file          = UPDATE_APP_FILE;
             component_bit = 1U;
             if (component->size > PLATFORM_APP_MAX_SIZE)
                 return FIRMWARE_STATUS_OUT_OF_RANGE;
         }
         else if (component->target == IMAGE_TARGET_GUI)
         {
-            file = UPDATE_GUI_FILE;
+            file          = UPDATE_GUI_FILE;
             component_bit = 2U;
             if (component->size > PLATFORM_GUI_MAX_SIZE)
                 return FIRMWARE_STATUS_OUT_OF_RANGE;
         }
         else if (component->target == IMAGE_TARGET_THERAPY)
         {
-            file = UPDATE_THERAPY_FILE;
+            file          = UPDATE_THERAPY_FILE;
             component_bit = 4U;
             if (component->size > PLATFORM_THERAPY_MAX_SIZE)
                 return FIRMWARE_STATUS_OUT_OF_RANGE;
@@ -592,7 +599,7 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
         expected |= component_bit;
     }
-    return expected == 7U ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_NOT_FOUND;
+    return expected != 0U ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_NOT_FOUND;
 }
 
 /** 解析完整 manifest 并执行 schema、范围和规范性校验。 */
@@ -663,8 +670,8 @@ firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     SkipSpace(&cursor);
-    if (cursor.position != cursor.length || (seen & 63U) != 63U || manifest->component_count == 0U ||
-        manifest->has_signing == 0U)
+    if (cursor.position != cursor.length || (seen & 63U) != 63U ||
+        manifest->component_count == 0U || manifest->has_signing == 0U)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     if (!IsCanonicalAsciiValue(manifest->product, sizeof(manifest->product)) ||
         !IsCanonicalAsciiValue(manifest->hardware, sizeof(manifest->hardware)) ||
@@ -716,13 +723,11 @@ typedef struct
     crypto_sha256_context_t *hash;
 } CanonicalWriter;
 
-static firmware_status_t CanonicalWrite(CanonicalWriter *writer, const uint8_t *data,
-                                        size_t size)
+static firmware_status_t CanonicalWrite(CanonicalWriter *writer, const uint8_t *data, size_t size)
 {
     if (writer->hash != NULL)
-        return Crypto_Sha256Update(writer->hash, data, size) == 0
-                   ? FIRMWARE_STATUS_OK
-                   : FIRMWARE_STATUS_IO_ERROR;
+        return Crypto_Sha256Update(writer->hash, data, size) == 0 ? FIRMWARE_STATUS_OK
+                                                                  : FIRMWARE_STATUS_IO_ERROR;
     if (writer->length > writer->capacity || size > writer->capacity - writer->length)
         return FIRMWARE_STATUS_BUFFER_TOO_SMALL;
     (void) memcpy(writer->buffer + writer->length, data, size);
@@ -783,9 +788,9 @@ static firmware_status_t AppendMinimumBootloaderVersion(CanonicalWriter *writer,
 static firmware_status_t WriteCanonical(const update_manifest_t *manifest, CanonicalWriter *writer)
 {
     /* 组件输出顺序属于 canonical 格式，保证相同 manifest 始终得到相同摘要。 */
-    static const image_target_t component_order[] = {
-        IMAGE_TARGET_APP, IMAGE_TARGET_GUI, IMAGE_TARGET_THERAPY};
-    size_t component_count                  = 0U;
+    static const image_target_t component_order[] = {IMAGE_TARGET_APP, IMAGE_TARGET_GUI,
+                                                     IMAGE_TARGET_THERAPY};
+    size_t component_count                        = 0U;
     size_t i;
     firmware_status_t status;
 
@@ -797,8 +802,7 @@ static firmware_status_t WriteCanonical(const update_manifest_t *manifest, Canon
             return status;                                                                         \
     } while (0)
 
-    if (manifest == NULL || writer == NULL ||
-        !UpdatePackage_IsValidId(manifest->package_id))
+    if (manifest == NULL || writer == NULL || !UpdatePackage_IsValidId(manifest->package_id))
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
 
     APPEND_TEXT("{\"components\":{");

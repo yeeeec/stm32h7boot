@@ -111,8 +111,8 @@ extern "C"
     spi_nor_status_t SpiNor_Init(spi_nor_t *device, const spi_nor_port_t *port,
                                  const spi_nor_config_t *config);
     spi_nor_status_t SpiNor_GetInfo(const spi_nor_t *device, spi_nor_info_t *info);
-    spi_nor_status_t SpiNor_GetMemoryMappedReadTransaction(
-        const spi_nor_t *device, spi_nor_transaction_t *transaction);
+    spi_nor_status_t SpiNor_GetMemoryMappedReadTransaction(const spi_nor_t *device,
+                                                           spi_nor_transaction_t *transaction);
     spi_nor_status_t SpiNor_Read(spi_nor_t *device, uint32_t address, void *data, uint32_t size);
 
     /** Start one page-bounded, transfer-size-bounded program operation. */

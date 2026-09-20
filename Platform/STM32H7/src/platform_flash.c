@@ -17,10 +17,10 @@ static uint8_t s_memory_mapped;
 static void CopyTransaction(const spi_nor_transaction_t *source,
                             bsp_qspi_flash_transaction_t *destination)
 {
-    destination->instruction = source->instruction;
+    destination->instruction   = source->instruction;
     destination->address_bytes = source->address_bytes;
-    destination->dummy_cycles = source->dummy_cycles;
-    destination->address = source->address;
+    destination->dummy_cycles  = source->dummy_cycles;
+    destination->address       = source->address;
 }
 
 static firmware_status_t QspiCommand(void *context, const spi_nor_transaction_t *transaction)
@@ -107,15 +107,15 @@ static firmware_status_t WaitOperation(void)
 
 firmware_status_t PlatformFlash_Init(void)
 {
-    const spi_nor_port_t port = {.context = NULL,
-                                 .command = QspiCommand,
-                                 .receive = QspiReceive,
-                                 .transmit = QspiTransmit,
-                                 .now_ms = NowMs,
-                                 .delay_ms = DelayMs,
-                                 .max_transfer_size = PLATFORM_FLASH_TRANSFER_MAX};
+    const spi_nor_port_t port     = {.context           = NULL,
+                                     .command           = QspiCommand,
+                                     .receive           = QspiReceive,
+                                     .transmit          = QspiTransmit,
+                                     .now_ms            = NowMs,
+                                     .delay_ms          = DelayMs,
+                                     .max_transfer_size = PLATFORM_FLASH_TRANSFER_MAX};
     const spi_nor_config_t config = {.program_timeout_ms = PLATFORM_FLASH_PROGRAM_TIMEOUT_MS,
-                                     .erase_timeout_ms = PLATFORM_FLASH_ERASE_TIMEOUT_MS};
+                                     .erase_timeout_ms   = PLATFORM_FLASH_ERASE_TIMEOUT_MS};
     spi_nor_info_t info;
     firmware_status_t status;
 
@@ -166,11 +166,11 @@ firmware_status_t PlatformFlash_GetInfo(platform_flash_info_t *info)
         return status;
     }
     info->capacity_bytes = driver_info.capacity_bytes;
-    info->page_size = driver_info.page_size;
-    info->erase_size = driver_info.erase_size;
-    info->jedec_id[0] = driver_info.jedec_id[0];
-    info->jedec_id[1] = driver_info.jedec_id[1];
-    info->jedec_id[2] = driver_info.jedec_id[2];
+    info->page_size      = driver_info.page_size;
+    info->erase_size     = driver_info.erase_size;
+    info->jedec_id[0]    = driver_info.jedec_id[0];
+    info->jedec_id[1]    = driver_info.jedec_id[1];
+    info->jedec_id[2]    = driver_info.jedec_id[2];
     return FIRMWARE_STATUS_OK;
 }
 
@@ -190,7 +190,7 @@ firmware_status_t PlatformFlash_Read(uint32_t address, void *buffer, uint32_t si
 firmware_status_t PlatformFlash_Write(uint32_t address, const void *buffer, uint32_t size)
 {
     const uint8_t *source = (const uint8_t *) buffer;
-    uint32_t remaining = size;
+    uint32_t remaining    = size;
     if ((buffer == NULL) || (size == 0U))
     {
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
@@ -206,8 +206,8 @@ firmware_status_t PlatformFlash_Write(uint32_t address, const void *buffer, uint
     }
     while (remaining != 0U)
     {
-        uint32_t page_remaining = PLATFORM_FLASH_PAGE_SIZE - (address % PLATFORM_FLASH_PAGE_SIZE);
-        uint32_t chunk = (remaining < page_remaining) ? remaining : page_remaining;
+        uint32_t page_remaining  = PLATFORM_FLASH_PAGE_SIZE - (address % PLATFORM_FLASH_PAGE_SIZE);
+        uint32_t chunk           = (remaining < page_remaining) ? remaining : page_remaining;
         firmware_status_t status = SpiNor_ProgramStart(&s_flash, address, source, chunk);
         if (status != FIRMWARE_STATUS_OK)
         {
@@ -244,8 +244,7 @@ firmware_status_t PlatformFlash_Erase(uint32_t address, uint32_t size)
     }
     while (remaining != 0U)
     {
-        firmware_status_t status = SpiNor_EraseStart(&s_flash, address,
-                                                     PLATFORM_FLASH_ERASE_SIZE);
+        firmware_status_t status = SpiNor_EraseStart(&s_flash, address, PLATFORM_FLASH_ERASE_SIZE);
         if (status != FIRMWARE_STATUS_OK)
         {
             return status;

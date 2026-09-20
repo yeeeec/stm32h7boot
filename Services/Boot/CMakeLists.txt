@@ -1,5 +1,4 @@
 add_library(boot_service STATIC
-    src/boot_mailbox.c
     src/runtime_image.c
 )
 

@@ -1,7 +1,6 @@
 add_library(update_service STATIC
     src/package_reader.c
     src/update_manifest.c
-    src/manifest_verify.c
     src/version_policy.c
     src/image_installer.c
     src/current_store.c

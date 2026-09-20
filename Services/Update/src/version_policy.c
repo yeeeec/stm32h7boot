@@ -1,8 +1,7 @@
 #include "update_internal.h"
 
 update_version_decision_t VersionPolicy_Check(const update_version_t *update,
-                                               const update_version_t *current,
-                                               int current_exists)
+                                              const update_version_t *current, int current_exists)
 {
     if (update == NULL || current_exists < 0 || current_exists > 1)
         return UPDATE_VERSION_REJECT;

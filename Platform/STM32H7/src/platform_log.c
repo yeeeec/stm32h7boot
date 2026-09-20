@@ -25,8 +25,8 @@ static uint32_t LogNowMs(void *context)
 firmware_status_t Platform_LogInit(void)
 {
     s_logging_port.context = NULL;
-    s_logging_port.write = UartWrite;
-    s_logging_port.now_ms = LogNowMs;
+    s_logging_port.write   = UartWrite;
+    s_logging_port.now_ms  = LogNowMs;
     if (Logging_SetOutputPort(&s_logging_port) != 0)
     {
         return FIRMWARE_STATUS_IO_ERROR;

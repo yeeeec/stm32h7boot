@@ -3,7 +3,6 @@ set(PLATFORM_STM32H7_SOURCES
     src/platform_flash.c
     src/platform_storage.c
     src/platform_nv_storage.c
-    src/platform_retained_memory.c
     src/platform_system.c
     src/platform_cpu.c
     src/platform_therapy.c

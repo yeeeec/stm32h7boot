@@ -28,6 +28,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "application/application.h"
+#include "iwdg.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -263,9 +264,10 @@ void Error_Handler(void)
 {
     /* USER CODE BEGIN Error_Handler_Debug */
     /* User can add his own implementation to report the HAL error return state */
-    __disable_irq();
     while (1)
     {
+        (void) HAL_IWDG_Refresh(&hiwdg1);
+        HAL_Delay(100U);
     }
     /* USER CODE END Error_Handler_Debug */
 }
