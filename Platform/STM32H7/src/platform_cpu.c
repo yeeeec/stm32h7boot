@@ -49,6 +49,7 @@ _Noreturn void PlatformCpu_Jump(uint32_t vector_address)
     __set_MSP(stack_pointer);
     __DSB();
     __ISB();
+    __enable_irq();
     entry();
     for (;;)
     {
