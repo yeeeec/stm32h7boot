@@ -1,20 +1,20 @@
-add_library(update STATIC
+add_library(update_service STATIC
+    src/package_reader.c
     src/update_manifest.c
-    src/update_request.c
+    src/manifest_verify.c
     src/version_policy.c
     src/image_installer.c
-    src/current_manager.c
-    src/update_manager.c
-    src/recovery_manager.c
+    src/current_store.c
     src/update_journal.c
-    src/boot_mailbox.c
+    src/update_service.c
 )
 
-target_include_directories(update PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
+target_include_directories(update_service
+    PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
+    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
-target_link_libraries(update
+target_link_libraries(update_service
     PUBLIC firmware_types
-    PRIVATE firmware_crypto platform_stm32h7
+    PRIVATE platform_stm32h7 firmware_crypto firmware_checksum
 )

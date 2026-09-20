@@ -10,6 +10,8 @@ extern "C"
 
 #define BOOT_REQUEST_MAGIC          0x504D424CUL
 #define BOOT_REQUEST_FORMAT_VERSION 1U
+#define BOOT_REQUEST_NONE           0U
+#define BOOT_REQUEST_UPDATE         0x55504454UL
 
     typedef struct
     {

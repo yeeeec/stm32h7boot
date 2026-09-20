@@ -1,3 +1,3 @@
 
+add_subdirectory(Boot)
 add_subdirectory(Update)
-add_subdirectory(stm32isp)

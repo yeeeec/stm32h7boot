@@ -3,10 +3,10 @@
  * @brief 无堆内存的升级 manifest JSON 解析、规范化和摘要计算。
  *
  * 解析器只接受定义好的升级 schema，并在复制字符串/数字前执行边界检查；
- * 签名校验通过注入的 verifier 完成。
+ * 签名验证由独立的静态信任库模块完成。
  */
 
-#include "update/update_manifest.h"
+#include "update_internal.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -14,7 +14,9 @@
 #include <string.h>
 
 #include "crypto/sha256.h"
-#include "firmware/boot_config.h"
+#include "firmware/product_identity.h"
+#include "platform/platform_memory_map.h"
+#include "update_config.h"
 
 /* 解析游标不拥有输入缓冲区，整个解析过程不申请堆内存。 */
 typedef struct
@@ -24,10 +26,6 @@ typedef struct
     size_t position;     /* 当前解析偏移。 */
 } JsonCursor;
 
-/* 当前产品注入的签名验证器及其上下文。 */
-static update_manifest_signature_verifier_t s_verifier;
-/* 签名 verifier 的不透明上下文，由注入方管理生命周期。 */
-static void *s_verifier_context;
 
 /** 跳过 JSON 空白字符。 */
 static void SkipSpace(JsonCursor *cursor)
@@ -49,6 +47,42 @@ static int Consume(JsonCursor *cursor, uint8_t expected)
         return 0;
     ++cursor->position;
     return 1;
+}
+static int HasTrailingObjectComma(const uint8_t *json, size_t length)
+{
+    size_t position;
+    int in_string = 0;
+    int escaped = 0;
+
+    for (position = 0U; position < length; ++position)
+    {
+        uint8_t c = json[position];
+        if (in_string != 0)
+        {
+            if (escaped != 0)
+                escaped = 0;
+            else if (c == '\\')
+                escaped = 1;
+            else if (c == '"')
+                in_string = 0;
+            continue;
+        }
+        if (c == '"')
+        {
+            in_string = 1;
+            continue;
+        }
+        if (c == ',')
+        {
+            size_t next = position + 1U;
+            while (next < length && (json[next] == ' ' || json[next] == '\t' ||
+                                     json[next] == '\r' || json[next] == '\n'))
+                ++next;
+            if (next < length && json[next] == '}')
+                return 1;
+        }
+    }
+    return 0;
 }
 
 /** 读取 JSON 字符串并复制到固定容量缓冲区。 */
@@ -137,7 +171,7 @@ static int IsSha256Hex(const char *value)
     for (i = 0U; i < UPDATE_SHA256_HEX_LENGTH; ++i)
     {
         const unsigned char c = (unsigned char) value[i];
-        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')))
+        if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
             return 0;
     }
     return 1;
@@ -310,10 +344,6 @@ static uint32_t ComponentMask(const char *name)
         return 2U;
     if (strcmp(name, "therapy") == 0)
         return 4U;
-    if (strcmp(name, "voice") == 0)
-        return 8U;
-    if (strcmp(name, "config") == 0)
-        return 16U;
     return 0U;
 }
 
@@ -397,7 +427,9 @@ static int ReadComponents(JsonCursor *cursor, update_manifest_t *manifest)
         component = &manifest->components[manifest->component_count];
         (void) memset(component, 0, sizeof(*component));
         (void) memcpy(component->name, key, strlen(key) + 1U);
-        component->mask = mask;
+        component->target = mask == 1U ? IMAGE_TARGET_APP
+                            : mask == 2U ? IMAGE_TARGET_GUI
+                                        : IMAGE_TARGET_THERAPY;
         if (!ReadComponent(cursor, component))
             return 0;
         seenMask |= mask;
@@ -427,7 +459,8 @@ static int ReadSigning(JsonCursor *cursor, update_manifest_t *manifest)
             return 0;
         if (strcmp(key, "format_version") == 0 && (seen & 1U) == 0U)
         {
-            if (!ReadUint(cursor, &manifest->format_version) || manifest->format_version != 1U)
+            if (!ReadUint(cursor, &manifest->format_version) ||
+                manifest->format_version != UPDATE_SUPPORTED_MANIFEST_VERSION)
                 return 0;
             seen |= 1U;
         }
@@ -476,7 +509,7 @@ static int ReadSigning(JsonCursor *cursor, update_manifest_t *manifest)
         if (!Consume(cursor, ','))
             return 0;
     }
-    if ((seen & 119U) != 119U)
+    if (seen != 127U)
         return 0;
     manifest->has_signing = 1U;
     return 1;
@@ -519,8 +552,10 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
 {
     size_t i;
     uint32_t expected = 0U;
-    if (manifest == NULL || strcmp(manifest->product, BOOT_PRODUCT_NAME) != 0 ||
-        strcmp(manifest->hardware, BOOT_HARDWARE_NAME) != 0 || manifest->component_count == 0U)
+    if (manifest == NULL || strcmp(manifest->product, FIRMWARE_PRODUCT_NAME) != 0 ||
+        strcmp(manifest->hardware, FIRMWARE_HARDWARE_NAME) != 0 ||
+        manifest->format_version != UPDATE_SUPPORTED_MANIFEST_VERSION ||
+        manifest->component_count == 0U)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     for (i = 0U; i < manifest->component_count; ++i)
     {
@@ -529,31 +564,35 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
         if (component->size == 0U || strcmp(component->format, "raw-bin-v1") != 0 ||
             !IsSha256Hex(component->sha256))
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
-        if (component->mask == 1U)
+        uint32_t component_bit;
+        if (component->target == IMAGE_TARGET_APP)
         {
-            file = BOOT_APP_FILE;
-            if (component->size > BOOT_APP_MAX_SIZE)
+            file = UPDATE_APP_FILE;
+            component_bit = 1U;
+            if (component->size > PLATFORM_APP_MAX_SIZE)
                 return FIRMWARE_STATUS_OUT_OF_RANGE;
         }
-        else if (component->mask == 2U)
+        else if (component->target == IMAGE_TARGET_GUI)
         {
-            file = BOOT_GUI_FILE;
-            if (component->size > BOOT_GUI_MAX_SIZE)
+            file = UPDATE_GUI_FILE;
+            component_bit = 2U;
+            if (component->size > PLATFORM_GUI_MAX_SIZE)
                 return FIRMWARE_STATUS_OUT_OF_RANGE;
         }
-        else if (component->mask == 4U)
+        else if (component->target == IMAGE_TARGET_THERAPY)
         {
-            file = BOOT_THERAPY_FILE;
-            if (component->size > BOOT_THERAPY_MAX_SIZE)
+            file = UPDATE_THERAPY_FILE;
+            component_bit = 4U;
+            if (component->size > PLATFORM_THERAPY_MAX_SIZE)
                 return FIRMWARE_STATUS_OUT_OF_RANGE;
         }
         else
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
-        if (strcmp(component->file, file) != 0 || (expected & component->mask) != 0U)
+        if (strcmp(component->file, file) != 0 || (expected & component_bit) != 0U)
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
-        expected |= component->mask;
+        expected |= component_bit;
     }
-    return FIRMWARE_STATUS_OK;
+    return expected == 7U ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_NOT_FOUND;
 }
 
 /** 解析完整 manifest 并执行 schema、范围和规范性校验。 */
@@ -564,6 +603,8 @@ firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
     char key[32];
     uint32_t seen = 0U;
     if (json == NULL || manifest == NULL || length == 0U || length > UPDATE_MANIFEST_MAX_SIZE)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    if (HasTrailingObjectComma(json, length))
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     (void) memset(manifest, 0, sizeof(*manifest));
     if (!Consume(&cursor, '{'))
@@ -577,7 +618,8 @@ firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
         if (strcmp(key, "format_version") == 0 && (seen & 1U) == 0U)
         {
-            if (!ReadUint(&cursor, &manifest->format_version) || manifest->format_version != 1U)
+            if (!ReadUint(&cursor, &manifest->format_version) ||
+                manifest->format_version != UPDATE_SUPPORTED_MANIFEST_VERSION)
                 return FIRMWARE_STATUS_INVALID_ARGUMENT;
             seen |= 1U;
         }
@@ -621,7 +663,8 @@ firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     SkipSpace(&cursor);
-    if (cursor.position != cursor.length || (seen & 31U) != 31U || manifest->component_count == 0U)
+    if (cursor.position != cursor.length || (seen & 63U) != 63U || manifest->component_count == 0U ||
+        manifest->has_signing == 0U)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     if (!IsCanonicalAsciiValue(manifest->product, sizeof(manifest->product)) ||
         !IsCanonicalAsciiValue(manifest->hardware, sizeof(manifest->hardware)) ||
@@ -641,7 +684,7 @@ firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
             !IsSha256Hex(manifest->components[i].sha256))
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    return UpdateManifest_ValidateTarget(manifest);
+    return FIRMWARE_STATUS_OK;
 }
 
 /** 按 major/minor/patch/build 字段比较两个版本。 */
@@ -665,44 +708,34 @@ int UpdateVersion_Compare(const update_version_t *left, const update_version_t *
     return 0;
 }
 
-typedef firmware_status_t (*canonical_write_fn)(void *context, const uint8_t *data, size_t size);
-
 typedef struct
 {
-    canonical_write_fn write; /* 输出目标（缓冲区或哈希上下文）。 */
-    void *context;            /* 输出回调上下文，由调用者管理。 */
+    char *buffer;
+    size_t capacity;
+    size_t length;
+    crypto_sha256_context_t *hash;
 } CanonicalWriter;
 
-typedef struct
+static firmware_status_t CanonicalWrite(CanonicalWriter *writer, const uint8_t *data,
+                                        size_t size)
 {
-    char *buffer;    /* 调用者提供的输出缓冲区。 */
-    size_t capacity; /* 缓冲区容量。 */
-    size_t length;   /* 已写入长度。 */
-} CanonicalBuffer;
-
-/** 将规范化文本追加到调用者提供的固定缓冲区。 */
-static firmware_status_t BufferWrite(void *context, const uint8_t *data, size_t size)
-{
-    CanonicalBuffer *output = (CanonicalBuffer *) context;
-    if (output->length > output->capacity || size > output->capacity - output->length)
+    if (writer->hash != NULL)
+        return Crypto_Sha256Update(writer->hash, data, size) == 0
+                   ? FIRMWARE_STATUS_OK
+                   : FIRMWARE_STATUS_IO_ERROR;
+    if (writer->length > writer->capacity || size > writer->capacity - writer->length)
         return FIRMWARE_STATUS_BUFFER_TOO_SMALL;
-    (void) memcpy(output->buffer + output->length, data, size);
-    output->length += size;
+    (void) memcpy(writer->buffer + writer->length, data, size);
+    writer->length += size;
     return FIRMWARE_STATUS_OK;
-}
-
-/** 将规范化文本写入 SHA-256 上下文。 */
-static firmware_status_t HashWrite(void *context, const uint8_t *data, size_t size)
-{
-    return Crypto_Sha256Update((crypto_sha256_context_t *) context, data, size);
 }
 
 /** 向规范化输出器追加一段常量文本。 */
 static firmware_status_t Append(CanonicalWriter *writer, const char *text)
 {
-    if (writer == NULL || writer->write == NULL || text == NULL)
+    if (writer == NULL || text == NULL)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    return writer->write(writer->context, (const uint8_t *) text, strlen(text));
+    return CanonicalWrite(writer, (const uint8_t *) text, strlen(text));
 }
 
 /** 按固定键顺序追加版本对象。 */
@@ -726,7 +759,7 @@ static firmware_status_t AppendVersion(CanonicalWriter *writer, const update_ver
     }
     if (count <= 0 || (size_t) count >= sizeof(text))
         return FIRMWARE_STATUS_OVERFLOW;
-    return writer->write(writer->context, (const uint8_t *) text, (size_t) count);
+    return CanonicalWrite(writer, (const uint8_t *) text, (size_t) count);
 }
 
 /** 追加兼容数字/字符串表示的最低 bootloader 版本。 */
@@ -743,14 +776,15 @@ static firmware_status_t AppendMinimumBootloaderVersion(CanonicalWriter *writer,
                      (unsigned long) manifest->minimum_bootloader_version.patch);
     if (count <= 0 || (size_t) count >= sizeof(text))
         return FIRMWARE_STATUS_OVERFLOW;
-    return writer->write(writer->context, (const uint8_t *) text, (size_t) count);
+    return CanonicalWrite(writer, (const uint8_t *) text, (size_t) count);
 }
 
 /** 按协议规定的键顺序写出 canonical manifest（不含签名字段值）。 */
 static firmware_status_t WriteCanonical(const update_manifest_t *manifest, CanonicalWriter *writer)
 {
     /* 组件输出顺序属于 canonical 格式，保证相同 manifest 始终得到相同摘要。 */
-    static const uint32_t component_order[] = {1U, 16U, 2U, 4U, 8U};
+    static const image_target_t component_order[] = {
+        IMAGE_TARGET_APP, IMAGE_TARGET_GUI, IMAGE_TARGET_THERAPY};
     size_t component_count                  = 0U;
     size_t i;
     firmware_status_t status;
@@ -763,7 +797,7 @@ static firmware_status_t WriteCanonical(const update_manifest_t *manifest, Canon
             return status;                                                                         \
     } while (0)
 
-    if (manifest == NULL || writer == NULL || writer->write == NULL ||
+    if (manifest == NULL || writer == NULL ||
         !UpdatePackage_IsValidId(manifest->package_id))
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
 
@@ -777,7 +811,7 @@ static firmware_status_t WriteCanonical(const update_manifest_t *manifest, Canon
         int count;
 
         for (j = 0U; j < manifest->component_count; ++j)
-            if (manifest->components[j].mask == component_order[i])
+            if (manifest->components[j].target == component_order[i])
                 component = &manifest->components[j];
         if (component == NULL)
             continue;
@@ -802,7 +836,7 @@ static firmware_status_t WriteCanonical(const update_manifest_t *manifest, Canon
         }
         if (count <= 0 || (size_t) count >= sizeof(field))
             return FIRMWARE_STATUS_OVERFLOW;
-        status = writer->write(writer->context, (const uint8_t *) field, (size_t) count);
+        status = CanonicalWrite(writer, (const uint8_t *) field, (size_t) count);
         if (FirmwareStatus_IsError(status))
             return status;
     }
@@ -846,15 +880,14 @@ static firmware_status_t WriteCanonical(const update_manifest_t *manifest, Canon
 firmware_status_t UpdateManifest_Canonicalize(const update_manifest_t *manifest, char *buffer,
                                               size_t capacity, size_t *length)
 {
-    CanonicalBuffer output = {buffer, capacity, 0U};
-    CanonicalWriter writer = {BufferWrite, &output};
+    CanonicalWriter writer = {buffer, capacity, 0U, NULL};
     firmware_status_t status;
 
     if (buffer == NULL || length == NULL || capacity == 0U)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     status = WriteCanonical(manifest, &writer);
     if (FirmwareStatus_IsOk(status))
-        *length = output.length;
+        *length = writer.length;
     return status;
 }
 
@@ -862,7 +895,7 @@ firmware_status_t UpdateManifest_Canonicalize(const update_manifest_t *manifest,
 firmware_status_t UpdateManifest_Digest(const update_manifest_t *manifest, uint8_t digest[32])
 {
     crypto_sha256_context_t hash;
-    CanonicalWriter writer = {HashWrite, &hash};
+    CanonicalWriter writer = {NULL, 0U, 0U, &hash};
     firmware_status_t status;
 
     if (manifest == NULL || digest == NULL)
@@ -899,22 +932,4 @@ firmware_status_t UpdateManifest_Hash(const update_manifest_t *manifest,
     }
     output[UPDATE_SHA256_HEX_LENGTH] = '\0';
     return FIRMWARE_STATUS_OK;
-}
-
-/** 注入签名校验回调；由产品启动阶段设置一次。 */
-void UpdateManifest_SetSignatureVerifier(update_manifest_signature_verifier_t verifier,
-                                         void *context)
-{
-    s_verifier         = verifier;
-    s_verifier_context = context;
-}
-
-/** 使用已注入的 verifier 校验 manifest 签名。 */
-firmware_status_t UpdateManifest_VerifySignature(const update_manifest_t *manifest,
-                                                 const uint8_t digest[32])
-{
-    if (manifest == NULL || digest == NULL || s_verifier == NULL)
-        return FIRMWARE_STATUS_NOT_SUPPORTED;
-    return s_verifier(manifest->key_id, digest, manifest->signature, manifest->signature_encoding,
-                      s_verifier_context);
 }

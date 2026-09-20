@@ -1,134 +1,226 @@
-#include "update/image_installer.h"
+#include "update_internal.h"
 
+#include <stdio.h>
 #include <string.h>
-#include <limits.h>
 
 #include "crypto/sha256.h"
+#include "platform/platform_flash.h"
+#include "platform/platform_memory_map.h"
+#include "platform/platform_storage.h"
+#include "platform/platform_system.h"
+#include "platform/platform_therapy.h"
+#include "update_config.h"
 
-static image_installer_port_t s_port;
+static uint8_t s_source_block[UPDATE_IO_BLOCK_SIZE];
+static uint8_t s_readback_block[UPDATE_IO_BLOCK_SIZE];
 
-void ImageInstaller_SetPort(const image_installer_port_t *port)
+static update_operation_result_t install_result(update_failure_t failure,
+                                                firmware_status_t status)
 {
-    if (port == NULL)
-        (void) memset(&s_port, 0, sizeof(s_port));
-    else
-        s_port = *port;
+    update_operation_result_t result = {failure, status};
+    return result;
 }
 
-static int valid_port(const image_installer_port_t *p)
+static firmware_status_t target_limits(image_target_t target, uint32_t *address,
+                                       uint32_t *maximum_size)
 {
-    return p != NULL && p->source_open != NULL && p->source_read != NULL &&
-           p->source_close != NULL && p->target_erase != NULL && p->target_write != NULL &&
-           p->target_read != NULL;
+    if (address == NULL || maximum_size == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+
+    switch (target)
+    {
+        case IMAGE_TARGET_APP:
+            *address = PLATFORM_APP_OFFSET;
+            *maximum_size = PLATFORM_APP_MAX_SIZE;
+            return FIRMWARE_STATUS_OK;
+        case IMAGE_TARGET_GUI:
+            *address = PLATFORM_GUI_OFFSET;
+            *maximum_size = PLATFORM_GUI_MAX_SIZE;
+            return FIRMWARE_STATUS_OK;
+        case IMAGE_TARGET_THERAPY:
+            *address = PLATFORM_THERAPY_TARGET_ADDRESS;
+            *maximum_size = PLATFORM_THERAPY_MAX_SIZE;
+            return FIRMWARE_STATUS_OK;
+        default:
+            return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
 }
 
-ImageInstallResult_t ImageInstaller_InstallWithPort(const ImageInstallPlan_t *plan,
-                                                    const image_installer_port_t *port)
+static firmware_status_t target_erase(image_target_t target, uint32_t address, uint32_t size)
 {
-    uint32_t handle = 0U, actual_size = 0U, offset = 0U;
-    uint8_t source[IMAGE_INSTALLER_BLOCK_SIZE];
-    uint8_t verify[IMAGE_INSTALLER_BLOCK_SIZE];
-    uint8_t digest[32];
+    return target == IMAGE_TARGET_THERAPY ? PlatformTherapy_Erase(address, size)
+                                          : PlatformFlash_Erase(address, size);
+}
+
+static firmware_status_t target_write(image_target_t target, uint32_t address,
+                                      const void *data, uint32_t size)
+{
+    return target == IMAGE_TARGET_THERAPY ? PlatformTherapy_Write(address, data, size)
+                                          : PlatformFlash_Write(address, data, size);
+}
+
+static firmware_status_t target_read(image_target_t target, uint32_t address, void *data,
+                                     uint32_t size)
+{
+    return target == IMAGE_TARGET_THERAPY ? PlatformTherapy_Read(address, data, size)
+                                          : PlatformFlash_Read(address, data, size);
+}
+
+update_operation_result_t ImageInstaller_Install(
+    const char *root, const update_manifest_component_t *component)
+{
+    char path[UPDATE_PATH_MAX];
+    platform_file_info_t info;
+    platform_file_handle_t file = 0U;
     crypto_sha256_context_t hash;
-    firmware_status_t status;
-    int opened = 0;
+    uint8_t expected_digest[32];
+    uint8_t installed_digest[32];
+    uint32_t target_address;
+    uint32_t maximum_size;
+    uint32_t offset = 0U;
+    uint32_t erase_size;
+    int file_open = 0;
+    int hash_started = 0;
+    int therapy_started = 0;
+    update_operation_result_t result = {UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK};
 
-    if (plan == NULL || plan->source_path == NULL || !valid_port(port) ||
-        plan->expected_size == 0U || plan->expected_size > plan->target_max_size ||
-        plan->target_address > UINT32_MAX - plan->expected_size)
-        return IMAGE_INSTALL_INVALID_ARGUMENT;
-    status = port->source_open(port->context, plan->source_path, &handle, &actual_size);
-    if (FirmwareStatus_IsError(status))
-        return IMAGE_INSTALL_SOURCE;
-    opened = 1;
-    if (actual_size != plan->expected_size)
+    if (root == NULL || component == NULL ||
+        target_limits(component->target, &target_address, &maximum_size) != FIRMWARE_STATUS_OK ||
+        snprintf(path, sizeof(path), "%s/%s", root, component->file) <= 0)
+        return install_result(UPDATE_FAILURE_INSTALL_SOURCE,
+                              FIRMWARE_STATUS_INVALID_ARGUMENT);
+    if (!UpdateHex_DecodeSha256(component->sha256, expected_digest))
+        return install_result(UPDATE_FAILURE_INSTALL_HASH,
+                              FIRMWARE_STATUS_INVALID_ARGUMENT);
+
+    result.status = PlatformStorage_Stat(path, &info);
+    if (FirmwareStatus_IsError(result.status) || info.is_directory != 0U)
+        return install_result(UPDATE_FAILURE_INSTALL_SOURCE,
+                              FirmwareStatus_IsError(result.status)
+                                  ? result.status
+                                  : FIRMWARE_STATUS_INVALID_STATE);
+    if (info.size == 0U || info.size != component->size || info.size > maximum_size)
+        return install_result(UPDATE_FAILURE_INSTALL_SIZE, FIRMWARE_STATUS_OUT_OF_RANGE);
+
+    result.status = PlatformStorage_OpenRead(path, &file);
+    if (FirmwareStatus_IsError(result.status))
+        return install_result(UPDATE_FAILURE_INSTALL_SOURCE, result.status);
+    file_open = 1;
+
+    result.status = Crypto_Sha256Init(&hash);
+    if (FirmwareStatus_IsError(result.status))
     {
-        (void) port->source_close(port->context, handle);
-        return IMAGE_INSTALL_SIZE;
+        result.failure = UPDATE_FAILURE_INSTALL_HASH;
+        goto cleanup;
     }
+    hash_started = 1;
+
+    if (component->target == IMAGE_TARGET_THERAPY)
     {
-        const uint32_t erase_size = (plan->expected_size + (IMAGE_INSTALLER_BLOCK_SIZE - 1U)) &
-                                    ~(IMAGE_INSTALLER_BLOCK_SIZE - 1U);
-        if (erase_size < plan->expected_size ||
-            erase_size > plan->target_max_size ||
-            plan->target_address > UINT32_MAX - erase_size)
+        result.status = PlatformTherapy_Init();
+        if (FirmwareStatus_IsOk(result.status))
+            result.status = PlatformTherapy_BeginUpdate(NULL);
+        if (FirmwareStatus_IsError(result.status))
         {
-            (void) port->source_close(port->context, handle);
-            return IMAGE_INSTALL_SIZE;
+            result.failure = UPDATE_FAILURE_INSTALL_ERASE;
+            goto cleanup;
         }
-        status = port->target_erase(port->context, plan->target_address, erase_size);
+        therapy_started = 1;
+        erase_size = component->size;
     }
-    if (FirmwareStatus_IsError(status))
+    else
     {
-        (void) port->source_close(port->context, handle);
-        return IMAGE_INSTALL_ERASE;
+        result.status = PlatformFlash_Init();
+        if (FirmwareStatus_IsOk(result.status))
+            result.status = PlatformFlash_ExitMemoryMapped();
+        if (FirmwareStatus_IsError(result.status))
+        {
+            result.failure = UPDATE_FAILURE_INSTALL_ERASE;
+            goto cleanup;
+        }
+        erase_size = (component->size + PLATFORM_FLASH_ERASE_SIZE - 1U) &
+                     ~(PLATFORM_FLASH_ERASE_SIZE - 1U);
     }
-    status = Crypto_Sha256Init(&hash);
-    if (FirmwareStatus_IsError(status))
+
+    result.status = target_erase(component->target, target_address, erase_size);
+    if (FirmwareStatus_IsError(result.status))
     {
-        (void) port->source_close(port->context, handle);
-        return IMAGE_INSTALL_IO;
+        result.failure = UPDATE_FAILURE_INSTALL_ERASE;
+        goto cleanup;
     }
-    while (offset < plan->expected_size)
+
+    while (offset < component->size)
     {
-        const size_t requested = (plan->expected_size - offset) < sizeof(source)
-                                     ? (size_t) (plan->expected_size - offset)
-                                     : sizeof(source);
-        size_t received        = 0U;
-        status = port->source_read(port->context, handle, offset, source, requested, &received);
-        if (FirmwareStatus_IsError(status) || received != requested)
+        size_t requested = component->size - offset;
+        size_t received = 0U;
+
+        if (requested > sizeof(s_source_block))
+            requested = sizeof(s_source_block);
+        result.status = PlatformStorage_Read(file, s_source_block, requested, &received);
+        if (FirmwareStatus_IsError(result.status) || received != requested)
         {
-            Crypto_Sha256Abort(&hash);
-            (void) port->source_close(port->context, handle);
-            return IMAGE_INSTALL_SOURCE;
+            result.failure = UPDATE_FAILURE_INSTALL_SOURCE;
+            if (FirmwareStatus_IsOk(result.status))
+                result.status = FIRMWARE_STATUS_IO_ERROR;
+            goto cleanup;
         }
-        status = Crypto_Sha256Update(&hash, source, received);
-        if (FirmwareStatus_IsError(status))
+        result.status = Crypto_Sha256Update(&hash, s_source_block, received);
+        if (FirmwareStatus_IsError(result.status))
         {
-            Crypto_Sha256Abort(&hash);
-            (void) port->source_close(port->context, handle);
-            return IMAGE_INSTALL_IO;
+            result.failure = UPDATE_FAILURE_INSTALL_HASH;
+            goto cleanup;
         }
-        status = port->target_write(port->context, plan->target_address + offset, source, received);
-        if (FirmwareStatus_IsError(status))
+        result.status = target_write(component->target, target_address + offset,
+                                     s_source_block, (uint32_t) received);
+        if (FirmwareStatus_IsError(result.status))
         {
-            Crypto_Sha256Abort(&hash);
-            (void) port->source_close(port->context, handle);
-            return IMAGE_INSTALL_WRITE;
+            result.failure = UPDATE_FAILURE_INSTALL_WRITE;
+            goto cleanup;
         }
-        status = port->target_read(port->context, plan->target_address + offset, verify, received);
-        if (FirmwareStatus_IsError(status))
+        result.status = target_read(component->target, target_address + offset,
+                                    s_readback_block, (uint32_t) received);
+        if (FirmwareStatus_IsError(result.status) ||
+            memcmp(s_source_block, s_readback_block, received) != 0)
         {
-            Crypto_Sha256Abort(&hash);
-            (void) port->source_close(port->context, handle);
-            return IMAGE_INSTALL_READBACK;
-        }
-        if (memcmp(source, verify, received) != 0)
-        {
-            Crypto_Sha256Abort(&hash);
-            (void) port->source_close(port->context, handle);
-            return IMAGE_INSTALL_READBACK;
+            result.failure = UPDATE_FAILURE_INSTALL_READBACK;
+            if (FirmwareStatus_IsOk(result.status))
+                result.status = FIRMWARE_STATUS_AUTHENTICATION_FAILED;
+            goto cleanup;
         }
         offset += (uint32_t) received;
+        PlatformSystem_WatchdogRefresh();
     }
-    status = Crypto_Sha256Finish(&hash, digest);
-    if (opened)
-        (void) port->source_close(port->context, handle);
-    if (FirmwareStatus_IsError(status))
-        return IMAGE_INSTALL_IO;
-    return memcmp(digest, plan->expected_sha256, sizeof(digest)) == 0 ? IMAGE_INSTALL_OK
-                                                                      : IMAGE_INSTALL_HASH;
-}
 
-ImageInstallResult_t ImageInstaller_Install(const ImageInstallPlan_t *plan)
-{
-    return ImageInstaller_InstallWithPort(plan, &s_port);
-}
+    result.status = Crypto_Sha256Finish(&hash, installed_digest);
+    hash_started = 0;
+    if (FirmwareStatus_IsError(result.status) ||
+        memcmp(installed_digest, expected_digest, sizeof(installed_digest)) != 0)
+    {
+        result.failure = UPDATE_FAILURE_INSTALL_HASH;
+        if (FirmwareStatus_IsOk(result.status))
+            result.status = FIRMWARE_STATUS_AUTHENTICATION_FAILED;
+    }
 
-const char *ImageInstaller_ResultString(ImageInstallResult_t result)
-{
-    static const char *const strings[] = {"ok",    "invalid argument", "source", "size", "erase",
-                                          "write", "readback",         "hash",   "io"};
-    return (result >= 0 && (size_t) result < sizeof(strings) / sizeof(strings[0])) ? strings[result]
-                                                                                   : "unknown";
+cleanup:
+    if (hash_started != 0)
+        Crypto_Sha256Abort(&hash);
+    if (file_open != 0)
+    {
+        firmware_status_t close_status = PlatformStorage_Close(file);
+        if (FirmwareStatus_IsOk(result.status) && FirmwareStatus_IsError(close_status))
+        {
+            result.failure = UPDATE_FAILURE_INSTALL_CLOSE;
+            result.status = close_status;
+        }
+    }
+    if (therapy_started != 0)
+    {
+        firmware_status_t end_status = PlatformTherapy_EndUpdate();
+        if (FirmwareStatus_IsOk(result.status) && FirmwareStatus_IsError(end_status))
+        {
+            result.failure = UPDATE_FAILURE_THERAPY_EXIT;
+            result.status = end_status;
+        }
+    }
+    return result;
 }
