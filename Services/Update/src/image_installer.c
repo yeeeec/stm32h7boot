@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "crypto/sha256.h"
+#include "firmware/memory.h"
 #include "platform/platform_flash.h"
 #include "platform/platform_memory_map.h"
 #include "platform/platform_storage.h"
@@ -11,8 +12,8 @@
 #include "platform/platform_therapy.h"
 #include "update_config.h"
 
-static uint8_t s_source_block[UPDATE_IO_BLOCK_SIZE];
-static uint8_t s_readback_block[UPDATE_IO_BLOCK_SIZE];
+static FIRMWARE_STORAGE_RAM uint8_t s_source_block[UPDATE_IO_BLOCK_SIZE];
+static FIRMWARE_STORAGE_RAM uint8_t s_readback_block[UPDATE_IO_BLOCK_SIZE];
 
 static update_operation_result_t install_result(update_failure_t failure, firmware_status_t status)
 {
@@ -23,23 +24,27 @@ static update_operation_result_t install_result(update_failure_t failure, firmwa
 static firmware_status_t target_limits(image_target_t target, uint32_t *address,
                                        uint32_t *maximum_size)
 {
+    const update_component_descriptor_t *descriptor;
     if (address == NULL || maximum_size == NULL)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
 
+    descriptor = UpdateComponent_FindByTarget(target);
+    if (descriptor == NULL)
+        return FIRMWARE_STATUS_NOT_SUPPORTED;
+    *address = descriptor->address;
+    *maximum_size = descriptor->maximum_size;
+
     switch (target)
     {
-        case IMAGE_TARGET_APP:
-            *address      = PLATFORM_APP_OFFSET;
-            *maximum_size = PLATFORM_APP_MAX_SIZE;
-            return FIRMWARE_STATUS_OK;
-        case IMAGE_TARGET_GUI:
-            *address      = PLATFORM_GUI_OFFSET;
-            *maximum_size = PLATFORM_GUI_MAX_SIZE;
-            return FIRMWARE_STATUS_OK;
         case IMAGE_TARGET_THERAPY:
-            *address      = PLATFORM_THERAPY_TARGET_ADDRESS;
-            *maximum_size = PLATFORM_THERAPY_MAX_SIZE;
             return FIRMWARE_STATUS_OK;
+        case IMAGE_TARGET_APP:
+        case IMAGE_TARGET_GUI:
+        case IMAGE_TARGET_VOICE:
+        case IMAGE_TARGET_CONFIG:
+            return FIRMWARE_STATUS_OK;
+        case IMAGE_TARGET_RESOURCE:
+            return FIRMWARE_STATUS_NOT_SUPPORTED;
         default:
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }

@@ -4,13 +4,14 @@
 #include <string.h>
 
 #include "crypto/sha256.h"
+#include "firmware/memory.h"
 #include "firmware/product_identity.h"
 #include "platform/platform_storage.h"
 #include "platform/platform_system.h"
 #include "update_config.h"
 
-static uint8_t s_manifest_buffer[UPDATE_MANIFEST_MAX_SIZE];
-static uint8_t s_hash_buffer[UPDATE_IO_BLOCK_SIZE];
+static FIRMWARE_STORAGE_RAM uint8_t s_manifest_buffer[UPDATE_MANIFEST_MAX_SIZE];
+static FIRMWARE_STORAGE_RAM uint8_t s_hash_buffer[UPDATE_IO_BLOCK_SIZE];
 
 static update_operation_result_t package_result(update_failure_t failure, firmware_status_t status)
 {
@@ -225,7 +226,7 @@ static update_operation_result_t verify_payload(const char *root,
 }
 
 update_operation_result_t PackageReader_Validate(const char *root,
-                                                 const uint8_t *expected_raw_digest,
+                                                 const uint8_t *expected_manifest_digest,
                                                  int verify_payload_hashes,
                                                  update_package_t *package)
 {
@@ -248,10 +249,6 @@ update_operation_result_t PackageReader_Validate(const char *root,
         return result;
     if (Crypto_Sha256(s_manifest_buffer, manifest_length, package->raw_manifest_sha256) != 0)
         return package_result(UPDATE_FAILURE_MANIFEST_DIGEST, FIRMWARE_STATUS_IO_ERROR);
-    if (expected_raw_digest != NULL &&
-        memcmp(package->raw_manifest_sha256, expected_raw_digest, 32U) != 0)
-        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST,
-                              FIRMWARE_STATUS_AUTHENTICATION_FAILED);
 
     result.status = UpdateManifest_Parse(s_manifest_buffer, manifest_length, &package->manifest);
     if (FirmwareStatus_IsError(result.status))
@@ -259,6 +256,12 @@ update_operation_result_t PackageReader_Validate(const char *root,
     result.status = UpdateManifest_ValidateTarget(&package->manifest);
     if (FirmwareStatus_IsError(result.status))
         return package_result(UPDATE_FAILURE_TARGET, result.status);
+    if (UpdateManifest_Digest(&package->manifest, package->manifest_sha256) != FIRMWARE_STATUS_OK)
+        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST, FIRMWARE_STATUS_IO_ERROR);
+    if (expected_manifest_digest != NULL &&
+        memcmp(package->manifest_sha256, expected_manifest_digest, 32U) != 0)
+        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST,
+                              FIRMWARE_STATUS_AUTHENTICATION_FAILED);
     result.status = VersionPolicy_ValidateMinimumBootloader(
         &package->manifest.minimum_bootloader_version, &bootloader_version);
     if (FirmwareStatus_IsError(result.status))
@@ -278,4 +281,61 @@ update_operation_result_t PackageReader_Validate(const char *root,
         }
     }
     return package_result(UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
+}
+
+firmware_status_t PackageReader_ValidateUpdateRoot(void)
+{
+    platform_dir_handle_t directory;
+    platform_dir_entry_t entry;
+    uint32_t found = 0U;
+    firmware_status_t status = PlatformStorage_DirOpen(UPDATE_ROOT, &directory);
+    if (FirmwareStatus_IsError(status))
+        return status;
+    while ((status = PlatformStorage_DirRead(directory, &entry)) == FIRMWARE_STATUS_OK)
+    {
+        if (strcmp(entry.name, "firmware") == 0 && entry.is_directory != 0U)
+            found |= 1U;
+        else if (strcmp(entry.name, "boot_update_request.json") == 0 &&
+                 entry.is_directory == 0U)
+            found |= 2U;
+        else
+        {
+            (void) PlatformStorage_DirClose(directory);
+            return FIRMWARE_STATUS_INVALID_STATE;
+        }
+    }
+    {
+        firmware_status_t close_status = PlatformStorage_DirClose(directory);
+        if (status != FIRMWARE_STATUS_NOT_FOUND)
+            return status;
+        if (FirmwareStatus_IsError(close_status))
+            return close_status;
+    }
+    return found == 3U ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_NOT_FOUND;
+}
+
+update_operation_result_t PackageReader_ValidateRequest(const char *root,
+                                                        const update_request_t *request,
+                                                        const uint8_t *expected_manifest_digest,
+                                                        int verify_payload_hashes,
+                                                        update_package_t *package)
+{
+    update_operation_result_t result;
+    uint8_t request_digest[32];
+    if (request == NULL || request->requested == 0U ||
+        !UpdateHex_DecodeSha256(request->manifest_sha256, request_digest))
+        return package_result(UPDATE_FAILURE_REQUEST_PARSE, FIRMWARE_STATUS_INVALID_ARGUMENT);
+    if (expected_manifest_digest != NULL &&
+        memcmp(request_digest, expected_manifest_digest, sizeof(request_digest)) != 0)
+        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST, FIRMWARE_STATUS_AUTHENTICATION_FAILED);
+    result = PackageReader_Validate(root, request_digest, verify_payload_hashes, package);
+    if (FirmwareStatus_IsError(result.status))
+        return result;
+    if (strcmp(request->package_id, package->manifest.package_id) != 0)
+        return package_result(UPDATE_FAILURE_REQUEST_PACKAGE_ID_MISMATCH,
+                              FIRMWARE_STATUS_AUTHENTICATION_FAILED);
+    if (request->component_mask != package->manifest.component_mask)
+        return package_result(UPDATE_FAILURE_REQUEST_COMPONENT_MASK_MISMATCH,
+                              FIRMWARE_STATUS_AUTHENTICATION_FAILED);
+    return result;
 }

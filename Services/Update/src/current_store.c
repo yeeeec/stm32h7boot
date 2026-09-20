@@ -3,11 +3,12 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "firmware/memory.h"
 #include "platform/platform_storage.h"
 #include "platform/platform_system.h"
 #include "update_config.h"
 
-static uint8_t s_copy_buffer[UPDATE_IO_BLOCK_SIZE];
+static FIRMWARE_STORAGE_RAM uint8_t s_copy_buffer[UPDATE_IO_BLOCK_SIZE];
 
 static firmware_status_t remove_tree_if_present(const char *path)
 {
@@ -86,16 +87,45 @@ static firmware_status_t verify_root(const char *root, update_package_t *package
     return result.status;
 }
 
+static firmware_status_t verify_current_root(void)
+{
+    platform_dir_handle_t directory;
+    platform_dir_entry_t entry;
+    firmware_status_t status = PlatformStorage_DirOpen(CURRENT_ROOT, &directory);
+    if (FirmwareStatus_IsError(status))
+        return status;
+    while ((status = PlatformStorage_DirRead(directory, &entry)) == FIRMWARE_STATUS_OK)
+    {
+        if (strcmp(entry.name, "firmware") != 0 || entry.is_directory == 0U)
+        {
+            (void) PlatformStorage_DirClose(directory);
+            return FIRMWARE_STATUS_INVALID_STATE;
+        }
+    }
+    {
+        firmware_status_t close_status = PlatformStorage_DirClose(directory);
+        if (status != FIRMWARE_STATUS_NOT_FOUND)
+            return status;
+        if (FirmwareStatus_IsError(close_status))
+            return close_status;
+    }
+    return FIRMWARE_STATUS_OK;
+}
+
 firmware_status_t CurrentStore_Verify(void)
 {
-    return verify_root(CURRENT_PACKAGE_ROOT, NULL);
+    firmware_status_t status = verify_current_root();
+    return FirmwareStatus_IsError(status) ? status : verify_root(CURRENT_PACKAGE_ROOT, NULL);
 }
 
 firmware_status_t CurrentStore_Read(update_package_t *package)
 {
     if (package == NULL)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    return verify_root(CURRENT_PACKAGE_ROOT, package);
+    {
+        firmware_status_t status = verify_current_root();
+        return FirmwareStatus_IsError(status) ? status : verify_root(CURRENT_PACKAGE_ROOT, package);
+    }
 }
 
 firmware_status_t CurrentStore_Commit(const update_package_t *package,
@@ -109,7 +139,7 @@ firmware_status_t CurrentStore_Commit(const update_package_t *package,
 
     if (package == NULL || expected_manifest_sha256 == NULL)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    if (memcmp(package->raw_manifest_sha256, expected_manifest_sha256, 32U) != 0)
+    if (memcmp(package->manifest_sha256, expected_manifest_sha256, 32U) != 0)
         return FIRMWARE_STATUS_AUTHENTICATION_FAILED;
 
     status = remove_tree_if_present(CURRENT_ROOT);
@@ -148,7 +178,7 @@ firmware_status_t CurrentStore_Commit(const update_package_t *package,
         return status;
     status = verify_root(CURRENT_PACKAGE_ROOT, &verified);
     if (FirmwareStatus_IsOk(status) &&
-        memcmp(verified.raw_manifest_sha256, expected_manifest_sha256, 32U) != 0)
+        memcmp(verified.manifest_sha256, expected_manifest_sha256, 32U) != 0)
         status = FIRMWARE_STATUS_AUTHENTICATION_FAILED;
     return status;
 }

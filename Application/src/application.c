@@ -2,10 +2,12 @@
 
 #include <stdint.h>
 
+#include "bootloader_config.h"
 #include "boot_flow.h"
 #include "platform/platform.h"
 #include "platform/platform_cpu.h"
 #include "platform/platform_system.h"
+#include "update/update_service.h"
 
 static uint8_t s_initialized;
 
@@ -18,6 +20,9 @@ firmware_status_t Application_Init(void)
     if (FirmwareStatus_IsError(status))
         return status;
     status = PlatformSystem_WatchdogInit();
+    if (FirmwareStatus_IsError(status))
+        return status;
+    status = UpdateService_Init();
     if (FirmwareStatus_IsError(status))
         return status;
     s_initialized = 1U;

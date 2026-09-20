@@ -195,9 +195,10 @@ static int ReadUint(JsonCursor *cursor, uint32_t *value)
         while (cursor->position < cursor->length && cursor->data[cursor->position] >= '0' &&
                cursor->data[cursor->position] <= '9')
         {
-            number = number * 10U + (uint32_t) (cursor->data[cursor->position++] - '0');
-            if (number > UINT32_MAX)
+            uint32_t digit = (uint32_t) (cursor->data[cursor->position++] - '0');
+            if (number > (UINT32_MAX - digit) / 10U)
                 return 0;
+            number = number * 10U + digit;
             ++digits;
         }
     }
@@ -345,13 +346,8 @@ static int ReadTarget(JsonCursor *cursor, update_manifest_t *manifest)
 /** 将组件名称映射为传输位掩码。 */
 static uint32_t ComponentMask(const char *name)
 {
-    if (strcmp(name, "app") == 0)
-        return 1U;
-    if (strcmp(name, "gui") == 0)
-        return 2U;
-    if (strcmp(name, "therapy") == 0)
-        return 4U;
-    return 0U;
+    const update_component_descriptor_t *descriptor = UpdateComponent_Find(name);
+    return descriptor != NULL ? descriptor->mask_bit : 0U;
 }
 
 /** 读取单个组件定义。 */
@@ -434,9 +430,14 @@ static int ReadComponents(JsonCursor *cursor, update_manifest_t *manifest)
         component = &manifest->components[manifest->component_count];
         (void) memset(component, 0, sizeof(*component));
         (void) memcpy(component->name, key, strlen(key) + 1U);
-        component->target = mask == 1U   ? IMAGE_TARGET_APP
-                            : mask == 2U ? IMAGE_TARGET_GUI
-                                         : IMAGE_TARGET_THERAPY;
+        {
+            const update_component_descriptor_t *descriptor = UpdateComponent_Find(key);
+            if (descriptor == NULL)
+                return 0;
+            component->target = descriptor->target;
+            component->mask_bit = descriptor->mask_bit;
+            component->installation_order = descriptor->installation_order;
+        }
         if (!ReadComponent(cursor, component))
             return 0;
         seenMask |= mask;
@@ -447,6 +448,7 @@ static int ReadComponents(JsonCursor *cursor, update_manifest_t *manifest)
         if (!Consume(cursor, ','))
             return 0;
     }
+    manifest->component_mask = seenMask;
     return manifest->component_count != 0U;
 }
 
@@ -547,9 +549,10 @@ int UpdatePackage_IsValidComponentFileName(const char *value)
     for (i = 0U; i < UPDATE_COMPONENT_FILE_MAX && value[i] != '\0'; ++i)
     {
         unsigned char c = (unsigned char) value[i];
-        if (c == '/' || c == '\\' || (c == '.' && (i == 0U || value[i - 1U] == '.')))
+        if (c == '/' || c == '\\' || (c == '.' && (i == 0U || value[i - 1U] == '.')) ||
+            c == '?' || c == '<' || c == '>' || c == '|' || c == ';')
             return 0;
-        if (c < 0x21U || c == ':' || c == '"' || c == '*')
+        if (c < 0x21U || c > 0x7EU || c == ':' || c == '"' || c == '*')
             return 0;
     }
     return i != 0U && i < UPDATE_COMPONENT_FILE_MAX;
@@ -562,44 +565,27 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
     if (manifest == NULL || strcmp(manifest->product, FIRMWARE_PRODUCT_NAME) != 0 ||
         strcmp(manifest->hardware, FIRMWARE_HARDWARE_NAME) != 0 ||
         manifest->format_version != UPDATE_SUPPORTED_MANIFEST_VERSION ||
-        manifest->component_count == 0U)
+        manifest->component_count == 0U || manifest->component_count > UPDATE_MANIFEST_MAX_COMPONENTS)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     for (i = 0U; i < manifest->component_count; ++i)
     {
         const update_manifest_component_t *component = &manifest->components[i];
-        const char *file                             = NULL;
-        if (component->size == 0U || strcmp(component->format, "raw-bin-v1") != 0 ||
-            !IsSha256Hex(component->sha256))
+        const update_component_descriptor_t *descriptor = UpdateComponent_Find(component->name);
+        if (descriptor == NULL || component->mask_bit != descriptor->mask_bit ||
+            component->target != descriptor->target || component->size == 0U ||
+            strcmp(component->format, descriptor->format) != 0 ||
+            !IsSha256Hex(component->sha256) || strcmp(component->file, UPDATE_MANIFEST_FILE) == 0)
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
-        uint32_t component_bit;
-        if (component->target == IMAGE_TARGET_APP)
-        {
-            file          = UPDATE_APP_FILE;
-            component_bit = 1U;
-            if (component->size > PLATFORM_APP_MAX_SIZE)
-                return FIRMWARE_STATUS_OUT_OF_RANGE;
-        }
-        else if (component->target == IMAGE_TARGET_GUI)
-        {
-            file          = UPDATE_GUI_FILE;
-            component_bit = 2U;
-            if (component->size > PLATFORM_GUI_MAX_SIZE)
-                return FIRMWARE_STATUS_OUT_OF_RANGE;
-        }
-        else if (component->target == IMAGE_TARGET_THERAPY)
-        {
-            file          = UPDATE_THERAPY_FILE;
-            component_bit = 4U;
-            if (component->size > PLATFORM_THERAPY_MAX_SIZE)
-                return FIRMWARE_STATUS_OUT_OF_RANGE;
-        }
-        else
+        if ((expected & descriptor->mask_bit) != 0U)
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
-        if (strcmp(component->file, file) != 0 || (expected & component_bit) != 0U)
-            return FIRMWARE_STATUS_INVALID_ARGUMENT;
-        expected |= component_bit;
+        expected |= descriptor->mask_bit;
+        for (size_t previous = 0U; previous < i; ++previous)
+            if (strcmp(component->file, manifest->components[previous].file) == 0)
+                return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    return expected != 0U ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_NOT_FOUND;
+    if (expected != manifest->component_mask || UpdateComponent_DeriveMask(manifest) != expected)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    return UpdateComponent_ValidateRanges(manifest);
 }
 
 /** 解析完整 manifest 并执行 schema、范围和规范性校验。 */
@@ -788,10 +774,10 @@ static firmware_status_t AppendMinimumBootloaderVersion(CanonicalWriter *writer,
 static firmware_status_t WriteCanonical(const update_manifest_t *manifest, CanonicalWriter *writer)
 {
     /* 组件输出顺序属于 canonical 格式，保证相同 manifest 始终得到相同摘要。 */
-    static const image_target_t component_order[] = {IMAGE_TARGET_APP, IMAGE_TARGET_GUI,
-                                                     IMAGE_TARGET_THERAPY};
-    size_t component_count                        = 0U;
+    size_t order[UPDATE_MANIFEST_MAX_COMPONENTS];
+    size_t component_count = 0U;
     size_t i;
+    size_t j;
     firmware_status_t status;
 
 #define APPEND_TEXT(text)                                                                          \
@@ -805,20 +791,26 @@ static firmware_status_t WriteCanonical(const update_manifest_t *manifest, Canon
     if (manifest == NULL || writer == NULL || !UpdatePackage_IsValidId(manifest->package_id))
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
 
+    for (i = 0U; i < manifest->component_count; ++i)
+        order[i] = i;
+    for (i = 0U; i < manifest->component_count; ++i)
+        for (j = i + 1U; j < manifest->component_count; ++j)
+            if (strcmp(manifest->components[order[j]].name,
+                       manifest->components[order[i]].name) < 0)
+            {
+                size_t temporary = order[i];
+                order[i] = order[j];
+                order[j] = temporary;
+            }
+
     APPEND_TEXT("{\"components\":{");
-    for (i = 0U; i < sizeof(component_order) / sizeof(component_order[0]); ++i)
+    for (i = 0U; i < manifest->component_count; ++i)
     {
-        size_t j;
-        const update_manifest_component_t *component = NULL;
+        const update_manifest_component_t *component = &manifest->components[order[i]];
         char field[UPDATE_COMPONENT_FILE_MAX + UPDATE_COMPONENT_FORMAT_MAX +
                    UPDATE_SHA256_HEX_LENGTH + 128U];
         int count;
 
-        for (j = 0U; j < manifest->component_count; ++j)
-            if (manifest->components[j].target == component_order[i])
-                component = &manifest->components[j];
-        if (component == NULL)
-            continue;
         if (component_count++ != 0U)
             APPEND_TEXT(",");
 

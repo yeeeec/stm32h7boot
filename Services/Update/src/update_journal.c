@@ -20,6 +20,7 @@ static int journal_valid(const update_journal_record_t *record)
            record->format_version == UPDATE_JOURNAL_FORMAT_VERSION &&
            record->state <= UPDATE_STATE_FAILED && record->source <= UPDATE_SOURCE_ROLLBACK &&
            (record->flags & ~UPDATE_JOURNAL_FLAG_CURRENT_COMMIT_PENDING) == 0U &&
+           (record->component_mask & ~31U) == 0U &&
            record->crc32 == journal_crc(record);
 }
 
@@ -104,6 +105,8 @@ firmware_status_t UpdateJournal_Write(const update_journal_record_t *record)
     stored.magic          = UPDATE_JOURNAL_MAGIC;
     stored.format_version = UPDATE_JOURNAL_FORMAT_VERSION;
     stored.sequence       = status == FIRMWARE_STATUS_OK ? latest.sequence + 1U : 1U;
+    if (stored.sequence == 0U)
+        stored.sequence = 1U;
     stored.crc32          = journal_crc(&stored);
     status = PlatformNvStorage_Write(UPDATE_JOURNAL_STORAGE_OFFSET +
                                          (active_slot ^ 1U) * UPDATE_JOURNAL_SLOT_SIZE,

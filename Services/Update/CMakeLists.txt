@@ -1,5 +1,8 @@
 add_library(update_service STATIC
     src/package_reader.c
+    src/update_request.c
+    src/component_registry.c
+    src/runtime_verifier.c
     src/update_manifest.c
     src/version_policy.c
     src/image_installer.c
@@ -10,7 +13,9 @@ add_library(update_service STATIC
 
 target_include_directories(update_service
     PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include
-    PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src
+    PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/Application/include
 )
 
 target_link_libraries(update_service

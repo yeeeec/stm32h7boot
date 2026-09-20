@@ -32,6 +32,7 @@ extern "C"
     firmware_status_t PlatformStorage_Init(void);
     firmware_status_t PlatformStorage_Mount(void);
     firmware_status_t PlatformStorage_Unmount(void);
+    firmware_status_t PlatformStorage_SyncVolume(void);
 
     firmware_status_t PlatformStorage_OpenRead(const char *path, platform_file_handle_t *handle);
 

@@ -1,218 +1,679 @@
-# STM32H7 HMI Bootloader 完整需求基线
+# STM32H7 HMI Bootloader Requirements Baseline
 
-文档状态：设计评审草案  
-适用目标：STM32H743、W25Q256、AT24、SD/FatFs、Therapy MCU  
-目标：定义启动、升级、APP试运行确认、失败重装、上一版本恢复以及分层架构要求。
+Document status: Final baseline  
+Target: STM32H743 HMI Bootloader  
+Storage: SD/FatFs, W25Q256, AT24 EEPROM  
+External target: Therapy MCU  
+Related protocol: STM32H7_Bootloader_Update_Request_Protocol.md
 
-## 1. 已确定的总体方案
+## 1. Objective
 
-1. Application负责固件包签名验证和导入NVM。
-2. Bootloader不执行签名验证，只重新执行SHA-256完整性校验。
-3. Application和Bootloader通过AT24中的持久Journal交换升级请求和状态。
-4. 不再使用retained RAM、`.noinit` mailbox或`boot_update_request.json`。
-5. NVM只保留两个固件目录：
+This document defines the complete Bootloader requirements for:
 
-   ```text
-   /UPDATE/firmware/   新版本候选包
-   /CURRENT/firmware/  当前已确认、可用于恢复的版本
-   ```
+- normal startup;
+- Production update using persistent EEPROM Journal;
+- Debug update that bypasses EEPROM;
+- strict firmware Package validation;
+- Manifest-driven installation of executable images and resources;
+- SHA-256 integrity verification;
+- APP trial confirmation;
+- interrupted-install recovery;
+- Rollback to CURRENT;
+- CURRENT Package commit;
+- Runtime validation and Jump;
+- Application, Services, Platform, BSP, and Drivers boundaries.
 
-6. 不使用`CURRENT_NEW`和`CURRENT_PREVIOUS`。
-7. 新APP确认成功前，`CURRENT`始终保留旧版本。
-8. 新APP确认成功后，Bootloader才使用`UPDATE`替换`CURRENT`。
-9. `UPDATE`在新`CURRENT`复制并验证成功前不得删除。
-10. 升级状态仅包含：
+The design shall use only the existing formal request:
 
-    ```c
-    UPDATE_STATE_IDLE
-    UPDATE_STATE_REQUESTED
-    UPDATE_STATE_INSTALLING
-    UPDATE_STATE_JUMPING
-    UPDATE_STATE_FAILED
-    ```
+~~~text
+/UPDATE/boot_update_request.json
+~~~
 
-11. `JUMPING`只用于Candidate或Rollback安装后的试运行，不用于普通`IDLE`启动。
-12. Candidate试运行失败达到上限后，从`CURRENT`重新安装上一版本。
-13. Rollback安装或试运行也失败后进入稳定`FAILED`安全模式。
+The Debug behavior shall be selected by a Bootloader compile-time macro. No additional file shall be introduced for mode selection or update triggering.
 
-## 2. 范围
+## 2. Frozen system decisions
 
-Bootloader负责：
+The following requirements are frozen:
 
-- 读取和维护持久Journal；
-- 读取Application已经导入NVM的固件包；
-- 校验原始Manifest SHA-256；
-- 严格解析Manifest；
-- 校验产品、硬件、版本、组件和文件集合；
-- 安装HMI APP、GUI资源和Therapy MCU固件；
-- 在安装过程中计算组件SHA-256；
-- 对写入内容执行readback校验；
-- 处理安装中断；
-- 对Candidate和Rollback执行试运行；
-- 在Candidate无法运行时恢复`CURRENT`；
-- 在Candidate确认后将`UPDATE`提交为新的`CURRENT`；
-- 验证Runtime向量表并执行Jump；
-- 在不可恢复故障下进入`FAILED`。
+1. /UPDATE/firmware is the primary installation Package.
+2. /UPDATE/boot_update_request.json is the only request file.
+3. The final /UPDATE directory contains only firmware and the formal request.
+4. Production mode initializes EEPROM and uses the Journal state machine.
+5. Debug mode bypasses EEPROM and checks the formal request directly.
+6. The mode is selected at Bootloader compile time.
+7. Both modes reuse the same request parser, Manifest parser, Package validator, component registry, Installer, CURRENT store, and Runtime verifier.
+8. The Package is not limited to HMI APP, GUI, and Therapy.
+9. Current version 1 components include app, gui, therapy, voice, and config.
+10. Future resources are added through the component registry.
+11. Bootloader performs SHA-256 integrity checking only.
+12. Bootloader does not perform ECDSA, RSA, AES, signature verification, encryption, or decryption.
+13. The running Application verifies Package signature before staging.
+14. Production mode requires APP confirmation before accepting Candidate as CURRENT.
+15. Debug mode accepts a successfully installed and verified Package without APP confirmation.
+16. CURRENT_NEW and CURRENT_PREVIOUS are not used.
+17. Retained RAM and .noinit request mailboxes are not used.
+18. FAILED is a stable state and shall not create an endless Jump/watchdog loop.
 
-Bootloader不负责：
+## 3. Bootloader build configuration
 
-- 固件包签名验证；
-- ECDSA、RSA或其他非对称密码算法；
-- AES或其他固件加密、解密；
-- USB升级包发现与导入；
-- Bootloader自身在线升级；
-- APP业务功能。
+### 3.1 Required macro
 
-## 3. 安全与信任边界
+The Bootloader shall define:
 
-### 3.1 Application责任
+~~~c
+#ifndef BOOTLOADER_UPDATE_USE_JOURNAL
+#define BOOTLOADER_UPDATE_USE_JOURNAL 1U
+#endif
+~~~
 
-Application是固件包认证边界，必须：
+Configuration:
 
-1. 从外部升级介质读取固件包；
-2. 使用产品现有机制完成签名验证；
-3. 验证Manifest结构；
-4. 验证Manifest声明的全部组件；
-5. 只有全部验证成功后，才允许导入NVM；
-6. 将完整候选包写入`/UPDATE/firmware`；
-7. 对写入文件执行sync；
-8. 从NVM重新读取原始`manifest.json`并计算SHA-256；
-9. 将Manifest SHA-256、候选版本和`REQUESTED`写入Journal；
-10. 回读并验证Journal；
-11. 触发软件复位；
-12. Candidate或Rollback试运行成功后执行APP健康确认。
+| Value | Intended build | Behavior |
+|---:|---|---|
+| 1U | Production | Use EEPROM Journal and APP trial confirmation |
+| 0U | Debug or factory | Skip EEPROM and inspect the formal request immediately |
 
-### 3.2 Bootloader责任
+Recommended file:
 
-Bootloader是完整性复核和安装边界，必须：
+~~~text
+Application/Inc/bootloader_config.h
+~~~
 
-1. 读取Journal；
-2. 计算NVM中原始Manifest字节的SHA-256；
-3. 与Journal中的32字节摘要直接比较；
-4. 严格解析Manifest；
-5. 安装过程中重新计算每个组件SHA-256；
-6. 将组件摘要与Manifest声明值比较；
-7. 对每个写入块执行readback比较；
-8. 根据Journal状态执行安装、重试、试运行或回滚。
+The word Application in this path means the Bootloader top-level Application layer, not the HMI runtime APP.
 
-Bootloader可以解析但不得验证Manifest签名字段。
+### 3.2 Build validation
 
-### 3.3 当前安全模型限制
+~~~c
+#if (BOOTLOADER_UPDATE_USE_JOURNAL != 0U) && \
+    (BOOTLOADER_UPDATE_USE_JOURNAL != 1U)
+#error "BOOTLOADER_UPDATE_USE_JOURNAL must be 0U or 1U"
+#endif
+~~~
 
-该方案信任Application已经完成身份认证。CRC32和SHA-256用于检测数据损坏，不用于抵御能够同时修改NVM和Journal的主动攻击者。
+### 3.3 Macro ownership
 
-## 4. 分层架构
+The macro belongs to the Bootloader Application layer.
 
-依赖方向必须为：
+It shall not be:
 
-```text
-Application -> Services -> Platform -> BSP/Drivers -> HAL
-```
+- stored in EEPROM;
+- read from the request;
+- inferred from directory contents;
+- interpreted by Platform;
+- exposed as a BSP board feature;
+- changed during one boot;
+- automatically switched after an error.
 
-### 4.1 Application层
+### 3.4 Build expectations
 
-Application只负责：
+Production and Debug builds may eliminate unused code through compile-time conditions.
 
-- 初始化Platform和看门狗；
-- 调用Services处理启动流程；
-- 根据Service结果执行Jump、Reset或FAILED；
-- 不实现升级细节。
+However, they shall not contain separate implementations of:
 
-Application不得包含：
+- request parsing;
+- Manifest parsing;
+- Package validation;
+- component dispatch;
+- installation;
+- readback;
+- SHA-256;
+- CURRENT commit;
+- Runtime Jump.
 
-- FatFs操作实现；
-- Manifest解析；
-- SHA-256实现；
-- Flash或Therapy安装适配器；
-- CURRENT复制实现；
-- Service callback表。
+## 4. Scope
 
-### 4.2 Services层
+### 4.1 Bootloader responsibilities
 
-Services负责：
+Bootloader shall:
 
-- Journal状态管理；
-- 固件包读取和验证；
-- 版本策略；
-- 镜像安装；
-- CURRENT提交；
-- Candidate失败后的Rollback；
-- APP健康确认；
-- Runtime启动前验证。
+- initialize the minimum hardware required for startup;
+- select the build flow using the compile-time macro;
+- manage Journal in Production mode;
+- avoid all EEPROM access in Debug mode;
+- mount and unmount update storage;
+- read and validate the formal request;
+- strictly parse Manifest;
+- calculate the canonical Manifest digest;
+- validate product and hardware target;
+- validate the exact firmware file set;
+- validate every component size and SHA-256;
+- install every declared component;
+- verify every target write using readback;
+- recover from interrupted installation;
+- trial-run Candidate and Rollback in Production mode;
+- commit an accepted Candidate to CURRENT;
+- commit a Debug installation to CURRENT before closing the request;
+- validate Runtime vectors;
+- Jump to APP;
+- service watchdog during bounded long operations;
+- report specific failure reasons.
 
-Services可以直接调用Platform，不得直接包含HAL、FatFs、BSP或设备Driver头文件。
+### 4.2 Running Application responsibilities
 
-### 4.3 Platform层
+In Production staging, the running HMI Application shall:
 
-Platform只提供：
+1. read the external firmware Package;
+2. strictly parse Manifest;
+3. verify the Manifest signature;
+4. validate the source file set;
+5. validate every source component size and SHA-256;
+6. stage the complete Package to /UPDATE/firmware;
+7. reread and verify the staged Package;
+8. create /UPDATE/boot_update_request.json last;
+9. sync, close, reread, and validate the request;
+10. commit EEPROM Journal REQUESTED;
+11. reset the device.
 
-- 外部Flash能力；
-- 文件存储能力；
-- AT24原始非易失读写；
-- Therapy MCU编程能力；
-- 系统时间、复位和看门狗；
-- CPU跳转；
-- 日志。
+During Production trial confirmation, the new APP shall:
 
-Platform不得识别Manifest、Candidate、CURRENT、升级状态或回滚策略。
+1. initialize only the EEPROM capability required for confirmation;
+2. read JUMPING state;
+3. verify running identity;
+4. commit confirmation;
+5. read back Journal;
+6. immediately perform a software reset;
+7. avoid full business initialization before that reset.
 
-### 4.4 回调限制
+The HMI Application is not involved in Debug update completion.
 
-Application与Services之间不得使用函数指针表。函数指针port只允许存在于AT24、SPI NOR和STM32 ROM Boot等可复用设备驱动边界。
+### 4.3 Excluded responsibilities
 
-## 5. 存储模型
+Bootloader shall not:
 
-### 5.1 固件目录
+- discover or download a Package from USB;
+- verify ECDSA or RSA signatures;
+- decrypt firmware;
+- provide APP business functions;
+- update the Bootloader itself;
+- silently skip unsupported resources;
+- use CRC32 as Package integrity;
+- use Platform as an update-policy layer.
 
-```text
-/UPDATE/firmware/   Candidate：Application认证并导入的新版本
-/CURRENT/firmware/  Current：最近一次已确认、可恢复的版本
-```
+## 5. Architecture and dependency direction
 
-定义：
+Required dependency direction:
 
-- `UPDATE`在Candidate试运行成功前是安装源；
-- `CURRENT`在Candidate试运行期间是Rollback源；
-- Candidate确认后，`UPDATE`成为新`CURRENT`的事务源；
-- 新`CURRENT`完整验证成功后才能删除`UPDATE`；
-- Rollback成功时不得用失败的`UPDATE`替换`CURRENT`。
+~~~text
+Bootloader Application
+        ↓
+Services
+        ↓
+Platform
+        ↓
+BSP / Drivers
+        ↓
+HAL / CMSIS / FatFs low-level integration
+~~~
 
-### 5.2 为什么不需要CURRENT_NEW
+Reverse dependency is forbidden.
 
-`UPDATE`本身已经是完整、经过Application认证且由Bootloader重新校验的候选包。提交CURRENT时，`UPDATE`可直接承担事务源角色。
+## 6. Layer responsibilities
 
-只要满足以下条件，就不需要`CURRENT_NEW`：
+### 6.1 Bootloader Application layer
 
-1. 替换CURRENT前重新验证UPDATE；
-2. 复制过程中UPDATE保持只读；
-3. CURRENT验证完成前不删除UPDATE；
-4. 提交完成前不清除`CURRENT_COMMIT_PENDING`；
-5. 掉电后能够删除不完整CURRENT并重新从UPDATE复制。
+The Bootloader Application layer owns:
 
-### 5.3 为什么不需要CURRENT_PREVIOUS
+- bootloader_config.h;
+- compile-time mode selection;
+- minimum startup ordering;
+- UpdateService entry;
+- final action dispatch;
+- Reset, Jump, Wait, and fatal handling.
 
-Candidate确认前，旧`CURRENT`一直保留，因此它已经是上一版本。
+It shall not:
 
-Candidate完成APP健康确认后，项目将其视为新的有效版本。此时允许旧版本被替换，不再支持“新版本确认成功后仍回退到更早版本”。
+- parse JSON;
+- parse Manifest;
+- enumerate Package components;
+- operate FatFs directly;
+- erase or program images directly;
+- implement Journal A/B record logic;
+- copy CURRENT directly.
 
-如果产品未来要求确认后仍保留一个历史版本，则必须重新引入独立Previous目录或A/B固件槽。
+### 6.2 Services layer
 
-### 5.4 Journal存储
+Services owns update business rules:
 
-Journal基线存储介质为AT24。AT24只保存控制记录，不保存固件包。
+- UpdateService;
+- BootFlow;
+- UpdateJournal;
+- UpdateRequest;
+- ManifestParser;
+- PackageReader;
+- ComponentRegistry;
+- ImageInstaller;
+- CurrentStore;
+- RuntimeVerifier;
+- version policy;
+- retry policy;
+- Rollback policy;
+- request closure.
 
-不再使用：
+Services may recognize:
 
-- retained RAM request；
-- `.noinit` mailbox；
-- EEPROM BootControl旧结构；
-- `boot_update_request.json`。
+- UPDATE and CURRENT;
+- the formal request;
+- Manifest fields;
+- app, gui, therapy, voice, and config;
+- Candidate and Rollback;
+- Journal states;
+- current_commit_pending.
 
-## 6. Journal数据模型
+Services shall not include HAL handles or FatFs private implementation details.
 
-### 6.1 状态
+### 6.3 Platform layer
 
-```c
+Platform exposes hardware capabilities only:
+
+- filesystem mount and unmount;
+- file open, read, write, close, stat, enumerate, unlink, and sync;
+- internal Flash erase, program, and read;
+- external Flash erase, program, and read;
+- EEPROM fixed-address raw read and write;
+- Therapy programming transport;
+- watchdog;
+- reset;
+- time;
+- cache and interrupt control;
+- CPU Jump;
+- logging.
+
+Platform shall not recognize:
+
+- boot_update_request.json fields;
+- Manifest schema;
+- Package ID;
+- component_mask;
+- component names;
+- Candidate;
+- Rollback;
+- CURRENT transaction;
+- Journal state transitions;
+- APP confirmation;
+- the compile-time mode macro.
+
+### 6.4 BSP
+
+BSP owns:
+
+- board pin mapping;
+- peripheral instances;
+- chip-select mapping;
+- device capacity;
+- memory-region mapping;
+- board-specific initialization order.
+
+BSP shall not parse requests or implement update policy.
+
+### 6.5 Drivers
+
+Drivers own reusable device protocols:
+
+- AT24 access;
+- W25Q access;
+- SD interface;
+- Therapy ROM or programming protocol;
+- other device-level operations.
+
+Drivers shall not depend on Services.
+
+### 6.6 Callback policy
+
+Business flow shall use normal functions, enums, and result types.
+
+Function-pointer ports are allowed only when a reusable device driver genuinely needs hardware transport abstraction. The component registry should use a static descriptor table and enum/switch unless a simpler implementation cannot satisfy the targets.
+
+## 7. Persistent storage layout
+
+The only final layout is:
+
+~~~text
+/UPDATE/
+├── boot_update_request.json
+└── firmware/
+    ├── manifest.json
+    └── <every Manifest component file>
+
+/CURRENT/
+└── firmware/
+    ├── manifest.json
+    └── <every accepted Package component file>
+~~~
+
+### 7.1 UPDATE requirements
+
+- /UPDATE shall contain only firmware and boot_update_request.json.
+- /UPDATE/firmware shall contain exactly one manifest.json.
+- /UPDATE/firmware shall contain every Manifest component file.
+- /UPDATE/firmware shall not contain undeclared files.
+- /UPDATE/firmware shall not contain subdirectories.
+- file names are case-sensitive.
+- the Package becomes immutable when the formal request exists.
+- /UPDATE/firmware remains available until the transaction is safely closed.
+
+### 7.2 Request requirements
+
+- The request is a real runtime protocol file.
+- The request is generated by the HMI Application after Package validation.
+- The request is the last persistent entry created by staging.
+- Both Bootloader modes use the same request.
+- No additional control file is allowed.
+- Request deletion is the completion marker.
+
+### 7.3 CURRENT requirements
+
+CURRENT stores the last accepted complete Package.
+
+It is:
+
+- the Production Rollback source;
+- the accepted version record;
+- the source used to recover an older Runtime;
+- updated after Candidate confirmation;
+- updated immediately after Debug installation succeeds.
+
+CURRENT shall never be considered valid until its exact file set, file sizes, and SHA-256 values are verified.
+
+### 7.4 No extra CURRENT directories
+
+The system shall not use additional CURRENT construction or history directories.
+
+Power-loss safety is provided by:
+
+- retaining UPDATE;
+- retaining the request;
+- retaining current_commit_pending in Production;
+- rebuilding CURRENT from the beginning after interruption;
+- validating CURRENT before request deletion.
+
+Candidate confirmation means the old CURRENT may be replaced. Retaining an additional accepted history version is outside this baseline.
+
+## 8. Firmware Package
+
+### 8.1 Package definition
+
+A firmware Package consists of:
+
+~~~text
+manifest.json
++ every file referenced by manifest.components
+~~~
+
+It can contain:
+
+- executable firmware;
+- graphical resources;
+- audio resources;
+- configuration data;
+- fonts;
+- languages;
+- media;
+- other registered product resources.
+
+### 8.2 Version 1 component registry
+
+| Component | Bit | Value | Target category |
+|---|---:|---:|---|
+| app | 0 | 1 | HMI execution region |
+| gui | 1 | 2 | GUI resource region |
+| therapy | 2 | 4 | Therapy MCU |
+| voice | 3 | 8 | Audio and voice resource region |
+| config | 4 | 16 | Configuration resource region |
+
+voice is the version 1 key for audio content.
+
+### 8.3 Extensibility
+
+A new component requires a registry entry defining:
+
+- stable key;
+- stable mask bit;
+- format;
+- maximum size;
+- target category;
+- destination range;
+- erase granularity;
+- write alignment;
+- readback method;
+- installation ordering;
+- target completion operation;
+- minimum compatible Bootloader version.
+
+Recommended maximum component count:
+
+~~~c
+#define UPDATE_MANIFEST_MAX_COMPONENTS 16U
+~~~
+
+The update state machine shall not require modification when a new component is registered.
+
+### 8.4 Unsupported components
+
+An unsupported component shall:
+
+- fail validation before erase;
+- fail the complete Package;
+- not be ignored;
+- not be copied without installation;
+- not be removed from component_mask;
+- not allow partial installation.
+
+## 9. component_mask
+
+component_mask is the exact Manifest component-set identity.
+
+~~~text
+component_mask = OR of all registered bits declared by Manifest
+~~~
+
+Rules:
+
+- request mask shall equal the derived mask;
+- Journal mask shall equal the same value when stored;
+- all Manifest components shall be installed;
+- mask shall not select a subset;
+- extra bits fail validation;
+- missing bits fail validation;
+- duplicate component keys fail validation.
+
+## 10. Cryptographic and integrity boundary
+
+### 10.1 Signature verification
+
+The running HMI Application performs signature verification before staging.
+
+Bootloader does not perform:
+
+- ECDSA;
+- RSA;
+- AES;
+- decryption;
+- public-key loading;
+- key selection.
+
+### 10.2 Manifest digest
+
+manifest_sha256 is:
+
+~~~text
+SHA-256(
+    JCS(
+        Manifest without signing.signature
+    )
+)
+~~~
+
+The definition is shared by:
+
+- Application staging;
+- the formal request;
+- Journal Candidate identity;
+- Journal running identity;
+- APP confirmation;
+- CURRENT validation;
+- Runtime identity comparison.
+
+Raw manifest.json bytes shall not be used as manifest_sha256.
+
+### 10.3 Component digest
+
+A component sha256 is the SHA-256 of all bytes in its file.
+
+Bootloader shall calculate it:
+
+- during complete Package preflight;
+- during installation;
+- when verifying CURRENT;
+- whenever a source must be revalidated after interruption.
+
+### 10.4 CRC32
+
+CRC32 may protect EEPROM Journal records.
+
+CRC32 shall not:
+
+- authenticate a Package;
+- replace component SHA-256;
+- replace Manifest digest;
+- approve installation.
+
+### 10.5 Debug security limitation
+
+Debug mode bypasses the Application authentication path. It provides integrity checking but not Package origin authentication.
+
+Therefore Debug mode is limited to physically controlled development, factory, service, or recovery use.
+
+If untrusted users can replace SD contents, Debug mode shall not be enabled in a public Production build.
+
+## 11. Formal request schema
+
+Path:
+
+~~~text
+/UPDATE/boot_update_request.json
+~~~
+
+Schema version 1:
+
+~~~json
+{
+  "format_version": 1,
+  "requested": true,
+  "package_id": "hmi-1.3.4+20260812",
+  "manifest_sha256": "6c3ab81f4e5e775629a81b6c8d19c8d507f59cfd9f1796c9e15a99f9b7c4b342",
+  "component_mask": 31
+}
+~~~
+
+Required validation:
+
+- format_version is 1;
+- requested is true for an active request;
+- package_id exactly matches Manifest;
+- manifest_sha256 has 64 lowercase hexadecimal characters;
+- digest equals the Bootloader calculation;
+- component_mask equals the Manifest-derived value;
+- all required fields exist;
+- duplicate keys are rejected;
+- unknown keys are rejected;
+- trailing content is rejected;
+- input size is bounded;
+- UTF-8 and numeric syntax are valid.
+
+The request shall be deleted after successful completion. It shall not be rewritten as an inactive completion record.
+
+## 12. Application staging order
+
+Production staging shall follow:
+
+~~~text
+Authenticate source Package
+    ↓
+Validate exact source file set
+    ↓
+Validate all source size and SHA-256
+    ↓
+Remove old formal request
+    ↓
+Rebuild /UPDATE/firmware
+    ↓
+Verify staged file set, size, and SHA-256
+    ↓
+Create the formal request last
+    ↓
+Sync, close, reread, and validate request
+    ↓
+Commit Journal REQUESTED
+    ↓
+Software reset
+~~~
+
+Final persistent layout shall contain no second request or trigger file.
+
+A partial or malformed request shall never permit target erase.
+
+## 13. Boot startup
+
+### 13.1 Common early startup
+
+Both builds shall:
+
+1. configure MPU as required;
+2. enable the required caches according to project startup policy;
+3. initialize HAL and clocks;
+4. initialize minimum GPIO and board capabilities;
+5. initialize logs;
+6. initialize watchdog;
+7. enter UpdateService.
+
+Only the capabilities required by the selected path shall be initialized before the update decision.
+
+### 13.2 Production startup
+
+When BOOTLOADER_UPDATE_USE_JOURNAL is 1U:
+
+1. initialize EEPROM;
+2. load Journal;
+3. validate Journal;
+4. dispatch Journal state;
+5. mount update storage only when required.
+
+Normal IDLE with no pending commit:
+
+- shall not mount update storage;
+- shall not inspect the request;
+- shall validate Runtime;
+- shall Jump APP.
+
+### 13.3 Debug startup
+
+When BOOTLOADER_UPDATE_USE_JOURNAL is 0U:
+
+1. do not initialize EEPROM;
+2. initialize update storage;
+3. mount filesystem;
+4. inspect the formal request;
+5. install only if the request is active and valid.
+
+If the request is absent:
+
+- unmount storage;
+- validate Runtime;
+- Jump APP.
+
+If the request is malformed or conflicts with the Package:
+
+- do not erase any target;
+- report the error;
+- remain in Bootloader error handling.
+
+## 14. Journal state model
+
+### 14.1 State enum
+
+Production mode uses exactly:
+
+~~~c
 typedef enum
 {
     UPDATE_STATE_IDLE = 0,
@@ -221,635 +682,1131 @@ typedef enum
     UPDATE_STATE_JUMPING,
     UPDATE_STATE_FAILED
 } update_state_t;
-```
+~~~
 
-| 状态 | 含义 |
+No Debug-only state shall be added.
+
+### 14.2 State meanings
+
+| State | Meaning |
 |---|---|
-| `IDLE` | 没有待安装事务；当前Runtime已经确认健康 |
-| `REQUESTED` | Application已经提交Candidate请求 |
-| `INSTALLING` | 正在安装Candidate或Rollback，Runtime可能不完整 |
-| `JUMPING` | Candidate或Rollback正在试运行，等待APP健康确认 |
-| `FAILED` | Candidate和Rollback均无法可靠安装或运行 |
+| IDLE | No active installation or trial |
+| REQUESTED | Application committed a Candidate |
+| INSTALLING | Candidate or Rollback is being installed |
+| JUMPING | Installed Runtime awaits APP confirmation |
+| FAILED | Candidate and Rollback paths cannot produce a confirmed APP |
 
-### 6.2 镜像来源
+### 14.3 Journal record
 
-```c
+The Journal shall include at least:
+
+- magic;
+- format_version;
+- sequence;
+- state;
+- source;
+- flags;
+- install_attempts;
+- jump_attempts;
+- commit_attempts;
+- last_error;
+- candidate_version;
+- component_mask;
+- candidate_manifest_sha256;
+- running_manifest_sha256;
+- CRC32.
+
+source shall distinguish:
+
+~~~c
+UPDATE_SOURCE_NONE
+UPDATE_SOURCE_CANDIDATE
+UPDATE_SOURCE_ROLLBACK
+~~~
+
+flags shall include:
+
+~~~c
+UPDATE_FLAG_CURRENT_COMMIT_PENDING
+~~~
+
+The pending flag is not a sixth state.
+
+### 14.4 A/B Journal storage
+
+Journal shall use two EEPROM records or an equivalent power-loss-safe scheme.
+
+Write procedure:
+
+1. validate both slots;
+2. choose the highest valid sequence;
+3. build the next record;
+4. write the inactive slot;
+5. write CRC;
+6. reread;
+7. validate the complete new record;
+8. only then accept the new sequence.
+
+Journal writes shall never update the only valid record in place.
+
+### 14.5 Invalid Journal
+
+If both slots are erased and the device is in defined first-boot state, Production Bootloader may initialize IDLE.
+
+Unexpected corruption shall:
+
+- produce JOURNAL_INVALID;
+- not claim update success;
+- not erase Runtime;
+- enter the configured controlled recovery path.
+
+## 15. Production dispatch priority
+
+Production startup shall process:
+
+1. invalid Journal;
+2. IDLE with CURRENT_COMMIT_PENDING;
+3. REQUESTED;
+4. INSTALLING;
+5. JUMPING;
+6. FAILED;
+7. normal IDLE.
+
+| Condition | Required action |
+|---|---|
+| IDLE + no pending | Validate Runtime and Jump |
+| IDLE + commit pending | Commit Candidate Package to CURRENT |
+| REQUESTED | Validate and begin Candidate installation |
+| INSTALLING | Restart Candidate or Rollback installation |
+| JUMPING | Retry trial or begin Rollback |
+| FAILED | Remain in stable failure handling |
+
+A request file alone shall not trigger Production installation.
+
+## 16. Common Package validation
+
+Both builds use the same Package validation service.
+
+### 16.1 Request-to-Manifest checks
+
+Before erase:
+
+1. load the formal request;
+2. strictly parse Manifest;
+3. compare package_id;
+4. calculate and compare manifest_sha256;
+5. derive and compare component_mask;
+6. validate target product;
+7. validate target hardware;
+8. validate minimum Bootloader version;
+9. validate release-version policy;
+10. validate every registered component;
+11. validate all target ranges;
+12. validate installation ordering.
+
+Production additionally verifies Journal Candidate identity.
+
+### 16.2 Exact file set
+
+Expected set:
+
+~~~text
+{ manifest.json } ∪ { manifest.components[*].file }
+~~~
+
+The firmware directory shall reject:
+
+- missing file;
+- extra file;
+- hidden file;
+- incomplete file;
+- subdirectory;
+- duplicate name;
+- case mismatch;
+- non-regular object;
+- illegal character;
+- path traversal;
+- component referencing manifest.json;
+- two components referencing one file.
+
+### 16.3 Full Package preflight
+
+All components shall pass before the first erase:
+
+- source stat;
+- source size;
+- complete source SHA-256;
+- registry lookup;
+- format policy;
+- target capacity;
+- address range;
+- erase range;
+- write alignment;
+- range overlap check;
+- readback availability;
+- target session availability.
+
+The Bootloader shall not begin destructive work after validating only the first component.
+
+## 17. Common Image Installer
+
+### 17.1 Installation plan
+
+The Installer receives a validated installation plan from Services.
+
+The plan contains:
+
+- Package source;
+- component count;
+- ordered component descriptors;
+- expected sizes and digests;
+- target ranges;
+- target-specific options.
+
+### 17.2 Installation order
+
+Installation order shall protect boot safety.
+
+Recommended default:
+
+1. non-executable resources;
+2. external Flash resources;
+3. Therapy image;
+4. HMI APP last.
+
+A component-specific dependency may override the default only through validated registry policy.
+
+### 17.3 Per-component operation
+
+For every component:
+
+1. open source;
+2. initialize target session;
+3. validate range;
+4. erase target;
+5. read a bounded source block;
+6. update SHA-256;
+7. write target;
+8. read target block;
+9. compare readback;
+10. repeat until exact declared size;
+11. verify EOF;
+12. verify final digest;
+13. finalize target;
+14. close target;
+15. close source.
+
+### 17.4 Failure behavior
+
+On any component failure:
+
+- stop installation;
+- store component and operation error;
+- do not Jump a partial Runtime;
+- keep request and UPDATE;
+- Production follows retry or Rollback policy;
+- Debug remains in diagnosable error handling;
+- do not continue with later components.
+
+### 17.5 Idempotence
+
+Installation shall be restartable:
+
+- restart from the first component;
+- erase before rewriting;
+- do not depend on a retained RAM offset;
+- do not require byte-level resume;
+- repeated installation of the same valid Package shall produce the same target contents.
+
+## 18. Production REQUESTED
+
+When Journal is REQUESTED:
+
+1. mount storage;
+2. require the formal request;
+3. execute common Package validation;
+4. validate CURRENT as Rollback source;
+5. set source=CANDIDATE;
+6. increment install_attempts;
+7. persist INSTALLING;
+8. begin common installation.
+
+The transition to INSTALLING shall be persisted before the first target erase.
+
+If validation fails before erase:
+
+- Runtime remains unchanged;
+- the specific error is stored;
+- the system shall not mark the Candidate successful;
+- recovery policy may return to the existing APP or remain in Bootloader.
+
+## 19. Production INSTALLING
+
+Starting in INSTALLING means the previous installation was interrupted or failed.
+
+The Bootloader shall:
+
+1. load source;
+2. select UPDATE for Candidate or CURRENT for Rollback;
+3. validate the complete source Package;
+4. increment and persist install_attempts;
+5. restart from the first component.
+
+### 19.1 Candidate write failure
+
+For erase, program, readback, file-read, or digest failure:
+
+- remain logically in INSTALLING;
+- retry from the start on the next controlled attempt;
+- stop after the configured Candidate install limit;
+- validate CURRENT;
+- switch source to ROLLBACK;
+- reinstall CURRENT.
+
+If CURRENT is missing or invalid, enter FAILED.
+
+### 19.2 Rollback write failure
+
+Rollback installation shall retry up to its configured limit.
+
+If Rollback cannot be installed, enter FAILED.
+
+### 19.3 Successful installation
+
+After Candidate or Rollback installation:
+
+1. validate all target results;
+2. save running_manifest_sha256;
+3. set JUMPING;
+4. set jump_attempts=0;
+5. persist Journal;
+6. unmount storage;
+7. Trial Jump.
+
+## 20. Production JUMPING
+
+JUMPING means an installed Runtime has not confirmed successful startup.
+
+### 20.1 Trial attempt persistence
+
+Before each Trial Jump:
+
+1. validate Runtime vectors;
+2. increment jump_attempts;
+3. persist Journal;
+4. shut down Bootloader peripherals;
+5. Jump APP.
+
+If APP resets before confirmation, Bootloader sees JUMPING again.
+
+### 20.2 Candidate APP failure
+
+Recommended limit:
+
+~~~c
+#define BOOTLOADER_TRIAL_JUMP_MAX_ATTEMPTS 3U
+~~~
+
+Behavior:
+
+- attempts below limit: Trial Jump again;
+- limit reached: validate CURRENT and begin Rollback installation;
+- CURRENT invalid: enter FAILED.
+
+### 20.3 Rollback APP failure
+
+If Rollback APP also fails to confirm after its limit:
+
+- enter FAILED;
+- do not alternate forever between Jump and watchdog reset;
+- do not repeatedly erase Runtime;
+- preserve diagnostic state.
+
+## 21. APP trial confirmation
+
+### 21.1 Early APP path
+
+Before normal APP tasks, UI, communication, storage, and other business modules, the APP shall check the Journal.
+
+If state is JUMPING:
+
+1. initialize EEPROM only;
+2. read the latest Journal record;
+3. verify running_manifest_sha256;
+4. confirm Candidate or Rollback;
+5. reread the committed Journal;
+6. perform software reset immediately.
+
+The APP does not need to mount SD for confirmation.
+
+### 21.2 Candidate confirmation
+
+Candidate confirmation writes one atomic Journal record:
+
+- state=IDLE;
+- source=CANDIDATE;
+- CURRENT_COMMIT_PENDING set;
+- candidate identity retained;
+- running identity retained;
+- jump_attempts cleared;
+- last_error cleared.
+
+### 21.3 Rollback confirmation
+
+Rollback confirmation writes:
+
+- state=IDLE;
+- source=ROLLBACK;
+- CURRENT_COMMIT_PENDING clear;
+- jump_attempts cleared;
+- original CURRENT retained;
+- failed Candidate remains identifiable for cleanup.
+
+### 21.4 Identity mismatch
+
+If running APP identity does not equal Journal running_manifest_sha256:
+
+- APP shall not confirm;
+- APP shall not clear JUMPING;
+- the next Bootloader start follows trial-failure policy.
+
+## 22. Production CURRENT commit
+
+On IDLE with CURRENT_COMMIT_PENDING:
+
+1. mount storage;
+2. require the formal request;
+3. revalidate request and UPDATE Package;
+4. verify Candidate identity equals the confirmed Runtime;
+5. remove incomplete CURRENT contents;
+6. copy Manifest and every component from UPDATE to CURRENT;
+7. sync and close all CURRENT files;
+8. enumerate CURRENT;
+9. verify exact CURRENT file set;
+10. verify every CURRENT file size and SHA-256;
+11. delete the formal request;
+12. sync the filesystem;
+13. clean UPDATE Package;
+14. clear CURRENT_COMMIT_PENDING;
+15. clear Candidate transaction fields;
+16. persist Journal IDLE;
+17. unmount storage;
+18. validate Runtime;
+19. Jump APP.
+
+The formal request and UPDATE shall remain until CURRENT passes validation.
+
+### 22.1 Interrupted CURRENT commit
+
+If power fails:
+
+- Journal remains IDLE with CURRENT_COMMIT_PENDING;
+- the formal request remains;
+- UPDATE remains the authoritative source;
+- incomplete CURRENT is not used for Rollback;
+- the next boot rebuilds CURRENT from the start.
+
+No extra construction directory is required.
+
+### 22.2 Rollback cleanup
+
+After Rollback APP confirmation:
+
+- keep the original CURRENT;
+- delete the failed Candidate request;
+- clean failed Candidate UPDATE;
+- clear Candidate transaction fields;
+- remain IDLE.
+
+Failure to clean storage shall be recorded but shall not overwrite the recovered CURRENT.
+
+## 23. Debug update flow
+
+This section applies only when:
+
+~~~c
+BOOTLOADER_UPDATE_USE_JOURNAL == 0U
+~~~
+
+### 23.1 Startup
+
+Debug Bootloader shall:
+
+1. skip EEPROM initialization;
+2. mount update storage;
+3. inspect /UPDATE/boot_update_request.json.
+
+### 23.2 No active request
+
+If the request is absent or explicitly inactive by protocol policy:
+
+1. unmount storage;
+2. validate current Runtime;
+3. Jump current APP.
+
+### 23.3 Invalid request
+
+If the request exists but is malformed, unsupported, or inconsistent:
+
+- do not erase;
+- do not treat it as a valid update;
+- report the error;
+- remain in controlled Bootloader handling.
+
+### 23.4 Active request
+
+If the request is valid and active:
+
+1. execute common Package validation;
+2. execute common installation for every Manifest component;
+3. validate all installed targets;
+4. validate Runtime;
+5. rebuild CURRENT from UPDATE;
+6. validate CURRENT;
+7. delete the formal request;
+8. sync filesystem;
+9. clean completed UPDATE if configured;
+10. unmount storage;
+11. Jump APP.
+
+### 23.5 Explicitly omitted Debug behavior
+
+Debug shall not:
+
+- initialize AT24;
+- read Journal;
+- write Journal;
+- use REQUESTED;
+- use INSTALLING;
+- use JUMPING;
+- wait for APP confirmation;
+- perform a completion reset;
+- automatically reinstall old CURRENT after APP failure.
+
+### 23.6 Debug success boundary
+
+Debug considers the update successful after:
+
+- every component is installed;
+- every write passes readback;
+- every digest matches;
+- Runtime vectors are valid;
+- CURRENT is complete and valid;
+- the formal request is deleted;
+- filesystem sync succeeds.
+
+Whether the APP later completes business initialization is outside Debug success determination.
+
+## 24. Debug power-loss behavior
+
+| Interruption | Required next Debug boot behavior |
+|---|---|
+| During request validation | Validate again; no target erase if invalid |
+| During installation | Request remains; reinstall from the beginning |
+| After install, before CURRENT validation | Reinstall if needed and rebuild CURRENT |
+| During CURRENT rebuild | Request remains; repeat safely |
+| After CURRENT validation, before request deletion | Repeat safely |
+| After request deletion, before Jump | No request; validate and Jump installed Runtime |
+
+Debug mode has no EEPROM attempt counter.
+
+Repeated Debug failure shall not cause a self-reset storm. The Bootloader shall expose the error and wait for controlled recovery or power cycle.
+
+## 25. Mode convergence
+
+The only mode-specific preconditions are:
+
+~~~text
+Production:
+EEPROM init → Journal decision → mount storage when required
+
+Debug:
+skip EEPROM → mount storage → inspect formal request
+~~~
+
+After an active request is accepted:
+
+~~~text
+Request parser
+    ↓
+Manifest parser
+    ↓
+Package validator
+    ↓
+Component registry
+    ↓
+Image Installer
+    ↓
+Readback and SHA-256
+    ↓
+Runtime verifier
+    ↓
+CurrentStore when required
+~~~
+
+Production then waits for APP confirmation before CurrentStore commit.
+
+Debug performs CurrentStore commit immediately before request closure.
+
+## 26. Debug-to-Production transition
+
+A completed Debug update shall leave:
+
+- installed Runtime matching the Package;
+- CURRENT matching the Package;
+- no formal request;
+- synchronized storage.
+
+When a Production build is later programmed:
+
+- an erased Journal may be initialized as IDLE;
+- a valid IDLE Journal starts normally;
+- a valid non-IDLE Journal is processed according to its stored state.
+
+Debug does not inspect EEPROM. Therefore a factory or service transition shall ensure any unrelated stale non-IDLE Journal is erased or normalized before the Production build is used.
+
+## 27. Runtime validation
+
+Before Jump:
+
+- MSP shall be inside an allowed RAM region;
+- MSP shall meet alignment requirements;
+- Reset_Handler shall be inside the allowed APP execution region;
+- Reset_Handler Thumb bit shall be set;
+- vector-table address shall meet VTOR alignment;
+- vector words shall not be erased values;
+- Runtime identity shall match the expected installed Package when available;
+- no partial component installation may remain accepted.
+
+Allowed RAM ranges shall reflect the actual linker map, including only configured DTCM, AXI SRAM, D2 SRAM, and SRAM4 regions.
+
+## 28. Jump implementation
+
+Services decides whether Jump is allowed.
+
+Platform performs the CPU transition.
+
+Required sequence shall be project-specific but centrally implemented:
+
+1. stop new work;
+2. sync and unmount storage;
+3. deinitialize active DMA and peripherals as required;
+4. disable SysTick;
+5. disable interrupts;
+6. clear pending NVIC interrupts;
+7. handle cache according to the validated Bootloader/APP memory contract;
+8. set VTOR;
+9. set MSP;
+10. branch to Reset_Handler.
+
+Cache maintenance shall not be added blindly. It must match MPU attributes, enabled caches, dirty memory regions, and the known STM32H7 startup contract.
+
+## 29. Watchdog
+
+Watchdog shall be serviced during:
+
+- directory enumeration;
+- Manifest digest calculation;
+- full Package hash validation;
+- Flash erase;
+- Flash programming;
+- readback;
+- Therapy programming;
+- CURRENT copy;
+- CURRENT validation.
+
+Requirements:
+
+- service points are progress-bound;
+- a stuck operation shall still time out;
+- retry counters are persisted before destructive operations or Trial Jump;
+- counters saturate and never wrap.
+
+## 30. Retry configuration
+
+Recommended centralized constants:
+
+~~~c
+#define BOOTLOADER_CANDIDATE_INSTALL_MAX_ATTEMPTS 3U
+#define BOOTLOADER_ROLLBACK_INSTALL_MAX_ATTEMPTS  3U
+#define BOOTLOADER_TRIAL_JUMP_MAX_ATTEMPTS        3U
+#define BOOTLOADER_CURRENT_COMMIT_MAX_ATTEMPTS    3U
+~~~
+
+Product review may change values, but:
+
+- values shall not be scattered across modules;
+- Candidate and Rollback attempts shall be distinguishable;
+- an attempt shall be persisted before the corresponding risky action;
+- reaching a limit shall cause an explicit state transition.
+
+## 31. FAILED behavior
+
+FAILED is a stable Production state.
+
+In FAILED, Bootloader shall:
+
+- preserve Journal;
+- preserve CURRENT and UPDATE where possible;
+- preserve last_error;
+- avoid repeated erase;
+- avoid infinite Jump;
+- avoid intentional watchdog-reset loops;
+- provide logs or service diagnostics;
+- wait in a watchdog-safe controlled loop if appropriate;
+- leave FAILED only through an explicit service, factory, or reprogramming operation.
+
+Debug errors do not write FAILED because Debug does not use Journal. They use an equivalent non-persistent controlled error path.
+
+## 32. Error model
+
+Minimum errors:
+
+~~~text
+JOURNAL_INVALID
+JOURNAL_READ_FAILED
+JOURNAL_WRITE_FAILED
+REQUEST_NOT_FOUND
+REQUEST_READ_FAILED
+REQUEST_PARSE_FAILED
+REQUEST_VERSION_UNSUPPORTED
+REQUEST_NOT_ACTIVE
+REQUEST_PACKAGE_ID_MISMATCH
+REQUEST_MANIFEST_DIGEST_MISMATCH
+REQUEST_COMPONENT_MASK_MISMATCH
+STORAGE_INIT_FAILED
+STORAGE_MOUNT_FAILED
+STORAGE_SYNC_FAILED
+MANIFEST_PARSE_FAILED
+MANIFEST_POLICY_FAILED
+TARGET_MISMATCH
+VERSION_REJECTED
+COMPONENT_UNSUPPORTED
+FILE_SET_MISMATCH
+COMPONENT_SIZE_MISMATCH
+COMPONENT_HASH_MISMATCH
+TARGET_RANGE_INVALID
+TARGET_OVERLAP
+ERASE_FAILED
+WRITE_FAILED
+READBACK_FAILED
+THERAPY_PROGRAM_FAILED
+RUNTIME_VECTOR_INVALID
+CURRENT_COMMIT_FAILED
+REQUEST_CLOSE_FAILED
+TRIAL_UNCONFIRMED
+ROLLBACK_FAILED
+~~~
+
+Each error shall preserve:
+
+- mode;
+- Journal state when applicable;
+- source;
+- Package identity;
+- component identity;
+- operation phase;
+- attempt counts.
+
+## 33. Service interfaces
+
+### 33.1 Top-level interface
+
+Mode is compile-time, so UpdateService does not need a runtime trigger-mode argument.
+
+~~~c
+firmware_status_t UpdateService_Init(void);
+update_result_t UpdateService_Process(void);
+~~~
+
+### 33.2 Compile-time dispatch
+
+~~~c
+update_result_t UpdateService_Process(void)
+{
+#if (BOOTLOADER_UPDATE_USE_JOURNAL == 1U)
+    return UpdateService_ProcessJournalBoot();
+#else
+    return UpdateService_ProcessFileBoot();
+#endif
+}
+~~~
+
+The two branches are small orchestration functions. They do not duplicate common validators or installers.
+
+### 33.3 APP confirmation interface
+
+Production APP-facing interface:
+
+~~~c
+firmware_status_t UpdateService_ConfirmRunning(
+    const uint8_t running_manifest_sha256[32]);
+~~~
+
+The API validates:
+
+- latest Journal;
+- state is JUMPING;
+- source is Candidate or Rollback;
+- digest matches running identity;
+- next Journal record is persisted and read back.
+
+### 33.4 Result enum
+
+Recommended top-level outcomes:
+
+~~~c
 typedef enum
 {
-    UPDATE_SOURCE_CANDIDATE = 0,
-    UPDATE_SOURCE_ROLLBACK
-} update_source_t;
-```
+    UPDATE_RESULT_JUMP_APP = 0,
+    UPDATE_RESULT_RESET,
+    UPDATE_RESULT_WAIT,
+    UPDATE_RESULT_FAILED
+} update_result_t;
+~~~
 
-- Candidate来源：`/UPDATE/firmware`；
-- Rollback来源：`/CURRENT/firmware`。
+Bootloader Application performs the final action.
 
-`INSTALLING`和`JUMPING`必须结合source字段解释。
+## 34. Recommended module layout
 
-### 6.3 标志
-
-至少定义：
-
-```c
-#define UPDATE_FLAG_CURRENT_COMMIT_PENDING (1UL << 0U)
-```
-
-含义：Candidate已经由APP确认健康，但尚未完成`UPDATE -> CURRENT`提交。
-
-### 6.4 建议记录格式
-
-```c
-typedef struct
-{
-    uint32_t magic;
-    uint32_t format_version;
-    uint32_t sequence;
-
-    uint32_t state;
-    uint32_t source;
-    uint32_t flags;
-
-    uint32_t install_attempts;
-    uint32_t jump_attempts;
-    uint32_t commit_attempts;
-    uint32_t last_error;
-
-    uint32_t candidate_version;
-    uint8_t candidate_manifest_sha256[32];
-    uint8_t running_manifest_sha256[32];
-
-    uint32_t crc32;
-} update_journal_record_t;
-```
-
-跨Application和Bootloader共享的ABI必须使用固定宽度整数，不得依赖编译器枚举大小或未定义padding。
-
-### 6.5 A/B双槽
-
-Journal必须使用两个物理槽：
-
-1. 启动时读取两个槽；
-2. 校验magic、format version和CRC32；
-3. 两个槽均有效时选择sequence较新的记录；
-4. 更新时写入非当前槽；
-5. 写完后回读；
-6. 回读验证成功后新记录才生效；
-7. 掉电不得同时破坏唯一有效记录。
-
-## 7. 固件包要求
-
-### 7.1 支持组件
-
-当前Bootloader支持：
-
-- HMI APP；
-- GUI资源；
-- Therapy MCU固件。
-
-Manifest中不得包含未实现安装路径的组件。
-
-### 7.2 精确文件集合
-
-`/UPDATE/firmware`和`/CURRENT/firmware`验证时必须：
-
-- 包含一个`manifest.json`；
-- 包含Manifest声明的全部组件文件；
-- 不得缺少文件；
-- 不得包含额外文件；
-- 不得包含未知子目录；
-- 文件名区分大小写；
-- 文件名不得包含路径穿越字符。
-
-### 7.3 Manifest验证
-
-Bootloader必须验证：
-
-- 原始Manifest SHA-256与Journal匹配；
-- `format_version`受支持；
-- product与目标产品一致；
-- hardware与目标硬件一致；
-- minimum bootloader version不高于当前版本；
-- package ID格式有效；
-- release版本满足版本策略；
-- 组件不重复；
-- 组件文件名、格式、大小和目标范围有效。
-
-Bootloader不得执行签名验证。
-
-## 8. Application提交升级请求
-
-Application必须按以下顺序执行：
-
-1. 验证外部固件包签名；
-2. 验证Manifest和全部组件；
-3. 确认Journal为`IDLE`且没有`CURRENT_COMMIT_PENDING`；
-4. 清理旧`/UPDATE/firmware`；
-5. 将完整固件包复制到`/UPDATE/firmware`；
-6. 对所有文件执行sync；
-7. 从NVM重新读取原始Manifest；
-8. 计算原始Manifest SHA-256；
-9. 写入候选版本、Manifest摘要、Candidate source和`REQUESTED`；
-10. 清零安装、Jump和Commit计数；
-11. 使用A/B Journal原子提交；
-12. 回读Journal并验证；
-13. 触发软件复位。
-
-`REQUESTED`必须最后提交。包已经写入但请求未提交时，Bootloader应继续正常启动当前APP。
-
-## 9. Bootloader总启动流程
-
-Bootloader启动后：
-
-1. 初始化最小Platform能力；
-2. 初始化日志；
-3. 初始化看门狗；
-4. 初始化Journal存储；
-5. 读取并验证A/B Journal；
-6. 根据状态和标志执行对应流程。
-
-处理优先级：
-
-```text
-FAILED
-  > INSTALLING
-  > JUMPING
-  > REQUESTED
-  > IDLE + CURRENT_COMMIT_PENDING
-  > 普通IDLE启动
-```
-
-## 10. IDLE处理
-
-### 10.1 IDLE且存在CURRENT_COMMIT_PENDING
-
-说明Candidate已经完成APP健康确认，Bootloader必须执行CURRENT提交：
-
-1. 挂载NVM；
-2. 验证`UPDATE`仍然完整；
-3. 执行`UPDATE -> CURRENT`复制替换；
-4. 完整验证新`CURRENT`；
-5. 删除`UPDATE`；
-6. 清除`CURRENT_COMMIT_PENDING`；
-7. 清除Candidate事务字段；
-8. 保持`IDLE`；
-9. 正常启动APP。
-
-### 10.2 普通IDLE
-
-普通`IDLE`表示当前Runtime已经确认健康：
-
-1. 不写`JUMPING`；
-2. 不要求APP再次执行升级确认；
-3. 初始化外部Flash；
-4. 进入内存映射模式；
-5. 验证Runtime向量表；
-6. Jump当前APP。
-
-`JUMPING`不得用于每一次普通启动，否则APP确认后的软件复位会形成循环。
-
-### 10.3 普通IDLE的能力边界
-
-该五状态模型只检测升级后的试运行失败，不检测已确认APP在未来普通启动中的所有故障。
-
-如果产品要求检测每一次正常启动失败，应增加独立Boot Health机制，不得改变本需求中`JUMPING`的语义。
-
-## 11. REQUESTED处理
-
-当状态为`REQUESTED`：
-
-1. 初始化并挂载NVM；
-2. 验证`UPDATE`目录和Manifest；
-3. 校验Manifest原始SHA-256；
-4. 校验产品、硬件、版本和精确文件集合；
-5. 验证`CURRENT`是完整有效的Rollback源；
-6. 设置`source = CANDIDATE`；
-7. 清零安装和Jump计数；
-8. 持久化`INSTALLING`；
-9. 开始安装Candidate。
-
-如果在第一次破坏性擦除前验证失败：
-
-- Runtime仍安全；
-- 记录错误；
-- 清理无效UPDATE；
-- 恢复`IDLE`；
-- 启动当前APP。
-
-如果`CURRENT`不存在或无效，本基线默认拒绝开始Candidate安装。量产时必须预置有效Factory/CURRENT包。
-
-## 12. INSTALLING处理
-
-### 12.1 重试原则
-
-启动时检测到`INSTALLING`表示上次安装异常。Bootloader必须从镜像起始位置重新安装，不做断点续传。
-
-推荐：
-
-```c
-#define UPDATE_MAX_INSTALL_ATTEMPTS 3U
-```
-
-每次安装前：
-
-1. 增加`install_attempts`；
-2. 持久化Journal；
-3. 再执行擦除。
-
-### 12.2 安装算法
-
-每个组件必须：
-
-1. 检查源文件大小；
-2. 初始化目标设备；
-3. 擦除目标区域；
-4. 分块读取源文件；
-5. 同步更新SHA-256；
-6. 写入目标；
-7. 立即readback；
-8. 使用`memcmp()`比较源块和readback块；
-9. 完成后比较组件最终SHA-256；
-10. 无论成功失败都关闭文件和硬件会话。
-
-### 12.3 Candidate安装结果
-
-Candidate安装成功：
-
-1. 设置`source = CANDIDATE`；
-2. 清零`jump_attempts`；
-3. 持久化`JUMPING`；
-4. 执行Trial Jump。
-
-Candidate安装失败：
-
-- 未达到最大次数：保持`INSTALLING`并软件复位，下次从头重装Candidate；
-- 达到最大次数：设置`source = ROLLBACK`，清零安装和Jump计数，从`CURRENT`安装上一版本；
-- 不得Jump部分写入的Runtime。
-
-### 12.4 Rollback安装结果
-
-Rollback必须恢复`CURRENT`声明的完整Package，而不是只恢复失败组件。
-
-Rollback安装成功：
-
-1. 设置`source = ROLLBACK`；
-2. 清零`jump_attempts`；
-3. 持久化`JUMPING`；
-4. 执行Trial Jump。
-
-Rollback安装达到最大失败次数后进入`FAILED`。
-
-## 13. JUMPING处理
-
-`JUMPING`只表示Candidate或Rollback安装后的试运行尚未得到APP确认。
-
-推荐：
-
-```c
-#define UPDATE_MAX_JUMP_ATTEMPTS 3U
-```
-
-### 13.1 执行Trial Jump
-
-每次Trial Jump前必须：
-
-1. 验证Runtime向量；
-2. 增加`jump_attempts`；
-3. 持久化`JUMPING`；
-4. 卸载不再需要的存储；
-5. 执行Jump。
-
-### 13.2 启动时再次检测到JUMPING
-
-说明上一次Trial Jump没有得到APP健康确认。
-
-如果未达到最大次数：
-
-- 不重新安装；
-- 重新验证Runtime；
-- 再次执行Trial Jump。
-
-Candidate达到最大Jump次数：
-
-- 设置`source = ROLLBACK`；
-- 清零安装和Jump计数；
-- 持久化`INSTALLING`；
-- 从`CURRENT`恢复上一版本。
-
-Rollback达到最大Jump次数：
-
-- 记录错误；
-- 持久化`FAILED`；
-- 不再自动Jump。
-
-复位原因可用于日志，但“未完成APP确认”才是试运行失败的主要判断依据。
-
-## 14. APP健康确认
-
-APP只能通过受限接口确认试运行成功，例如：
-
-```c
-firmware_status_t BootUpdate_ConfirmRunning(
-    const uint8_t running_manifest_sha256[32]);
-```
-
-### 14.1 确认时机
-
-APP检测到Journal为`JUMPING`时，不得只初始化EEPROM后立即确认。
-
-至少应完成：
-
-- 时钟和基础内存初始化；
-- SDRAM初始化；
-- RTOS启动；
-- 关键任务启动；
-- 关键配置加载；
-- 必要硬件自检；
-- 健康监控建立。
-
-完成健康条件后再初始化或访问Journal存储并执行确认。
-
-### 14.2 Candidate确认
-
-确认接口必须：
-
-1. 要求当前状态为`JUMPING`；
-2. 要求`source = CANDIDATE`；
-3. 校验运行版本摘要与Journal一致；
-4. 写入`IDLE`；
-5. 设置`CURRENT_COMMIT_PENDING`；
-6. 清零安装和Jump计数；
-7. 原子提交Journal；
-8. 触发一次软件复位。
-
-### 14.3 Rollback确认
-
-Rollback APP确认时：
-
-1. 要求`source = ROLLBACK`；
-2. 写入`IDLE`；
-3. 不设置`CURRENT_COMMIT_PENDING`；
-4. 清零安装和Jump计数；
-5. 原子提交Journal；
-6. 触发一次软件复位。
-
-Bootloader随后删除失败的`UPDATE`，保留原`CURRENT`并正常启动Rollback APP。
-
-## 15. UPDATE提交为CURRENT
-
-### 15.1 提交前提
-
-仅允许在以下条件全部满足时提交：
-
-- 状态为`IDLE`；
-- `CURRENT_COMMIT_PENDING`已设置；
-- Candidate已经完成APP健康确认；
-- `UPDATE`完整有效；
-- `UPDATE` Manifest SHA-256与Journal一致。
-
-### 15.2 提交流程
-
-必须按以下顺序：
-
-1. 完整验证`UPDATE`；
-2. 删除旧`CURRENT`内容；
-3. 创建新的`CURRENT/firmware`；
-4. 从`UPDATE`复制Manifest和全部组件；
-5. 对目标文件执行sync；
-6. 完整验证新`CURRENT`；
-7. 删除`UPDATE`；
-8. 清除`CURRENT_COMMIT_PENDING`；
-9. 清除Candidate事务信息；
-10. 原子写入Journal；
-11. 正常Jump当前APP。
-
-不得在新CURRENT验证成功前删除UPDATE或清除提交标志。
-
-### 15.3 掉电恢复
-
-| 掉电位置 | 可用数据 | 下次启动处理 |
-|---|---|---|
-| 删除旧CURRENT前 | UPDATE与旧CURRENT都有效 | 重新执行提交 |
-| 删除CURRENT过程中 | UPDATE有效，CURRENT状态未知 | 清理CURRENT并重新复制 |
-| 复制CURRENT过程中 | UPDATE有效，CURRENT不完整 | 清理CURRENT并重新复制 |
-| CURRENT验证完成前 | UPDATE有效 | 重新验证或重新复制 |
-| CURRENT验证后、清标志前 | UPDATE与CURRENT都有效 | 验证CURRENT后完成清理 |
-| 删除UPDATE后、清标志前 | CURRENT必须有效 | 验证CURRENT并清除标志 |
-
-### 15.4 Commit失败策略
-
-Commit失败不会立即表示Runtime损坏，因为Candidate已经完成APP健康确认。
-
-要求：
-
-- 保留`CURRENT_COMMIT_PENDING`；
-- 保留`UPDATE`；
-- 记录`last_error`和`commit_attempts`；
-- 下次启动继续提交；
-- 提交未完成期间禁止Application提交下一次升级。
-
-如果产品要求优先可用性，可以在有限重试后继续运行已确认Runtime，同时保留Pending并在后续启动重试。是否允许该行为需要产品评审确认。
-
-## 16. Runtime验证和Jump
-
-Jump前必须验证：
-
-- MSP为8字节对齐；
-- MSP位于允许的SRAM区域；
-- SRAM区域末端可作为合法初始MSP，例如`0x20020000`；
-- Reset Handler设置Thumb位；
-- Reset Handler位于APP执行区域；
-- 向量表满足VTOR对齐要求。
-
-Jump必须集中在`PlatformCpu_Jump()`：
-
-1. 禁止中断；
-2. 停止SysTick；
-3. 禁止并清除NVIC中断；
-4. 根据实机验证结果处理D-Cache和I-Cache；
-5. 设置VTOR；
-6. 清除BASEPRI、FAULTMASK、CONTROL和PSP；
-7. 设置MSP；
-8. 执行DSB和ISB；
-9. 跳转Reset Handler。
-
-Cache操作不得分散在多个模块。
-
-## 17. FAILED处理
-
-`FAILED`是稳定安全模式：
-
-1. 不再自动Jump；
-2. 不再自动擦除或写入Runtime；
-3. 保留Journal、错误码、来源和计数器；
-4. 输出日志或错误指示；
-5. 保持维护或救援入口可用；
-6. 如果看门狗必须启用，由Bootloader安全循环正常喂狗；
-7. 只有人工操作、Factory Recovery或新的受信维护请求才能退出FAILED。
-
-禁止在FAILED中无限执行“Jump → 看门狗复位 → Jump”。
-
-## 18. 看门狗要求
-
-Bootloader必须在以下长操作中定期刷新看门狗：
-
-- 文件复制；
-- SHA-256计算；
-- 外部Flash擦除；
-- Therapy MCU擦除和写入；
-- CURRENT复制和校验。
-
-APP试运行阶段的喂狗必须由统一健康管理控制。APP尚未满足确认条件时，不得由无关任务持续喂狗掩盖启动失败。
-
-## 19. 错误处理
-
-至少区分：
-
-- Journal无效；
-- NVM不可用；
-- Manifest SHA-256错误；
-- Manifest格式错误；
-- 目标或版本不匹配；
-- 文件集合错误；
-- 源文件size或SHA-256错误；
-- 擦除失败；
-- 写入失败；
-- readback失败；
-- Therapy协议失败；
-- CURRENT无效；
-- CURRENT提交失败；
-- Runtime向量无效；
-- APP试运行未确认；
-- Candidate回滚失败；
-- Rollback运行失败。
-
-不得将所有失败统一映射为通用I/O错误。Journal应保存最后错误类别，日志应包含状态、来源、组件和重试次数。
-
-## 20. 非功能要求
-
-- 关键路径不得依赖动态内存；
-- 所有缓冲区必须固定大小并检查边界；
-- 所有路径拼接必须检查截断；
-- 地址和长度计算必须检查溢出；
-- 状态转换必须先持久化，再执行破坏性或不可返回操作；
-- 安装必须可从起始位置幂等重做；
-- UPDATE在提交完成前必须保持只读；
-- 文件名比较必须区分大小写；
-- Services不得暴露HAL、FatFs或Driver类型；
-- 普通IDLE快速启动不应挂载NVM文件系统；
-- 存在Commit Pending时例外；
-- 最长擦除、复制和校验操作必须兼容看门狗。
-
-## 21. 建议模块
-
-```text
+~~~text
 Application/
-├── application.c
-└── boot_flow.c
+├── Inc/
+│   └── bootloader_config.h
+└── Src/
+    └── bootloader_main.c
 
-Services/Boot/
-├── boot_state.c
-├── boot_confirmation.c
-└── runtime_image.c
+Services/
+├── BootFlow/
+├── UpdateService/
+├── UpdateJournal/
+├── UpdateRequest/
+├── ManifestParser/
+├── PackageReader/
+├── ComponentRegistry/
+├── ImageInstaller/
+├── CurrentStore/
+└── RuntimeVerifier/
 
-Services/Update/
-├── update_service.c
-├── package_reader.c
-├── update_manifest.c
-├── image_installer.c
-├── current_store.c
-├── update_journal.c
-└── version_policy.c
-```
+Platform/
+├── Storage/
+├── Flash/
+├── Eeprom/
+├── TherapyProgrammer/
+├── Watchdog/
+├── System/
+└── Log/
 
-建议删除：
+BSP/
+└── Board instances and memory mapping
 
-- `boot_manager_io_t`；
-- `update_manager_port_t`；
-- `current_manager_port_t`；
-- `recovery_manager_t`；
-- `image_installer_port_t`；
-- retained RAM mailbox；
-- `BootControl_t`旧结构；
-- `boot_update_request.json`解析；
-- `CURRENT_NEW`和`CURRENT_PREVIOUS`相关实现；
-- 重复的`Services/stm32isp`。
+Drivers/
+└── Reusable device protocols
+~~~
 
-## 22. 状态转换汇总
+Module contracts:
 
-```text
-IDLE
- ├─ 无Pending → 普通Jump，不改变状态
- ├─ Commit Pending → UPDATE复制验证为CURRENT → 清Pending → 普通Jump
- └─ Application提交请求 → REQUESTED
+- UpdateRequest parses only the formal request.
+- ManifestParser owns schema and JCS digest.
+- PackageReader owns source directory and file validation.
+- ComponentRegistry maps business components to target categories.
+- ImageInstaller owns the common write/readback pipeline.
+- CurrentStore owns UPDATE-to-CURRENT copy and validation.
+- UpdateJournal owns persistent A/B records only.
+- UpdateService owns mode-specific orchestration and state transitions.
+- RuntimeVerifier owns Runtime admission checks.
+- Platform exposes only physical capabilities.
 
-REQUESTED
- ├─ 验证失败 → 删除UPDATE → IDLE
- └─ 验证成功 → INSTALLING(CANDIDATE)
+## 35. Memory requirements
 
-INSTALLING(CANDIDATE)
- ├─ 成功 → JUMPING(CANDIDATE)
- ├─ 未到重试上限 → 复位后从头重装
- └─ 达到上限 → INSTALLING(ROLLBACK)
+- no unbounded JSON allocation;
+- no full component loaded into RAM;
+- Manifest size has a fixed limit;
+- request size has a fixed limit;
+- component count is bounded;
+- path and file-name lengths are bounded;
+- one shared I/O block buffer is preferred;
+- SHA-256 is streamed;
+- large update contexts use static memory or a controlled memory region;
+- stack usage shall be measured;
+- no large manifest object shall be created on a small task stack.
 
-JUMPING(CANDIDATE)
- ├─ APP确认 → IDLE + CURRENT_COMMIT_PENDING → 软件复位
- ├─ 未到Jump上限 → 再次Trial Jump
- └─ 达到上限 → INSTALLING(ROLLBACK)
+## 36. Filesystem requirements
 
-INSTALLING(ROLLBACK)
- ├─ 成功 → JUMPING(ROLLBACK)
- ├─ 未到重试上限 → 复位后从头重装
- └─ 达到上限 → FAILED
+- every return value is checked;
+- short reads and writes are errors;
+- close and sync failures are errors;
+- exact file count is verified;
+- path traversal is rejected;
+- directory objects are rejected inside firmware;
+- file handles are closed on every exit path;
+- filesystem is unmounted before Jump;
+- request deletion is followed by sync;
+- completed Package data is immutable while request exists.
 
-JUMPING(ROLLBACK)
- ├─ APP确认 → IDLE，无Commit Pending → 软件复位
- ├─ 未到Jump上限 → 再次Trial Jump
- └─ 达到上限 → FAILED
+## 37. Version policy
 
-FAILED
- └─ 等待人工或受信救援，不自动Jump
-```
+Services shall validate:
 
-## 23. 验收场景
+- target product;
+- hardware identifier;
+- minimum Bootloader version;
+- release version format;
+- downgrade policy;
+- reinstall policy;
+- Package ID consistency.
 
-实现至少必须通过：
+Debug may allow downgrade only through a compile-time product policy. The request itself shall not enable downgrade.
 
-1. 普通IDLE不写JUMPING，直接快速启动；
-2. Application认证、导入UPDATE并提交REQUESTED；
-3. Manifest SHA-256错误时在擦除前拒绝；
-4. 缺失文件、额外文件和大小写不匹配时拒绝；
-5. 安装过程中掉电，下次启动检测INSTALLING并从头重装；
-6. Candidate安装成功后进入JUMPING；
-7. Candidate健康确认后写IDLE和Commit Pending并复位；
-8. Bootloader从UPDATE复制并验证CURRENT；
-9. CURRENT验证成功前UPDATE始终保留；
-10. CURRENT复制过程中任意位置掉电后能够从UPDATE重建；
-11. CURRENT提交成功后删除UPDATE并清Pending；
-12. Candidate连续安装失败达到上限后安装CURRENT；
-13. Candidate连续三次未确认后安装CURRENT；
-14. Rollback安装成功并确认后保留原CURRENT；
-15. Rollback安装达到上限后进入FAILED；
-16. Rollback连续三次未确认后进入FAILED；
-17. APP不得在只初始化EEPROM后立即确认；
-18. Journal任一槽写入时掉电，另一槽仍可恢复；
-19. MSP等于`0x20020000`时通过合法性检查；
-20. Reset Handler越界或未设置Thumb位时禁止Jump；
-21. FAILED不自动Jump且不形成高速重启循环；
-22. Commit Pending未完成时Application不能提交下一次更新。
+## 38. Testability
 
-## 24. 待确认设计点
+Logic shall be host-testable with fake Platform capabilities.
 
-1. Candidate和Rollback安装最大尝试次数是否均为3；
-2. Candidate和Rollback Trial Jump最大次数是否均为3；
-3. APP健康确认的具体条件和最长时间；
-4. Candidate确认后是否固定执行一次软件复位完成CURRENT提交；
-5. CURRENT Commit连续失败时，是停留Bootloader还是允许运行已确认Runtime并保留Pending；
-6. 首次量产是否保证预置有效CURRENT/Factory Package；
-7. 更新包是否必须包含APP、GUI、Therapy完整集合，还是允许部分组件包；
-8. FAILED模式的受信救援入口；
-9. FAILED模式是否持续喂狗常驻；
-10. Cache保持开启跳转，还是关闭后由APP重新初始化；
-11. Therapy失败是否始终回滚整个Package；
-12. 普通IDLE启动失败是否需要独立Boot Health机制。
+Host tests shall cover:
 
-上述项目确认后，Journal ABI和状态机行为才能冻结。
+- request strict parsing;
+- JCS digest;
+- Manifest strict parsing;
+- component_mask derivation;
+- exact file-set comparison;
+- component registry lookup;
+- target-range validation;
+- Journal A/B selection;
+- state transitions;
+- retry limits;
+- Candidate confirmation;
+- Rollback confirmation;
+- CURRENT interruption recovery;
+- Debug compile-time branch.
+
+Board tests shall cover:
+
+- real SD;
+- real EEPROM;
+- internal Flash;
+- external Flash;
+- Therapy programming;
+- watchdog;
+- reset reason;
+- Runtime Jump;
+- power removal at controlled points.
+
+## 39. Acceptance tests
+
+### 39.1 Layout tests
+
+- UPDATE contains only firmware and the formal request.
+- Adding another UPDATE-root file is rejected; it never becomes a trigger.
+- firmware with an extra file is rejected.
+- firmware with a missing file is rejected.
+- firmware with a subdirectory is rejected.
+- file-name case mismatch is rejected.
+- request path is identical in both builds.
+
+### 39.2 Component tests
+
+- app-only Package is handled if product policy allows it.
+- app plus gui Package derives mask 3.
+- all five current components derive mask 31.
+- voice installs as audio resource.
+- config installs through its registered target.
+- registered future resource installs without changing Journal states.
+- unregistered resource is rejected before erase.
+- mask cannot omit a declared resource.
+
+### 39.3 Integrity tests
+
+- modified request digest is rejected.
+- modified Manifest signed fields change JCS digest.
+- modified component content is rejected.
+- same size with different content is rejected.
+- readback mismatch is rejected.
+- raw Manifest file hash is not confused with manifest_sha256.
+
+### 39.4 Production tests
+
+- IDLE does not mount SD.
+- IDLE does not install from request alone.
+- REQUESTED requires the formal request.
+- invalid request causes no erase.
+- INSTALLING restarts from the first component after power loss.
+- Candidate write failure retries.
+- Candidate retry exhaustion starts CURRENT Rollback.
+- successful Candidate enters JUMPING.
+- jump_attempts is stored before each Trial Jump.
+- three failed Candidate trials start Rollback.
+- APP confirms using only EEPROM and resets.
+- Candidate confirmation sets CURRENT_COMMIT_PENDING.
+- interrupted CURRENT commit restarts from UPDATE.
+- CURRENT validation completes before request deletion.
+- Rollback confirmation preserves old CURRENT.
+- Rollback failure reaches FAILED.
+- FAILED does not endlessly Jump.
+
+### 39.5 Debug tests
+
+- EEPROM initialization function is never called.
+- EEPROM read function is never called.
+- EEPROM write function is never called.
+- missing request starts current APP.
+- malformed request causes no erase.
+- valid request installs every Manifest component.
+- interrupted install repeats safely.
+- CURRENT is committed before request deletion.
+- successful Debug update performs no completion reset.
+- APP confirmation is not expected.
+- request deletion prevents repeated installation.
+- later Production build sees consistent CURRENT.
+
+### 39.6 Layer-boundary tests
+
+- Platform has no request or Manifest include.
+- Platform has no component name table.
+- BSP and Drivers do not include Services headers.
+- Bootloader Application does not call FatFs directly.
+- mode macro is absent from Platform, BSP, and Drivers.
+- component registry exists only in Services.
+- only one request parser is compiled.
+- only one Installer is compiled.
+
+## 40. Power-loss test matrix
+
+Power shall be removed during:
+
+- Application Package staging;
+- request write;
+- Journal REQUESTED commit;
+- Candidate erase;
+- Candidate program;
+- Candidate readback;
+- Therapy programming;
+- transition to JUMPING;
+- before Trial Jump;
+- APP confirmation Journal write;
+- reset after APP confirmation;
+- CURRENT copy;
+- CURRENT validation;
+- request deletion;
+- filesystem sync;
+- Debug installation;
+- Debug CURRENT commit;
+- immediately before Jump.
+
+For every point, the next boot shall produce one defined result:
+
+- no destructive action;
+- restart Candidate;
+- retry Trial;
+- begin Rollback;
+- restart CURRENT commit;
+- start accepted Runtime;
+- enter controlled failure.
+
+Undefined partial acceptance is forbidden.
+
+## 41. Implementation migration requirements
+
+The current project shall be changed to:
+
+1. add BOOTLOADER_UPDATE_USE_JOURNAL;
+2. remove runtime update-mode selection;
+3. branch only in Bootloader startup orchestration;
+4. keep one formal request path;
+5. remove any assumption of an additional trigger file;
+6. implement one strict request parser;
+7. align manifest_sha256 with JCS excluding signature;
+8. expand component capacity to at least 16;
+9. register app, gui, therapy, voice, and config;
+10. make component_mask describe the complete Manifest set;
+11. preflight every component before erase;
+12. share one Installer between both builds;
+13. persist INSTALLING before erase;
+14. persist jump_attempts before Trial Jump;
+15. implement APP early EEPROM confirmation;
+16. implement CURRENT_COMMIT_PENDING;
+17. rebuild and verify CURRENT before request closure;
+18. compile Debug update flow without EEPROM access;
+19. add specific error propagation;
+20. add host, board, and power-loss tests;
+21. update sample request and Manifest so Package ID, digest, and mask match.
+
+## 42. Final state summary
+
+### Production successful Candidate
+
+~~~text
+Application authenticates and stages Package
+    ↓
+Application writes formal request
+    ↓
+Application writes Journal REQUESTED and resets
+    ↓
+Bootloader writes INSTALLING and installs UPDATE
+    ↓
+Bootloader writes JUMPING and Trial Jumps
+    ↓
+APP confirms through EEPROM and resets
+    ↓
+Bootloader sees IDLE + CURRENT_COMMIT_PENDING
+    ↓
+Bootloader rebuilds and validates CURRENT
+    ↓
+Bootloader deletes formal request
+    ↓
+Bootloader clears pending state and Jumps APP
+~~~
+
+### Production Candidate APP failure
+
+~~~text
+Candidate JUMPING reaches attempt limit
+    ↓
+Bootloader installs CURRENT
+    ↓
+Bootloader writes JUMPING for Rollback
+    ↓
+Rollback APP confirms and resets
+    ↓
+Bootloader keeps old CURRENT and removes failed Candidate
+~~~
+
+### Debug successful update
+
+~~~text
+Bootloader build macro bypasses EEPROM
+    ↓
+Bootloader mounts storage
+    ↓
+Bootloader checks the existing formal request
+    ↓
+Common validation and installation
+    ↓
+Runtime validation
+    ↓
+CURRENT rebuild and validation
+    ↓
+Formal request deletion and filesystem sync
+    ↓
+Direct Jump to APP
+~~~
+
+## 43. Completion criteria
+
+The Bootloader implementation is complete only when:
+
+- one compile-time macro selects Production or Debug startup;
+- no SD file selects the mode;
+- exactly one formal request path exists;
+- no additional trigger file is required;
+- both modes share validation and installation code;
+- the Package supports executable and resource components;
+- every Manifest component is installed or the entire Package is rejected;
+- Bootloader performs SHA-256 but no signature verification;
+- Production recovers interrupted writes and failed APP trials;
+- Debug performs no EEPROM operation;
+- CURRENT remains a valid recovery Package;
+- request closure is power-loss safe;
+- Platform remains free of update business policy;
+- all acceptance and power-loss tests pass.
+
+This baseline and STM32H7_Bootloader_Update_Request_Protocol.md are the authoritative Bootloader update requirements.

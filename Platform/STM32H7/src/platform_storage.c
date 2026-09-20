@@ -191,6 +191,13 @@ firmware_status_t PlatformStorage_Unmount(void)
     return first_status;
 }
 
+firmware_status_t PlatformStorage_SyncVolume(void)
+{
+    /* FatFs commits each file on close; this hook gives Services an explicit
+     * volume barrier without exposing FatFs policy outside Platform. */
+    return (s_mounted != 0U) ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_INVALID_STATE;
+}
+
 firmware_status_t PlatformStorage_OpenRead(const char *path, platform_file_handle_t *handle)
 {
     uint32_t i;

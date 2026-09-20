@@ -6,10 +6,12 @@
 
 #include "firmware/status.h"
 #include "firmware/update_journal.h"
+#include "update/component_registry.h"
 #include "update/update_types.h"
+#include "update/update_request.h"
 
 #define UPDATE_MANIFEST_MAX_SIZE       8192U
-#define UPDATE_MANIFEST_MAX_COMPONENTS 3U
+#define UPDATE_MANIFEST_MAX_COMPONENTS 16U
 #define UPDATE_COMPONENT_NAME_MAX      16U
 #define UPDATE_COMPONENT_FILE_MAX      96U
 #define UPDATE_COMPONENT_FORMAT_MAX    24U
@@ -34,6 +36,8 @@ typedef struct
     char sha256[UPDATE_SHA256_HEX_LENGTH + 1U];
     uint32_t size;
     image_target_t target;
+    uint32_t mask_bit;
+    uint8_t installation_order;
     uint8_t has_crc32;
     uint32_t crc32;
 } update_manifest_component_t;
@@ -56,11 +60,13 @@ typedef struct
     uint8_t has_signing;
     update_manifest_component_t components[UPDATE_MANIFEST_MAX_COMPONENTS];
     uint32_t component_count;
+    uint32_t component_mask;
 } update_manifest_t;
 
 typedef struct
 {
     update_manifest_t manifest;
+    uint8_t manifest_sha256[32];
     uint8_t raw_manifest_sha256[32];
     uint8_t canonical_signing_sha256[32];
     char root[192];
@@ -75,14 +81,30 @@ typedef struct
 firmware_status_t UpdateManifest_Parse(const uint8_t *json, size_t length,
                                        update_manifest_t *manifest);
 firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifest);
+firmware_status_t UpdateManifest_Canonicalize(const update_manifest_t *manifest, char *buffer,
+                                              size_t capacity, size_t *length);
+firmware_status_t UpdateManifest_Digest(const update_manifest_t *manifest, uint8_t digest[32]);
+firmware_status_t UpdateManifest_Hash(const update_manifest_t *manifest,
+                                      char output[UPDATE_SHA256_HEX_LENGTH + 1U]);
 int UpdateVersion_Compare(const update_version_t *left, const update_version_t *right);
 int UpdatePackage_IsValidId(const char *package_id);
 int UpdatePackage_IsValidComponentFileName(const char *file_name);
 
 update_operation_result_t PackageReader_Validate(const char *root,
-                                                 const uint8_t *expected_raw_digest,
+                                                 const uint8_t *expected_manifest_digest,
                                                  int verify_payload_hashes,
                                                  update_package_t *package);
+update_operation_result_t PackageReader_ValidateRequest(const char *root,
+                                                        const update_request_t *request,
+                                                        const uint8_t *expected_manifest_digest,
+                                                        int verify_payload_hashes,
+                                                        update_package_t *package);
+firmware_status_t PackageReader_ValidateUpdateRoot(void);
+
+const update_component_descriptor_t *UpdateComponent_Find(const char *name);
+const update_component_descriptor_t *UpdateComponent_FindByTarget(image_target_t target);
+uint32_t UpdateComponent_DeriveMask(const update_manifest_t *manifest);
+firmware_status_t UpdateComponent_ValidateRanges(const update_manifest_t *manifest);
 
 update_operation_result_t ImageInstaller_Install(const char *root,
                                                  const update_manifest_component_t *component);
@@ -92,6 +114,7 @@ firmware_status_t CurrentStore_Read(update_package_t *package);
 firmware_status_t CurrentStore_Commit(const update_package_t *package,
                                       const uint8_t expected_manifest_sha256[32]);
 firmware_status_t CurrentStore_CleanupUpdate(void);
+firmware_status_t RuntimeVerifier_Validate(void);
 
 firmware_status_t UpdateJournal_Read(update_journal_record_t *record);
 firmware_status_t UpdateJournal_Write(const update_journal_record_t *record);

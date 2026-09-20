@@ -230,6 +230,14 @@ SECTIONS
   PROVIDE( __bss_start = __tbss_start );
   PROVIDE( __bss_size = __bss_end - __bss_start );
 
+  .storage_ram_d2 (NOLOAD) : ALIGN(32)
+  {
+    . = ALIGN(32);
+    *(.storage_ram_d2)
+    *(.storage_ram_d2.*)
+    . = ALIGN(32);
+  } >RAM_D2
+
   /* User_heap_stack section, used to check that there is enough RAM left */
   ._user_heap_stack (NOLOAD) :
   {
