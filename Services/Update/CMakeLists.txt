@@ -20,5 +20,5 @@ target_include_directories(update_service
 
 target_link_libraries(update_service
     PUBLIC firmware_types
-    PRIVATE platform_stm32h7 firmware_crypto firmware_checksum
+    PRIVATE platform_stm32h7 firmware_crypto firmware_checksum firmware_logger
 )

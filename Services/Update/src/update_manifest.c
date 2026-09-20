@@ -572,9 +572,8 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
         const update_manifest_component_t *component = &manifest->components[i];
         const update_component_descriptor_t *descriptor = UpdateComponent_Find(component->name);
         if (descriptor == NULL || component->mask_bit != descriptor->mask_bit ||
-            component->target != descriptor->target || component->size == 0U ||
-            strcmp(component->format, descriptor->format) != 0 ||
-            !IsSha256Hex(component->sha256) || strcmp(component->file, UPDATE_MANIFEST_FILE) == 0)
+            component->target != descriptor->target ||
+            strcmp(component->file, UPDATE_MANIFEST_FILE) == 0)
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
         if ((expected & descriptor->mask_bit) != 0U)
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
@@ -582,6 +581,11 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
         for (size_t previous = 0U; previous < i; ++previous)
             if (strcmp(component->file, manifest->components[previous].file) == 0)
                 return FIRMWARE_STATUS_INVALID_ARGUMENT;
+        if (!UpdateComponent_IsEnabled(descriptor))
+            continue;
+        if (component->size == 0U || strcmp(component->format, descriptor->format) != 0 ||
+            !IsSha256Hex(component->sha256))
+            return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
     if (expected != manifest->component_mask || UpdateComponent_DeriveMask(manifest) != expected)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;

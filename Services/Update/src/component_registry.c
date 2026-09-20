@@ -2,6 +2,7 @@
 
 #include <string.h>
 
+#include "bootloader_config.h"
 #include "platform/platform_memory_map.h"
 #include "platform/platform_flash.h"
 
@@ -38,6 +39,17 @@ const update_component_descriptor_t *UpdateComponent_FindByTarget(image_target_t
     return NULL;
 }
 
+int UpdateComponent_IsEnabled(const update_component_descriptor_t *descriptor)
+{
+    if (descriptor == NULL)
+        return 0;
+#if (BOOTLOADER_UPDATE_APP_GUI_ONLY == 1U)
+    return descriptor->target == IMAGE_TARGET_APP || descriptor->target == IMAGE_TARGET_GUI;
+#else
+    return 1;
+#endif
+}
+
 uint32_t UpdateComponent_DeriveMask(const update_manifest_t *manifest)
 {
     uint32_t mask = 0U;
@@ -60,7 +72,11 @@ firmware_status_t UpdateComponent_ValidateRanges(const update_manifest_t *manife
             UpdateComponent_Find(manifest->components[left].name);
         uint64_t a_end;
         size_t right;
-        if (a == NULL || manifest->components[left].size == 0U ||
+        if (a == NULL)
+            return FIRMWARE_STATUS_NOT_SUPPORTED;
+        if (!UpdateComponent_IsEnabled(a))
+            continue;
+        if (manifest->components[left].size == 0U ||
             manifest->components[left].size > a->maximum_size)
             return FIRMWARE_STATUS_OUT_OF_RANGE;
         if ((a->address % a->erase_size) != 0U ||
@@ -81,6 +97,8 @@ firmware_status_t UpdateComponent_ValidateRanges(const update_manifest_t *manife
             uint64_t b_end;
             if (b == NULL)
                 return FIRMWARE_STATUS_NOT_SUPPORTED;
+            if (!UpdateComponent_IsEnabled(b))
+                continue;
             b_end = (uint64_t) b->address + manifest->components[right].size;
             if (a->target != IMAGE_TARGET_THERAPY && b->target != IMAGE_TARGET_THERAPY &&
                 (uint64_t) a->address < b_end && (uint64_t) b->address < a_end)

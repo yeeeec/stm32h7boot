@@ -163,11 +163,15 @@ firmware_status_t CurrentStore_Commit(const update_package_t *package,
     for (index = 0U; FirmwareStatus_IsOk(status) && index < package->manifest.component_count;
          ++index)
     {
+        const update_component_descriptor_t *descriptor =
+            UpdateComponent_Find(package->manifest.components[index].name);
         int source_length = snprintf(source, sizeof(source), "%s/%s", package->root,
                                      package->manifest.components[index].file);
         int destination_length =
             snprintf(destination, sizeof(destination), "%s/%s", CURRENT_PACKAGE_ROOT,
                      package->manifest.components[index].file);
+        if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
+            continue;
         if (source_length <= 0 || (size_t) source_length >= sizeof(source) ||
             destination_length <= 0 || (size_t) destination_length >= sizeof(destination))
             status = FIRMWARE_STATUS_BUFFER_TOO_SMALL;

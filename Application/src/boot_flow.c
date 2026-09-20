@@ -13,7 +13,7 @@ boot_flow_result_t BootFlow_Run(uint32_t *vector_address)
     if (vector_address == NULL)
         return BOOT_FLOW_FATAL;
 
-    LOG_DEBUG("bootloader", "processing update journal");
+    LOG_DEBUG("bootloader", "processing update startup flow");
     result = UpdateService_Process();
     if (result.outcome == UPDATE_OUTCOME_RUNTIME_UNSAFE)
     {

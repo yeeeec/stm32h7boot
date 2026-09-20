@@ -2,23 +2,29 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug (OpenOCD + CMSIS-DAP)",
+      "name": "Debug0 (DAPLink direct update)",
       "type": "cortex-debug",
       "request": "launch",
       "servertype": "openocd",
       "serverpath": "openocd",
       "device": "STM32H743XI",
       "interface": "swd",
+      "adapterSpeed": 4000,
       "gdbPath": "arm-none-eabi-gdb",
       "configFiles": [
         "interface/cmsis-dap.cfg",
         "target/stm32h7x.cfg"
       ],
-      "executable": "${command:cmake.launchTargetPath}",
+      "executable": "${workspaceFolder}/build/Debug0/stm32h7boot.elf",
       "svdFile": "${workspaceFolder}/STM32H743.svd",
       "cwd": "${workspaceFolder}",
       "showDevDebugOutput": "raw",
       "runToEntryPoint": "main",
+      "postLaunchCommands": [
+        "break UpdateRequest_Load",
+        "break UpdateService_ProcessFileBoot",
+        "break PlatformCpu_Jump"
+      ],
       "liveWatch": {
         "enabled": true,
         "samplesPerSecond": 4

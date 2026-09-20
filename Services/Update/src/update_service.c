@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "bootloader_config.h"
+#include "logging.h"
 #include "platform/platform_nv_storage.h"
 #include "platform/platform_storage.h"
 #include "platform/platform_system.h"
@@ -257,10 +258,16 @@ static update_result_t install_package(update_journal_record_t *journal, const c
         return handle_install_failure(journal, operation.failure, operation.status);
     for (index = 0U; index < package.manifest.component_count; ++index)
     {
+        const update_component_descriptor_t *descriptor =
+            UpdateComponent_Find(package.manifest.components[index].name);
         size_t selected = index;
         size_t candidate;
+        if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
+            continue;
         for (candidate = index + 1U; candidate < package.manifest.component_count; ++candidate)
-            if (package.manifest.components[candidate].installation_order <
+            if (UpdateComponent_IsEnabled(UpdateComponent_Find(
+                    package.manifest.components[candidate].name)) &&
+                package.manifest.components[candidate].installation_order <
                 package.manifest.components[selected].installation_order)
                 selected = candidate;
         if (selected != index)
@@ -548,12 +555,15 @@ static update_result_t UpdateService_ProcessFileBoot(void)
     update_operation_result_t validation;
     update_result_t outcome;
     firmware_status_t status;
+    update_request_presence_t request_presence;
     size_t index;
 
     status = mount_storage();
     if (FirmwareStatus_IsError(status))
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_STORAGE, status);
-    switch (UpdateRequest_Load(&request))
+    request_presence = UpdateRequest_Load(&request);
+    LOG_DEBUG("update", "direct request detection presence=%u", (unsigned) request_presence);
+    switch (request_presence)
     {
         case UPDATE_REQUEST_ABSENT:
             status = CurrentStore_CleanupUpdate();
@@ -608,10 +618,16 @@ static update_result_t UpdateService_ProcessFileBoot(void)
     }
     for (index = 0U; index < package.manifest.component_count; ++index)
     {
+        const update_component_descriptor_t *descriptor =
+            UpdateComponent_Find(package.manifest.components[index].name);
         size_t selected = index;
         size_t candidate;
+        if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
+            continue;
         for (candidate = index + 1U; candidate < package.manifest.component_count; ++candidate)
-            if (package.manifest.components[candidate].installation_order <
+            if (UpdateComponent_IsEnabled(UpdateComponent_Find(
+                    package.manifest.components[candidate].name)) &&
+                package.manifest.components[candidate].installation_order <
                 package.manifest.components[selected].installation_order)
                 selected = candidate;
         if (selected != index)
@@ -654,7 +670,12 @@ static update_result_t UpdateService_ProcessFileBoot(void)
     }
     if (FirmwareStatus_IsError(status))
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_CURRENT_COMMIT, status);
+    LOG_DEBUG("update", "direct update committed; next startup will launch the application");
+#if (BOOTLOADER_UPDATE_DEBUG_RESET_AFTER_COMMIT == 1U)
+    outcome = result(UPDATE_OUTCOME_RESET, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
+#else
     outcome = result(UPDATE_OUTCOME_LAUNCH, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
+#endif
     return outcome;
 }
 #endif

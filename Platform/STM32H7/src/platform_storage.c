@@ -115,6 +115,7 @@ firmware_status_t PlatformStorage_Init(void)
         return FIRMWARE_STATUS_OK;
     }
 
+    /* Configure and initialize the SDMMC handle before FatFs mounts it. */
     MX_SDMMC1_SD_Init();
     MX_FATFS_Init();
     s_initialized = 1U;

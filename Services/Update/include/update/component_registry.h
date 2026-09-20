@@ -25,6 +25,7 @@ extern "C"
 
     const update_component_descriptor_t *UpdateComponent_Find(const char *name);
     const update_component_descriptor_t *UpdateComponent_FindByTarget(image_target_t target);
+    int UpdateComponent_IsEnabled(const update_component_descriptor_t *descriptor);
 
 #ifdef __cplusplus
 }

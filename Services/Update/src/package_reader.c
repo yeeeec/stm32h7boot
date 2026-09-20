@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "bootloader_config.h"
 #include "crypto/sha256.h"
 #include "firmware/memory.h"
 #include "firmware/product_identity.h"
@@ -124,15 +125,25 @@ static update_operation_result_t validate_file_set(const char *root,
         for (index = 0U; index < manifest->component_count; ++index)
         {
             uint32_t bit = 1UL << (index + 1U);
-            if (strcmp(entry.name, manifest->components[index].file) == 0 && (found & bit) == 0U)
+            const update_component_descriptor_t *descriptor =
+                UpdateComponent_Find(manifest->components[index].name);
+            if (strcmp(entry.name, manifest->components[index].file) == 0 &&
+                (found & bit) == 0U)
             {
-                found |= bit;
+                if (descriptor != NULL && UpdateComponent_IsEnabled(descriptor))
+                    found |= bit;
                 allowed = 1;
                 break;
             }
         }
         if (!allowed)
         {
+#if (BOOTLOADER_UPDATE_APP_GUI_ONLY == 1U)
+            /* Board validation scope: leave stale non-directory payloads for
+             * disabled targets alone while APP and GUI remain strict. */
+            if (entry.is_directory == 0U)
+                continue;
+#endif
             (void) PlatformStorage_DirClose(directory);
             return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_INVALID_STATE);
         }
@@ -144,25 +155,41 @@ static update_operation_result_t validate_file_set(const char *root,
         if (FirmwareStatus_IsError(close_status))
             return package_result(UPDATE_FAILURE_FILE_SET, close_status);
     }
-    if (found != ((1UL << (manifest->component_count + 1U)) - 1U))
-        return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_NOT_FOUND);
+    {
+        uint32_t expected = 1U;
+        for (size_t index = 0U; index < manifest->component_count; ++index)
+        {
+            const update_component_descriptor_t *descriptor =
+                UpdateComponent_Find(manifest->components[index].name);
+            if (descriptor != NULL && UpdateComponent_IsEnabled(descriptor))
+                expected |= 1UL << (index + 1U);
+        }
+        if ((found & expected) != expected)
+            return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_NOT_FOUND);
+    }
 
     for (size_t index = 0U; index < manifest->component_count; ++index)
     {
-        char path[UPDATE_PATH_MAX];
-        platform_file_info_t info;
+        const update_component_descriptor_t *descriptor =
+            UpdateComponent_Find(manifest->components[index].name);
+        if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
+            continue;
         {
-            int length =
-                snprintf(path, sizeof(path), "%s/%s", root, manifest->components[index].file);
-            if (length <= 0 || (size_t) length >= sizeof(path))
-                return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+            char path[UPDATE_PATH_MAX];
+            platform_file_info_t info;
+            {
+                int length =
+                    snprintf(path, sizeof(path), "%s/%s", root, manifest->components[index].file);
+                if (length <= 0 || (size_t) length >= sizeof(path))
+                    return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+            }
+            status = PlatformStorage_Stat(path, &info);
+            if (FirmwareStatus_IsError(status) || info.is_directory != 0U ||
+                info.size != manifest->components[index].size)
+                return package_result(UPDATE_FAILURE_FILE_SET, FirmwareStatus_IsError(status)
+                                                                   ? status
+                                                                   : FIRMWARE_STATUS_INVALID_STATE);
         }
-        status = PlatformStorage_Stat(path, &info);
-        if (FirmwareStatus_IsError(status) || info.is_directory != 0U ||
-            info.size != manifest->components[index].size)
-            return package_result(UPDATE_FAILURE_FILE_SET, FirmwareStatus_IsError(status)
-                                                               ? status
-                                                               : FIRMWARE_STATUS_INVALID_STATE);
     }
     return package_result(UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
 }
@@ -275,6 +302,10 @@ update_operation_result_t PackageReader_Validate(const char *root,
         size_t index;
         for (index = 0U; index < package->manifest.component_count; ++index)
         {
+            const update_component_descriptor_t *descriptor =
+                UpdateComponent_Find(package->manifest.components[index].name);
+            if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
+                continue;
             result = verify_payload(root, &package->manifest.components[index]);
             if (FirmwareStatus_IsError(result.status))
                 return result;

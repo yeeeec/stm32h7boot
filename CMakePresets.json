@@ -18,6 +18,15 @@
             }
         },
         {
+            "name": "Debug0",
+            "inherits": "default",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "BOOTLOADER_UPDATE_USE_JOURNAL": "0",
+                "BOOTLOADER_UPDATE_APP_GUI_ONLY": "1"
+            }
+        },
+        {
             "name": "Release",
             "inherits": "default",
             "cacheVariables": {
@@ -29,6 +38,10 @@
         {
             "name": "Debug",
             "configurePreset": "Debug"
+        },
+        {
+            "name": "Debug0",
+            "configurePreset": "Debug0"
         },
         {
             "name": "Release",
