@@ -106,6 +106,7 @@ static update_operation_result_t validate_file_set(const char *root,
     {
         size_t index;
         int allowed = 0;
+        int protected_duplicate = 0;
 
         if (entry.is_directory != 0U)
         {
@@ -127,12 +128,15 @@ static update_operation_result_t validate_file_set(const char *root,
             uint32_t bit = 1UL << (index + 1U);
             const update_component_descriptor_t *descriptor =
                 UpdateComponent_Find(manifest->components[index].name);
-            if (strcmp(entry.name, manifest->components[index].file) == 0 &&
-                (found & bit) == 0U)
+            if (strcmp(entry.name, manifest->components[index].file) == 0)
             {
-                if (descriptor != NULL && UpdateComponent_IsEnabled(descriptor))
-                    found |= bit;
                 allowed = 1;
+                if ((found & bit) != 0U)
+                {
+                    protected_duplicate = descriptor != NULL && UpdateComponent_IsEnabled(descriptor);
+                }
+                else if (descriptor != NULL && UpdateComponent_IsEnabled(descriptor))
+                    found |= bit;
                 break;
             }
         }
@@ -141,9 +145,14 @@ static update_operation_result_t validate_file_set(const char *root,
 #if (BOOTLOADER_UPDATE_APP_GUI_ONLY == 1U)
             /* Board validation scope: leave stale non-directory payloads for
              * disabled targets alone while APP and GUI remain strict. */
-            if (entry.is_directory == 0U)
+            if (entry.is_directory == 0U && protected_duplicate == 0)
                 continue;
 #endif
+            (void) PlatformStorage_DirClose(directory);
+            return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_INVALID_STATE);
+        }
+        if (protected_duplicate != 0)
+        {
             (void) PlatformStorage_DirClose(directory);
             return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_INVALID_STATE);
         }
