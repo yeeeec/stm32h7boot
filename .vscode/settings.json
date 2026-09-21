@@ -18,6 +18,6 @@
     "[cmake]": {
         "editor.formatOnSave": false
     },
-    "cortex-debug.variableUseNaturalFormat": false,
+    "cortex-debug.variableUseNaturalFormat": true,
     "editor.rename.enablePreview": false
 }

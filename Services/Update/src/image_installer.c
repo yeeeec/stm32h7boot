@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "logging.h"
 #include "crypto/sha256.h"
 #include "firmware/memory.h"
 #include "platform/platform_flash.h"
@@ -31,7 +32,7 @@ static firmware_status_t target_limits(image_target_t target, uint32_t *address,
     descriptor = UpdateComponent_FindByTarget(target);
     if (descriptor == NULL)
         return FIRMWARE_STATUS_NOT_SUPPORTED;
-    *address = descriptor->address;
+    *address      = descriptor->address;
     *maximum_size = descriptor->maximum_size;
 
     switch (target)
@@ -146,13 +147,15 @@ update_operation_result_t ImageInstaller_Install(const char *root,
         erase_size =
             (component->size + PLATFORM_FLASH_ERASE_SIZE - 1U) & ~(PLATFORM_FLASH_ERASE_SIZE - 1U);
     }
-
+    // 7675904 byte 7m erase 1m30s
+    LOG_DEBUG("install", "start erase size %lukb", erase_size / 0x400);
     result.status = target_erase(component->target, target_address, erase_size);
     if (FirmwareStatus_IsError(result.status))
     {
         result.failure = UPDATE_FAILURE_INSTALL_ERASE;
         goto cleanup;
     }
+    LOG_DEBUG("install", "end erase");
 
     while (offset < component->size)
     {
@@ -196,6 +199,7 @@ update_operation_result_t ImageInstaller_Install(const char *root,
         PlatformSystem_WatchdogRefresh();
     }
 
+    LOG_DEBUG("install", "end write&verif");
     result.status = Crypto_Sha256Finish(&hash, installed_digest);
     hash_started  = 0;
     if (FirmwareStatus_IsError(result.status) ||

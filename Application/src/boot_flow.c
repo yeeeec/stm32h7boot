@@ -19,7 +19,7 @@ boot_flow_result_t BootFlow_Run(uint32_t *vector_address)
     {
         LOG_ERROR("bootloader", "recovery failed: stage=%u status=%u", (unsigned) result.failure,
                   (unsigned) result.status);
-        return BOOT_FLOW_FATAL;
+        // return BOOT_FLOW_FATAL;
     }
     if (result.outcome == UPDATE_OUTCOME_RESET)
         return BOOT_FLOW_RESET;

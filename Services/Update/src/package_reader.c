@@ -105,7 +105,7 @@ static update_operation_result_t validate_file_set(const char *root,
     while ((status = PlatformStorage_DirRead(directory, &entry)) == FIRMWARE_STATUS_OK)
     {
         size_t index;
-        int allowed = 0;
+        int allowed             = 0;
         int protected_duplicate = 0;
 
         if (entry.is_directory != 0U)
@@ -133,7 +133,8 @@ static update_operation_result_t validate_file_set(const char *root,
                 allowed = 1;
                 if ((found & bit) != 0U)
                 {
-                    protected_duplicate = descriptor != NULL && UpdateComponent_IsEnabled(descriptor);
+                    protected_duplicate =
+                        descriptor != NULL && UpdateComponent_IsEnabled(descriptor);
                 }
                 else if (descriptor != NULL && UpdateComponent_IsEnabled(descriptor))
                     found |= bit;
@@ -142,12 +143,6 @@ static update_operation_result_t validate_file_set(const char *root,
         }
         if (!allowed)
         {
-#if (BOOTLOADER_UPDATE_APP_GUI_ONLY == 1U)
-            /* Board validation scope: leave stale non-directory payloads for
-             * disabled targets alone while APP and GUI remain strict. */
-            if (entry.is_directory == 0U && protected_duplicate == 0)
-                continue;
-#endif
             (void) PlatformStorage_DirClose(directory);
             return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_INVALID_STATE);
         }
@@ -190,7 +185,8 @@ static update_operation_result_t validate_file_set(const char *root,
                 int length =
                     snprintf(path, sizeof(path), "%s/%s", root, manifest->components[index].file);
                 if (length <= 0 || (size_t) length >= sizeof(path))
-                    return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
+                    return package_result(UPDATE_FAILURE_FILE_SET,
+                                          FIRMWARE_STATUS_BUFFER_TOO_SMALL);
             }
             status = PlatformStorage_Stat(path, &info);
             if (FirmwareStatus_IsError(status) || info.is_directory != 0U ||
@@ -327,7 +323,7 @@ firmware_status_t PackageReader_ValidateUpdateRoot(void)
 {
     platform_dir_handle_t directory;
     platform_dir_entry_t entry;
-    uint32_t found = 0U;
+    uint32_t found           = 0U;
     firmware_status_t status = PlatformStorage_DirOpen(UPDATE_ROOT, &directory);
     if (FirmwareStatus_IsError(status))
         return status;
@@ -335,8 +331,7 @@ firmware_status_t PackageReader_ValidateUpdateRoot(void)
     {
         if (strcmp(entry.name, "firmware") == 0 && entry.is_directory != 0U)
             found |= 1U;
-        else if (strcmp(entry.name, "boot_update_request.json") == 0 &&
-                 entry.is_directory == 0U)
+        else if (strcmp(entry.name, "boot_update_request.json") == 0 && entry.is_directory == 0U)
             found |= 2U;
         else
         {
@@ -367,7 +362,8 @@ update_operation_result_t PackageReader_ValidateRequest(const char *root,
         return package_result(UPDATE_FAILURE_REQUEST_PARSE, FIRMWARE_STATUS_INVALID_ARGUMENT);
     if (expected_manifest_digest != NULL &&
         memcmp(request_digest, expected_manifest_digest, sizeof(request_digest)) != 0)
-        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST, FIRMWARE_STATUS_AUTHENTICATION_FAILED);
+        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST,
+                              FIRMWARE_STATUS_AUTHENTICATION_FAILED);
     result = PackageReader_Validate(root, request_digest, verify_payload_hashes, package);
     if (FirmwareStatus_IsError(result.status))
         return result;

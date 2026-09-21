@@ -100,7 +100,7 @@ static update_result_t process_commit_pending(update_journal_record_t *journal)
     {
         set_error(journal, UPDATE_FAILURE_CURRENT_VERIFY);
         journal->state = UPDATE_STATE_FAILED;
-        status = UpdateJournal_Write(journal);
+        status         = UpdateJournal_Write(journal);
         return FirmwareStatus_IsError(status)
                    ? result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_JOURNAL, status)
                    : result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_CURRENT_VERIFY,
@@ -265,10 +265,10 @@ static update_result_t install_package(update_journal_record_t *journal, const c
         if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
             continue;
         for (candidate = index + 1U; candidate < package.manifest.component_count; ++candidate)
-            if (UpdateComponent_IsEnabled(UpdateComponent_Find(
-                    package.manifest.components[candidate].name)) &&
+            if (UpdateComponent_IsEnabled(
+                    UpdateComponent_Find(package.manifest.components[candidate].name)) &&
                 package.manifest.components[candidate].installation_order <
-                package.manifest.components[selected].installation_order)
+                    package.manifest.components[selected].installation_order)
                 selected = candidate;
         if (selected != index)
         {
@@ -597,11 +597,11 @@ static update_result_t UpdateService_ProcessFileBoot(void)
         (void) PlatformStorage_Unmount();
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, validation.failure, validation.status);
     }
+    LOG_DEBUG("upadate", "check files/request pass");
     {
         update_package_t current;
         firmware_status_t current_status = CurrentStore_Read(&current);
-        if (current_status != FIRMWARE_STATUS_NOT_FOUND &&
-            FirmwareStatus_IsError(current_status))
+        if (current_status != FIRMWARE_STATUS_NOT_FOUND && FirmwareStatus_IsError(current_status))
         {
             (void) PlatformStorage_Unmount();
             return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_CURRENT_VERIFY,
@@ -625,10 +625,10 @@ static update_result_t UpdateService_ProcessFileBoot(void)
         if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
             continue;
         for (candidate = index + 1U; candidate < package.manifest.component_count; ++candidate)
-            if (UpdateComponent_IsEnabled(UpdateComponent_Find(
-                    package.manifest.components[candidate].name)) &&
+            if (UpdateComponent_IsEnabled(
+                    UpdateComponent_Find(package.manifest.components[candidate].name)) &&
                 package.manifest.components[candidate].installation_order <
-                package.manifest.components[selected].installation_order)
+                    package.manifest.components[selected].installation_order)
                 selected = candidate;
         if (selected != index)
         {
@@ -637,6 +637,7 @@ static update_result_t UpdateService_ProcessFileBoot(void)
             package.manifest.components[selected] = temporary;
         }
         {
+            LOG_DEBUG("upadate", "start install %s.", package.manifest.components[candidate].name);
             update_operation_result_t install =
                 ImageInstaller_Install(UPDATE_PACKAGE_ROOT, &package.manifest.components[index]);
             if (FirmwareStatus_IsError(install.status))
@@ -683,8 +684,10 @@ static update_result_t UpdateService_ProcessFileBoot(void)
 update_result_t UpdateService_Process(void)
 {
 #if (BOOTLOADER_UPDATE_USE_JOURNAL == 1U)
+    LOG_DEBUG("upadate", "use journal");
     return UpdateService_ProcessJournalBoot();
 #else
+    LOG_DEBUG("upadate", "don't use journal");
     return UpdateService_ProcessFileBoot();
 #endif
 }
@@ -705,7 +708,7 @@ firmware_status_t UpdateService_ConfirmRunning(const uint8_t running_manifest_sh
         (journal.source != UPDATE_SOURCE_CANDIDATE && journal.source != UPDATE_SOURCE_ROLLBACK) ||
         memcmp(journal.running_manifest_sha256, running_manifest_sha256, 32U) != 0)
         return FIRMWARE_STATUS_INVALID_STATE;
-    source = (update_source_t) journal.source;
+    source                   = (update_source_t) journal.source;
     journal.state            = UPDATE_STATE_IDLE;
     journal.install_attempts = 0U;
     journal.jump_attempts    = 0U;
@@ -717,8 +720,8 @@ firmware_status_t UpdateService_ConfirmRunning(const uint8_t running_manifest_sh
     else
         journal.flags &= ~UPDATE_JOURNAL_FLAG_CURRENT_COMMIT_PENDING;
     journal.last_error = UPDATE_FAILURE_NONE;
-    expected_flags = journal.flags;
-    status = UpdateJournal_Write(&journal);
+    expected_flags     = journal.flags;
+    status             = UpdateJournal_Write(&journal);
     if (FirmwareStatus_IsError(status))
         return status;
     status = UpdateJournal_Read(&journal);

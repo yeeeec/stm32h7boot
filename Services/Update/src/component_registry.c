@@ -7,10 +7,10 @@
 #include "platform/platform_flash.h"
 
 static const update_component_descriptor_t s_components[] = {
-    {"app", 1U, IMAGE_TARGET_APP, "raw-bin-v1", PLATFORM_APP_MAX_SIZE,
-     PLATFORM_APP_OFFSET, PLATFORM_FLASH_ERASE_SIZE, 1U, 4U},
-    {"gui", 2U, IMAGE_TARGET_GUI, "raw-bin-v1", PLATFORM_GUI_MAX_SIZE,
-     PLATFORM_GUI_OFFSET, PLATFORM_FLASH_ERASE_SIZE, 1U, 2U},
+    {"app", 1U, IMAGE_TARGET_APP, "raw-bin-v1", PLATFORM_APP_MAX_SIZE, PLATFORM_APP_OFFSET,
+     PLATFORM_FLASH_ERASE_SIZE, 1U, 4U},
+    {"gui", 2U, IMAGE_TARGET_GUI, "raw-bin-v1", PLATFORM_GUI_MAX_SIZE, PLATFORM_GUI_OFFSET,
+     PLATFORM_FLASH_ERASE_SIZE, 1U, 2U},
     {"therapy", 4U, IMAGE_TARGET_THERAPY, "raw-bin-v1", PLATFORM_THERAPY_MAX_SIZE,
      PLATFORM_THERAPY_TARGET_ADDRESS, PLATFORM_FLASH_ERASE_SIZE, 1U, 3U},
     {"voice", 8U, IMAGE_TARGET_VOICE, "voice-bin-v1", PLATFORM_VOICE_MAX_SIZE,
@@ -43,11 +43,7 @@ int UpdateComponent_IsEnabled(const update_component_descriptor_t *descriptor)
 {
     if (descriptor == NULL)
         return 0;
-#if (BOOTLOADER_UPDATE_APP_GUI_ONLY == 1U)
-    return descriptor->target == IMAGE_TARGET_APP || descriptor->target == IMAGE_TARGET_GUI;
-#else
     return 1;
-#endif
 }
 
 uint32_t UpdateComponent_DeriveMask(const update_manifest_t *manifest)
@@ -80,8 +76,9 @@ firmware_status_t UpdateComponent_ValidateRanges(const update_manifest_t *manife
             manifest->components[left].size > a->maximum_size)
             return FIRMWARE_STATUS_OUT_OF_RANGE;
         if ((a->address % a->erase_size) != 0U ||
-            (((uint64_t) manifest->components[left].size + a->erase_size - 1U) /
-             a->erase_size) * a->erase_size > a->maximum_size)
+            (((uint64_t) manifest->components[left].size + a->erase_size - 1U) / a->erase_size) *
+                    a->erase_size >
+                a->maximum_size)
             return FIRMWARE_STATUS_OUT_OF_RANGE;
         a_end = (uint64_t) a->address + manifest->components[left].size;
         if (a_end > (uint64_t) a->address + a->maximum_size)
