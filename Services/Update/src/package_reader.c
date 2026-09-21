@@ -7,6 +7,7 @@
 #include "crypto/sha256.h"
 #include "firmware/memory.h"
 #include "firmware/product_identity.h"
+#include "logging.h"
 #include "platform/platform_storage.h"
 #include "platform/platform_system.h"
 #include "update_config.h"
@@ -268,6 +269,8 @@ update_operation_result_t PackageReader_Validate(const char *root,
                                            FIRMWARE_BOOTLOADER_VERSION_PATCH, 0U};
     size_t manifest_length;
 
+    LOG_INFO("update", "package validation start: root=%s", root != NULL ? root : "(null)");
+
     if (root == NULL || package == NULL ||
         (verify_payload_hashes != 0 && verify_payload_hashes != 1))
         return package_result(UPDATE_FAILURE_MANIFEST_READ, FIRMWARE_STATUS_INVALID_ARGUMENT);
@@ -316,6 +319,11 @@ update_operation_result_t PackageReader_Validate(const char *root,
                 return result;
         }
     }
+    LOG_INFO("update", "package validation pass: package=%s version=%lu.%lu.%lu components=%lu",
+             package->manifest.package_id, (unsigned long) package->manifest.release.major,
+             (unsigned long) package->manifest.release.minor,
+             (unsigned long) package->manifest.release.patch,
+             (unsigned long) package->manifest.component_count);
     return package_result(UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
 }
 

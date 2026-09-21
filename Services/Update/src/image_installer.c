@@ -22,6 +22,27 @@ static update_operation_result_t install_result(update_failure_t failure, firmwa
     return result;
 }
 
+static const char *target_name(image_target_t target)
+{
+    switch (target)
+    {
+        case IMAGE_TARGET_APP:
+            return "app";
+        case IMAGE_TARGET_GUI:
+            return "gui";
+        case IMAGE_TARGET_THERAPY:
+            return "therapy";
+        case IMAGE_TARGET_VOICE:
+            return "voice";
+        case IMAGE_TARGET_CONFIG:
+            return "config";
+        case IMAGE_TARGET_RESOURCE:
+            return "resource";
+        default:
+            return "unknown";
+    }
+}
+
 static firmware_status_t target_limits(image_target_t target, uint32_t *address,
                                        uint32_t *maximum_size)
 {
@@ -98,19 +119,27 @@ update_operation_result_t ImageInstaller_Install(const char *root,
             return install_result(UPDATE_FAILURE_INSTALL_SOURCE, FIRMWARE_STATUS_BUFFER_TOO_SMALL);
     }
     if (!UpdateHex_DecodeSha256(component->sha256, expected_digest))
+    {
         return install_result(UPDATE_FAILURE_INSTALL_HASH, FIRMWARE_STATUS_INVALID_ARGUMENT);
+    }
 
     result.status = PlatformStorage_Stat(path, &info);
     if (FirmwareStatus_IsError(result.status) || info.is_directory != 0U)
+    {
         return install_result(UPDATE_FAILURE_INSTALL_SOURCE, FirmwareStatus_IsError(result.status)
                                                                  ? result.status
                                                                  : FIRMWARE_STATUS_INVALID_STATE);
+    }
     if (info.size == 0U || info.size != component->size || info.size > maximum_size)
+    {
         return install_result(UPDATE_FAILURE_INSTALL_SIZE, FIRMWARE_STATUS_OUT_OF_RANGE);
+    }
 
     result.status = PlatformStorage_OpenRead(path, &file);
     if (FirmwareStatus_IsError(result.status))
+    {
         return install_result(UPDATE_FAILURE_INSTALL_SOURCE, result.status);
+    }
     file_open = 1;
 
     result.status = Crypto_Sha256Init(&hash);
@@ -147,16 +176,19 @@ update_operation_result_t ImageInstaller_Install(const char *root,
         erase_size =
             (component->size + PLATFORM_FLASH_ERASE_SIZE - 1U) & ~(PLATFORM_FLASH_ERASE_SIZE - 1U);
     }
-    // 7675904 byte 7m erase 1m30s
-    LOG_DEBUG("install", "start erase size %lukb", erase_size / 0x400);
+    LOG_INFO("install", "erase start: component=%s target=%s address=0x%08lx size=%lu bytes",
+             component->name, target_name(component->target), (unsigned long) target_address,
+             (unsigned long) erase_size);
     result.status = target_erase(component->target, target_address, erase_size);
     if (FirmwareStatus_IsError(result.status))
     {
         result.failure = UPDATE_FAILURE_INSTALL_ERASE;
         goto cleanup;
     }
-    LOG_DEBUG("install", "end erase");
+    LOG_INFO("install", "erase complete: component=%s", component->name);
 
+    LOG_INFO("install", "write start: component=%s size=%lu", component->name,
+             (unsigned long) component->size);
     while (offset < component->size)
     {
         size_t requested = component->size - offset;
@@ -199,7 +231,8 @@ update_operation_result_t ImageInstaller_Install(const char *root,
         PlatformSystem_WatchdogRefresh();
     }
 
-    LOG_DEBUG("install", "end write&verif");
+    LOG_INFO("install", "write complete: component=%s bytes=%lu", component->name,
+             (unsigned long) offset);
     result.status = Crypto_Sha256Finish(&hash, installed_digest);
     hash_started  = 0;
     if (FirmwareStatus_IsError(result.status) ||
@@ -231,5 +264,7 @@ cleanup:
             result.status  = end_status;
         }
     }
+    if (FirmwareStatus_IsOk(result.status))
+        LOG_INFO("install", "verify pass: component=%s", component->name);
     return result;
 }

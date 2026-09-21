@@ -17,6 +17,23 @@ static update_result_t result(update_outcome_t outcome, update_failure_t failure
     return value;
 }
 
+#if (BOOTLOADER_UPDATE_USE_JOURNAL == 1U)
+static const char *source_name(uint32_t source)
+{
+    switch (source)
+    {
+        case UPDATE_SOURCE_NONE:
+            return "none";
+        case UPDATE_SOURCE_CANDIDATE:
+            return "candidate";
+        case UPDATE_SOURCE_ROLLBACK:
+            return "rollback";
+        default:
+            return "unknown";
+    }
+}
+#endif
+
 static uint8_t s_update_initialized;
 
 firmware_status_t UpdateService_Init(void)
@@ -162,6 +179,7 @@ static update_result_t process_commit_pending(update_journal_record_t *journal)
     }
     else if (update_valid != 0)
     {
+        LOG_INFO("update", "commit current start: package=%s", package.manifest.package_id);
         status = CurrentStore_Commit(&package, journal->candidate_manifest_sha256);
         if (FirmwareStatus_IsError(status))
             failure = UPDATE_FAILURE_CURRENT_COMMIT;
@@ -212,6 +230,7 @@ static update_result_t process_commit_pending(update_journal_record_t *journal)
         (void) UpdateJournal_Write(&pending_record);
         return result(UPDATE_OUTCOME_LAUNCH, UPDATE_FAILURE_CURRENT_COMMIT, status);
     }
+    LOG_INFO("update", "commit current complete");
     return result(UPDATE_OUTCOME_LAUNCH, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
 }
 
@@ -237,6 +256,7 @@ static update_result_t handle_install_failure(update_journal_record_t *journal,
         journal->install_attempts = 0U;
         journal->jump_attempts    = 0U;
         (void) memcpy(journal->running_manifest_sha256, current.manifest_sha256, 32U);
+        LOG_WARN("update", "candidate install failed; rollback start");
         current_status = UpdateJournal_Write(journal);
         if (FirmwareStatus_IsError(current_status))
             return fail(journal, UPDATE_FAILURE_JOURNAL, current_status, 1);
@@ -256,6 +276,11 @@ static update_result_t install_package(update_journal_record_t *journal, const c
     operation = PackageReader_Validate(root, expected_digest, 1, &package);
     if (FirmwareStatus_IsError(operation.status))
         return handle_install_failure(journal, operation.failure, operation.status);
+    LOG_INFO("update", "upgrade content: package=%s version=%lu.%lu.%lu components=%lu source=%s",
+             package.manifest.package_id, (unsigned long) package.manifest.release.major,
+             (unsigned long) package.manifest.release.minor,
+             (unsigned long) package.manifest.release.patch,
+             (unsigned long) package.manifest.component_count, source_name(journal->source));
     for (index = 0U; index < package.manifest.component_count; ++index)
     {
         const update_component_descriptor_t *descriptor =
@@ -276,6 +301,11 @@ static update_result_t install_package(update_journal_record_t *journal, const c
             package.manifest.components[index]    = package.manifest.components[selected];
             package.manifest.components[selected] = temporary;
         }
+        LOG_INFO("update", "install component[%lu/%lu]=%s order=%u size=%lu",
+                 (unsigned long) (index + 1U), (unsigned long) package.manifest.component_count,
+                 package.manifest.components[index].name,
+                 (unsigned) package.manifest.components[index].installation_order,
+                 (unsigned long) package.manifest.components[index].size);
         operation = ImageInstaller_Install(root, &package.manifest.components[index]);
         if (FirmwareStatus_IsError(operation.status))
             return handle_install_failure(journal, operation.failure, operation.status);
@@ -323,6 +353,7 @@ static update_result_t process_installing(update_journal_record_t *journal)
                 return fail(journal, UPDATE_FAILURE_JOURNAL, status, 1);
             root   = CURRENT_PACKAGE_ROOT;
             digest = current.manifest_sha256;
+            LOG_WARN("update", "candidate install retries exhausted; rollback start");
         }
         else
             return fail(journal, UPDATE_FAILURE_ROLLBACK_INSTALL, FIRMWARE_STATUS_IO_ERROR, 1);
@@ -365,6 +396,7 @@ static update_result_t process_jumping(update_journal_record_t *journal)
                 return fail(journal, UPDATE_FAILURE_JOURNAL, status, 1);
             }
             {
+                LOG_WARN("update", "runtime launch failed; rollback start");
                 update_result_t outcome = process_installing(journal);
                 (void) PlatformStorage_Unmount();
                 return outcome;
@@ -391,7 +423,10 @@ static update_result_t UpdateService_ProcessJournalBoot(void)
 
     status = UpdateJournal_Read(&journal);
     if (status == FIRMWARE_STATUS_NOT_FOUND)
+    {
+        LOG_INFO("update", "upgrade check: no request");
         return result(UPDATE_OUTCOME_LAUNCH, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
+    }
     if (FirmwareStatus_IsError(status))
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_JOURNAL, status);
 
@@ -399,9 +434,18 @@ static update_result_t UpdateService_ProcessJournalBoot(void)
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, (update_failure_t) journal.last_error,
                       FIRMWARE_STATUS_INVALID_STATE);
 
+    if (journal.state == UPDATE_STATE_IDLE && journal.source == UPDATE_SOURCE_NONE &&
+        (journal.flags & UPDATE_JOURNAL_FLAG_CURRENT_COMMIT_PENDING) == 0U)
+        LOG_INFO("update", "upgrade check: no request");
+    else
+        LOG_INFO("update", "upgrade check: request found source=%s", source_name(journal.source));
+
     if (journal.state == UPDATE_STATE_IDLE &&
         (journal.flags & UPDATE_JOURNAL_FLAG_CURRENT_COMMIT_PENDING) != 0U)
+    {
+        LOG_INFO("update", "commit current resume");
         return process_commit_pending(&journal);
+    }
 
     if (journal.state == UPDATE_STATE_IDLE && journal.source == UPDATE_SOURCE_ROLLBACK)
     {
@@ -560,9 +604,13 @@ static update_result_t UpdateService_ProcessFileBoot(void)
 
     status = mount_storage();
     if (FirmwareStatus_IsError(status))
+    {
+        LOG_ERROR("update", "direct update storage unavailable: status=%u", (unsigned) status);
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_STORAGE, status);
+    }
     request_presence = UpdateRequest_Load(&request);
-    LOG_DEBUG("update", "direct request detection presence=%u", (unsigned) request_presence);
+    LOG_INFO("update", "upgrade check: %s",
+             request_presence == UPDATE_REQUEST_ACTIVE ? "request found" : "no request");
     switch (request_presence)
     {
         case UPDATE_REQUEST_ABSENT:
@@ -597,7 +645,11 @@ static update_result_t UpdateService_ProcessFileBoot(void)
         (void) PlatformStorage_Unmount();
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, validation.failure, validation.status);
     }
-    LOG_DEBUG("upadate", "check files/request pass");
+    LOG_INFO("update", "upgrade content: package=%s version=%lu.%lu.%lu components=%lu",
+             package.manifest.package_id, (unsigned long) package.manifest.release.major,
+             (unsigned long) package.manifest.release.minor,
+             (unsigned long) package.manifest.release.patch,
+             (unsigned long) package.manifest.component_count);
     {
         update_package_t current;
         firmware_status_t current_status = CurrentStore_Read(&current);
@@ -637,7 +689,11 @@ static update_result_t UpdateService_ProcessFileBoot(void)
             package.manifest.components[selected] = temporary;
         }
         {
-            LOG_DEBUG("upadate", "start install %s.", package.manifest.components[candidate].name);
+            LOG_INFO("update", "install component[%lu/%lu]=%s order=%u size=%lu",
+                     (unsigned long) (index + 1U), (unsigned long) package.manifest.component_count,
+                     package.manifest.components[index].name,
+                     (unsigned) package.manifest.components[index].installation_order,
+                     (unsigned long) package.manifest.components[index].size);
             update_operation_result_t install =
                 ImageInstaller_Install(UPDATE_PACKAGE_ROOT, &package.manifest.components[index]);
             if (FirmwareStatus_IsError(install.status))
@@ -655,6 +711,7 @@ static update_result_t UpdateService_ProcessFileBoot(void)
         (void) PlatformStorage_Unmount();
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_RUNTIME_VECTOR, status);
     }
+    LOG_INFO("update", "runtime verify pass; commit current start");
     status = CurrentStore_Commit(&package, package.manifest_sha256);
     if (FirmwareStatus_IsOk(status))
         status = CurrentStore_Read(&package);
@@ -671,7 +728,7 @@ static update_result_t UpdateService_ProcessFileBoot(void)
     }
     if (FirmwareStatus_IsError(status))
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_CURRENT_COMMIT, status);
-    LOG_DEBUG("update", "direct update committed; next startup will launch the application");
+    LOG_INFO("update", "commit current complete");
 #if (BOOTLOADER_UPDATE_DEBUG_RESET_AFTER_COMMIT == 1U)
     outcome = result(UPDATE_OUTCOME_RESET, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
 #else
@@ -684,12 +741,15 @@ static update_result_t UpdateService_ProcessFileBoot(void)
 update_result_t UpdateService_Process(void)
 {
 #if (BOOTLOADER_UPDATE_USE_JOURNAL == 1U)
-    LOG_DEBUG("upadate", "use journal");
-    return UpdateService_ProcessJournalBoot();
+    update_result_t outcome;
+    outcome = UpdateService_ProcessJournalBoot();
 #else
-    LOG_DEBUG("upadate", "don't use journal");
-    return UpdateService_ProcessFileBoot();
+    update_result_t outcome;
+    outcome = UpdateService_ProcessFileBoot();
 #endif
+    LOG_INFO("update", "boot update flow complete: outcome=%u failure=%u status=%u",
+             (unsigned) outcome.outcome, (unsigned) outcome.failure, (unsigned) outcome.status);
+    return outcome;
 }
 
 firmware_status_t UpdateService_ConfirmRunning(const uint8_t running_manifest_sha256[32])
@@ -703,11 +763,15 @@ firmware_status_t UpdateService_ConfirmRunning(const uint8_t running_manifest_sh
     uint32_t expected_flags;
     firmware_status_t status = UpdateJournal_Read(&journal);
 
+    LOG_INFO("update", "confirm running image: journal_status=%u", (unsigned) status);
     if (running_manifest_sha256 == NULL || FirmwareStatus_IsError(status) ||
         journal.state != UPDATE_STATE_JUMPING ||
         (journal.source != UPDATE_SOURCE_CANDIDATE && journal.source != UPDATE_SOURCE_ROLLBACK) ||
         memcmp(journal.running_manifest_sha256, running_manifest_sha256, 32U) != 0)
+    {
+        LOG_WARN("update", "running image confirmation rejected: state/source/digest mismatch");
         return FIRMWARE_STATUS_INVALID_STATE;
+    }
     source                   = (update_source_t) journal.source;
     journal.state            = UPDATE_STATE_IDLE;
     journal.install_attempts = 0U;
@@ -723,15 +787,23 @@ firmware_status_t UpdateService_ConfirmRunning(const uint8_t running_manifest_sh
     expected_flags     = journal.flags;
     status             = UpdateJournal_Write(&journal);
     if (FirmwareStatus_IsError(status))
+    {
+        LOG_ERROR("update", "running image confirmation journal write failed: status=%u",
+                  (unsigned) status);
         return status;
+    }
     status = UpdateJournal_Read(&journal);
     if (FirmwareStatus_IsError(status))
         return status;
-    return (journal.state == UPDATE_STATE_IDLE && journal.source == source &&
-            journal.flags == expected_flags && journal.jump_attempts == 0U &&
-            memcmp(journal.running_manifest_sha256, running_manifest_sha256, 32U) == 0)
-               ? FIRMWARE_STATUS_OK
-               : FIRMWARE_STATUS_IO_ERROR;
+    status = (journal.state == UPDATE_STATE_IDLE && journal.source == source &&
+              journal.flags == expected_flags && journal.jump_attempts == 0U &&
+              memcmp(journal.running_manifest_sha256, running_manifest_sha256, 32U) == 0)
+                 ? FIRMWARE_STATUS_OK
+                 : FIRMWARE_STATUS_IO_ERROR;
+    LOG_INFO("update", "running image confirmation complete: status=%u commit_pending=%u",
+             (unsigned) status,
+             (unsigned) ((expected_flags & UPDATE_JOURNAL_FLAG_CURRENT_COMMIT_PENDING) != 0U));
+    return status;
 #endif
 }
 
@@ -744,6 +816,7 @@ update_result_t UpdateService_ReportRuntimeFailure(firmware_status_t status)
     firmware_status_t journal_status;
     int rollback_started = 0;
 
+    LOG_ERROR("update", "runtime reported failure: status=%u", (unsigned) status);
     journal_status = UpdateJournal_Read(&journal);
     if (FirmwareStatus_IsError(journal_status))
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_JOURNAL, journal_status);
@@ -760,6 +833,8 @@ update_result_t UpdateService_ReportRuntimeFailure(firmware_status_t status)
             journal_status = CurrentStore_Read(&current);
         if (FirmwareStatus_IsError(journal_status))
         {
+            LOG_ERROR("update", "rollback unavailable; CURRENT verification failed: status=%u",
+                      (unsigned) journal_status);
             journal.state = UPDATE_STATE_FAILED;
             set_error(&journal, UPDATE_FAILURE_CURRENT_VERIFY);
         }
@@ -771,6 +846,7 @@ update_result_t UpdateService_ReportRuntimeFailure(firmware_status_t status)
             journal.jump_attempts    = 0U;
             (void) memcpy(journal.running_manifest_sha256, current.manifest_sha256, 32U);
             rollback_started = 1;
+            LOG_WARN("update", "runtime failure accepted; rollback scheduled");
         }
         (void) PlatformStorage_Unmount();
     }
@@ -779,6 +855,8 @@ update_result_t UpdateService_ReportRuntimeFailure(firmware_status_t status)
         journal.state = UPDATE_STATE_FAILED;
     }
     journal_status = UpdateJournal_Write(&journal);
+    LOG_INFO("update", "runtime failure handling complete: rollback=%u journal_status=%u",
+             (unsigned) rollback_started, (unsigned) journal_status);
     return FirmwareStatus_IsError(journal_status)
                ? result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_JOURNAL, journal_status)
                : result(rollback_started != 0 ? UPDATE_OUTCOME_RESET
@@ -802,17 +880,31 @@ firmware_status_t UpdateService_SubmitCandidateEx(const char *package_id,
     update_journal_record_t journal;
     firmware_status_t status;
 
+    LOG_INFO("update", "submit candidate: package=%s version=%lu mask=0x%lx",
+             package_id != NULL ? package_id : "(unspecified)", (unsigned long) candidate_version,
+             (unsigned long) component_mask);
     if (manifest_sha256 == NULL || (component_mask & ~31U) != 0U ||
         (package_id != NULL && !UpdatePackage_IsValidId(package_id)))
+    {
+        LOG_WARN("update", "candidate rejected: invalid arguments");
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    }
     status = UpdateJournal_Read(&journal);
     if (status == FIRMWARE_STATUS_NOT_FOUND)
         (void) memset(&journal, 0, sizeof(journal));
     else if (FirmwareStatus_IsError(status))
+    {
+        LOG_ERROR("update", "candidate rejected: journal read failed: status=%u",
+                  (unsigned) status);
         return status;
+    }
     else if (journal.state != UPDATE_STATE_IDLE ||
              (journal.flags & UPDATE_JOURNAL_FLAG_CURRENT_COMMIT_PENDING) != 0U)
+    {
+        LOG_WARN("update", "candidate rejected: update busy (state=%s flags=0x%lx)",
+                 state_name(journal.state), (unsigned long) journal.flags);
         return FIRMWARE_STATUS_BUSY;
+    }
 
     journal.state             = UPDATE_STATE_REQUESTED;
     journal.source            = UPDATE_SOURCE_CANDIDATE;
@@ -829,7 +921,10 @@ firmware_status_t UpdateService_SubmitCandidateEx(const char *package_id,
                        sizeof(journal.candidate_package_id) - 1U);
     (void) memcpy(journal.candidate_manifest_sha256, manifest_sha256, 32U);
     (void) memset(journal.running_manifest_sha256, 0, sizeof(journal.running_manifest_sha256));
-    return UpdateJournal_Write(&journal);
+    status = UpdateJournal_Write(&journal);
+    LOG_INFO("update", "candidate submission %s: status=%u",
+             FirmwareStatus_IsOk(status) ? "accepted" : "failed", (unsigned) status);
+    return status;
 #endif
 }
 
