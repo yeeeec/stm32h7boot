@@ -1,0 +1,19 @@
+set(FIRMWARE_APPLICATION_SOURCES
+    src/application.c
+    src/boot_flow.c
+)
+
+add_library(firmware_application STATIC ${FIRMWARE_APPLICATION_SOURCES})
+
+target_include_directories(firmware_application PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(firmware_application
+    PUBLIC firmware_types
+    PRIVATE
+    boot_service
+    update_service
+    platform_stm32h7
+    firmware_logger
+)

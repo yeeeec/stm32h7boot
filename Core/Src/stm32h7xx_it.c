@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file    stm32h7xx_it.c
-  * @brief   Interrupt Service Routines.
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file    stm32h7xx_it.c
+ * @brief   Interrupt Service Routines.
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 
 /* Includes ------------------------------------------------------------------*/
@@ -55,8 +55,9 @@
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-extern HCD_HandleTypeDef hhcd_USB_OTG_HS;
-extern DMA2D_HandleTypeDef hdma2d;
+extern I2C_HandleTypeDef hi2c1;
+extern DMA_HandleTypeDef hdma_sai1_a;
+extern SD_HandleTypeDef hsd1;
 /* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
@@ -73,9 +74,9 @@ void NMI_Handler(void)
 
   /* USER CODE END NonMaskableInt_IRQn 0 */
   /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
-   while (1)
-  {
-  }
+    while (1)
+    {
+    }
   /* USER CODE END NonMaskableInt_IRQn 1 */
 }
 
@@ -85,7 +86,12 @@ void NMI_Handler(void)
 void HardFault_Handler(void)
 {
   /* USER CODE BEGIN HardFault_IRQn 0 */
-
+    volatile uint32_t hfsr  = SCB->HFSR;
+    volatile uint32_t cfsr  = SCB->CFSR;
+    volatile uint32_t bfar  = SCB->BFAR;
+    volatile uint32_t mmfar = SCB->MMFAR;
+    volatile uint32_t shcsr = SCB->SHCSR;
+    (void) hfsr, cfsr, bfar, mmfar, shcsr;
   /* USER CODE END HardFault_IRQn 0 */
   while (1)
   {
@@ -200,31 +206,45 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
-  * @brief This function handles USB On The Go HS global interrupt.
+  * @brief This function handles I2C1 event interrupt.
   */
-void OTG_HS_IRQHandler(void)
+void I2C1_EV_IRQHandler(void)
 {
-  /* USER CODE BEGIN OTG_HS_IRQn 0 */
+  /* USER CODE BEGIN I2C1_EV_IRQn 0 */
 
-  /* USER CODE END OTG_HS_IRQn 0 */
-  HAL_HCD_IRQHandler(&hhcd_USB_OTG_HS);
-  /* USER CODE BEGIN OTG_HS_IRQn 1 */
+  /* USER CODE END I2C1_EV_IRQn 0 */
+  HAL_I2C_EV_IRQHandler(&hi2c1);
+  /* USER CODE BEGIN I2C1_EV_IRQn 1 */
 
-  /* USER CODE END OTG_HS_IRQn 1 */
+  /* USER CODE END I2C1_EV_IRQn 1 */
 }
 
 /**
-  * @brief This function handles DMA2D global interrupt.
+  * @brief This function handles I2C1 error interrupt.
   */
-void DMA2D_IRQHandler(void)
+void I2C1_ER_IRQHandler(void)
 {
-  /* USER CODE BEGIN DMA2D_IRQn 0 */
+  /* USER CODE BEGIN I2C1_ER_IRQn 0 */
 
-  /* USER CODE END DMA2D_IRQn 0 */
-  HAL_DMA2D_IRQHandler(&hdma2d);
-  /* USER CODE BEGIN DMA2D_IRQn 1 */
+  /* USER CODE END I2C1_ER_IRQn 0 */
+  HAL_I2C_ER_IRQHandler(&hi2c1);
+  /* USER CODE BEGIN I2C1_ER_IRQn 1 */
 
-  /* USER CODE END DMA2D_IRQn 1 */
+  /* USER CODE END I2C1_ER_IRQn 1 */
+}
+
+/**
+  * @brief This function handles SDMMC1 global interrupt.
+  */
+void SDMMC1_IRQHandler(void)
+{
+  /* USER CODE BEGIN SDMMC1_IRQn 0 */
+
+  /* USER CODE END SDMMC1_IRQn 0 */
+  HAL_SD_IRQHandler(&hsd1);
+  /* USER CODE BEGIN SDMMC1_IRQn 1 */
+
+  /* USER CODE END SDMMC1_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */
