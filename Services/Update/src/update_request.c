@@ -70,7 +70,7 @@ static int copy_string(request_cursor_t *cursor, char *destination, size_t capac
 static int read_uint(request_cursor_t *cursor, uint32_t *value)
 {
     uint64_t number = 0U;
-    size_t digits = 0U;
+    size_t digits   = 0U;
     skip_space(cursor);
     if (cursor->position >= cursor->length)
         return 0;
@@ -128,8 +128,7 @@ static int valid_digest(const char *digest)
     return 1;
 }
 
-firmware_status_t UpdateRequest_Parse(const uint8_t *json, size_t length,
-                                      update_request_t *request)
+firmware_status_t UpdateRequest_Parse(const uint8_t *json, size_t length, update_request_t *request)
 {
     request_cursor_t cursor;
     uint32_t seen = 0U;
@@ -138,8 +137,8 @@ firmware_status_t UpdateRequest_Parse(const uint8_t *json, size_t length,
     if (json == NULL || request == NULL || length == 0U || length > UPDATE_REQUEST_MAX_SIZE)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     (void) memset(request, 0, sizeof(*request));
-    cursor.data = json;
-    cursor.length = length;
+    cursor.data     = json;
+    cursor.length   = length;
     cursor.position = 0U;
     if (!consume(&cursor, '{'))
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
@@ -184,8 +183,7 @@ firmware_status_t UpdateRequest_Parse(const uint8_t *json, size_t length,
         }
         else if (strcmp(key, "manifest_sha256") == 0 && (seen & 8U) == 0U)
         {
-            if (!copy_string(&cursor, request->manifest_sha256,
-                             sizeof(request->manifest_sha256)) ||
+            if (!copy_string(&cursor, request->manifest_sha256, sizeof(request->manifest_sha256)) ||
                 !valid_digest(request->manifest_sha256))
                 return FIRMWARE_STATUS_INVALID_ARGUMENT;
             seen |= 8U;
@@ -233,7 +231,7 @@ update_request_presence_t UpdateRequest_Load(update_request_t *request)
     while (total < info.size)
     {
         size_t actual = 0U;
-        status = PlatformStorage_Read(file, buffer + total, info.size - total, &actual);
+        status        = PlatformStorage_Read(file, buffer + total, info.size - total, &actual);
         if (FirmwareStatus_IsError(status) || actual != info.size - total)
         {
             (void) PlatformStorage_Close(file);
@@ -242,7 +240,8 @@ update_request_presence_t UpdateRequest_Load(update_request_t *request)
         total += actual;
     }
     status = PlatformStorage_Close(file);
-    if (FirmwareStatus_IsError(status) || FirmwareStatus_IsError(UpdateRequest_Parse(buffer, total, request)))
+    if (FirmwareStatus_IsError(status) ||
+        FirmwareStatus_IsError(UpdateRequest_Parse(buffer, total, request)))
         return UPDATE_REQUEST_INVALID;
     return request->requested != 0U ? UPDATE_REQUEST_ACTIVE : UPDATE_REQUEST_ABSENT;
 }
@@ -260,7 +259,8 @@ firmware_status_t UpdateRequest_Write(const update_request_t *request)
         (request->component_mask & ~31U) != 0U)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     length = snprintf(buffer, sizeof(buffer),
-                      "{\"format_version\":1,\"requested\":true,\"package_id\":\"%s\",\"manifest_sha256\":\"%s\",\"component_mask\":%lu}",
+                      "{\"format_version\":1,\"requested\":true,\"package_id\":\"%s\",\"manifest_"
+                      "sha256\":\"%s\",\"component_mask\":%lu}",
                       request->package_id, request->manifest_sha256,
                       (unsigned long) request->component_mask);
     if (length <= 0 || (size_t) length >= sizeof(buffer))

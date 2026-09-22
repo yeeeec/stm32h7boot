@@ -434,8 +434,8 @@ static int ReadComponents(JsonCursor *cursor, update_manifest_t *manifest)
             const update_component_descriptor_t *descriptor = UpdateComponent_Find(key);
             if (descriptor == NULL)
                 return 0;
-            component->target = descriptor->target;
-            component->mask_bit = descriptor->mask_bit;
+            component->target             = descriptor->target;
+            component->mask_bit           = descriptor->mask_bit;
             component->installation_order = descriptor->installation_order;
         }
         if (!ReadComponent(cursor, component))
@@ -549,8 +549,8 @@ int UpdatePackage_IsValidComponentFileName(const char *value)
     for (i = 0U; i < UPDATE_COMPONENT_FILE_MAX && value[i] != '\0'; ++i)
     {
         unsigned char c = (unsigned char) value[i];
-        if (c == '/' || c == '\\' || (c == '.' && (i == 0U || value[i - 1U] == '.')) ||
-            c == '?' || c == '<' || c == '>' || c == '|' || c == ';')
+        if (c == '/' || c == '\\' || (c == '.' && (i == 0U || value[i - 1U] == '.')) || c == '?' ||
+            c == '<' || c == '>' || c == '|' || c == ';')
             return 0;
         if (c < 0x21U || c > 0x7EU || c == ':' || c == '"' || c == '*')
             return 0;
@@ -565,11 +565,12 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
     if (manifest == NULL || strcmp(manifest->product, FIRMWARE_PRODUCT_NAME) != 0 ||
         strcmp(manifest->hardware, FIRMWARE_HARDWARE_NAME) != 0 ||
         manifest->format_version != UPDATE_SUPPORTED_MANIFEST_VERSION ||
-        manifest->component_count == 0U || manifest->component_count > UPDATE_MANIFEST_MAX_COMPONENTS)
+        manifest->component_count == 0U ||
+        manifest->component_count > UPDATE_MANIFEST_MAX_COMPONENTS)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     for (i = 0U; i < manifest->component_count; ++i)
     {
-        const update_manifest_component_t *component = &manifest->components[i];
+        const update_manifest_component_t *component    = &manifest->components[i];
         const update_component_descriptor_t *descriptor = UpdateComponent_Find(component->name);
         if (descriptor == NULL || component->mask_bit != descriptor->mask_bit ||
             component->target != descriptor->target ||
@@ -799,12 +800,12 @@ static firmware_status_t WriteCanonical(const update_manifest_t *manifest, Canon
         order[i] = i;
     for (i = 0U; i < manifest->component_count; ++i)
         for (j = i + 1U; j < manifest->component_count; ++j)
-            if (strcmp(manifest->components[order[j]].name,
-                       manifest->components[order[i]].name) < 0)
+            if (strcmp(manifest->components[order[j]].name, manifest->components[order[i]].name) <
+                0)
             {
                 size_t temporary = order[i];
-                order[i] = order[j];
-                order[j] = temporary;
+                order[i]         = order[j];
+                order[j]         = temporary;
             }
 
     APPEND_TEXT("{\"components\":{");

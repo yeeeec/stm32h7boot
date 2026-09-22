@@ -57,12 +57,10 @@ firmware_status_t Application_Run(void)
     }
     if (result == BOOT_FLOW_LAUNCH)
     {
-        LOG_INFO("boot", "jumping to application: vector=0x%08lx",
-                 (unsigned long) vector_address);
+        LOG_INFO("boot", "jumping to application: vector=0x%08lx", (unsigned long) vector_address);
         PlatformCpu_Jump(vector_address);
     }
 
-    LOG_ERROR("boot", "boot flow stopped without application jump: result=%u",
-              (unsigned) result);
+    LOG_ERROR("boot", "boot flow stopped without application jump: result=%u", (unsigned) result);
     return FIRMWARE_STATUS_INVALID_STATE;
 }

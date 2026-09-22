@@ -11,9 +11,9 @@ extern "C"
 {
 #endif
 
-#define UPDATE_REQUEST_MAX_SIZE 1024U
+#define UPDATE_REQUEST_MAX_SIZE       1024U
 #define UPDATE_REQUEST_PACKAGE_ID_MAX 64U
-#define UPDATE_REQUEST_FILE_PATH "/UPDATE/boot_update_request.json"
+#define UPDATE_REQUEST_FILE_PATH      "/UPDATE/boot_update_request.json"
 
     typedef enum
     {
