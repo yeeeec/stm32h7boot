@@ -740,11 +740,10 @@ static update_result_t UpdateService_ProcessFileBoot(void)
 
 update_result_t UpdateService_Process(void)
 {
-#if (BOOTLOADER_UPDATE_USE_JOURNAL == 1U)
     update_result_t outcome;
+#if (BOOTLOADER_UPDATE_USE_JOURNAL == 1U)
     outcome = UpdateService_ProcessJournalBoot();
 #else
-    update_result_t outcome;
     outcome = UpdateService_ProcessFileBoot();
 #endif
     LOG_INFO("update", "boot update flow complete: outcome=%u failure=%u status=%u",

@@ -10,7 +10,7 @@
 #include "platform/platform_system.h"
 #include "update/update_service.h"
 
-static uint8_t s_initialized;
+static uint8_t s_initialized = 0;
 
 firmware_status_t Application_Init(void)
 {

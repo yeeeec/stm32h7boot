@@ -214,7 +214,7 @@ update_request_presence_t UpdateRequest_Load(update_request_t *request)
     const char *path = UPDATE_REQUEST_PATH;
     platform_file_handle_t file;
     platform_file_info_t info;
-    size_t total = 0U;
+    size_t actual;
     firmware_status_t status;
 
     if (request == NULL)
@@ -228,20 +228,16 @@ update_request_presence_t UpdateRequest_Load(update_request_t *request)
     status = PlatformStorage_OpenRead(path, &file);
     if (FirmwareStatus_IsError(status))
         return UPDATE_REQUEST_INVALID;
-    while (total < info.size)
+
+    status = PlatformStorage_Read(file, buffer, info.size, &actual);
+    if (FirmwareStatus_IsError(status) || actual != info.size)
     {
-        size_t actual = 0U;
-        status        = PlatformStorage_Read(file, buffer + total, info.size - total, &actual);
-        if (FirmwareStatus_IsError(status) || actual != info.size - total)
-        {
-            (void) PlatformStorage_Close(file);
-            return UPDATE_REQUEST_INVALID;
-        }
-        total += actual;
+        (void) PlatformStorage_Close(file);
+        return UPDATE_REQUEST_INVALID;
     }
     status = PlatformStorage_Close(file);
     if (FirmwareStatus_IsError(status) ||
-        FirmwareStatus_IsError(UpdateRequest_Parse(buffer, total, request)))
+        FirmwareStatus_IsError(UpdateRequest_Parse(buffer, actual, request)))
         return UPDATE_REQUEST_INVALID;
     return request->requested != 0U ? UPDATE_REQUEST_ACTIVE : UPDATE_REQUEST_ABSENT;
 }
