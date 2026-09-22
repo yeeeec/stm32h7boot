@@ -13,10 +13,18 @@
     "C_Cpp.formatting": "clangFormat",
     "editor.formatOnSave": true,
     "files.associations": {
-        "*.h": "c"
+        "*.h": "c",
+        "CMakeLists.txt": "cmake",
+        "*.cmake": "cmake"
     },
     "[cmake]": {
-        "editor.formatOnSave": false
+        "editor.defaultFormatter": "cheshirekow.cmake-format",
+        "editor.formatOnSave": true,
+        "cmakeFormat.exePath": "python",
+        "cmakeFormat.args": [
+            "-m",
+            "cmakelang.format"
+        ]
     },
     "cortex-debug.variableUseNaturalFormat": true,
     "editor.rename.enablePreview": false

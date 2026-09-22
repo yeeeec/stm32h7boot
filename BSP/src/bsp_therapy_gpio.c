@@ -2,10 +2,10 @@
 
 #include "gpio.h"
 
-#define THERAPY_BOOT0_GPIO_PORT GPIOI
-#define THERAPY_BOOT0_PIN       GPIO_PIN_8
-#define THERAPY_RESET_GPIO_PORT GPIOC
-#define THERAPY_RESET_PIN       GPIO_PIN_13
+#define THERAPY_BOOT0_GPIO_PORT GPIOG
+#define THERAPY_BOOT0_PIN       GPIO_PIN_2
+#define THERAPY_RESET_GPIO_PORT GPIOB
+#define THERAPY_RESET_PIN       GPIO_PIN_0
 
 static int s_initialized;
 
@@ -13,8 +13,8 @@ firmware_status_t BspTherapyGpio_Init(void)
 {
     GPIO_InitTypeDef init = {0};
 
-    __HAL_RCC_GPIOI_CLK_ENABLE();
-    __HAL_RCC_GPIOC_CLK_ENABLE();
+    __HAL_RCC_GPIOG_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
     init.Mode  = GPIO_MODE_OUTPUT_PP;
     init.Pull  = GPIO_NOPULL;
     init.Speed = GPIO_SPEED_FREQ_LOW;
