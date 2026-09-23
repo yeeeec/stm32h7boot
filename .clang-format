@@ -42,3 +42,5 @@ IndentCaseLabels: true
 MaxEmptyLinesToKeep: 2
 # 关闭 #include 自动排序
 SortIncludes: Never
+
+AlignArrayOfStructures: Left

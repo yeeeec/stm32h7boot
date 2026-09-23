@@ -67,8 +67,6 @@ typedef struct
 {
     update_manifest_t manifest;
     uint8_t manifest_sha256[32];
-    uint8_t raw_manifest_sha256[32];
-    uint8_t canonical_signing_sha256[32];
     char root[192];
 } update_package_t;
 

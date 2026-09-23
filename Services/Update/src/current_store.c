@@ -122,10 +122,9 @@ firmware_status_t CurrentStore_Read(update_package_t *package)
 {
     if (package == NULL)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    {
-        firmware_status_t status = verify_current_root();
-        return FirmwareStatus_IsError(status) ? status : verify_root(CURRENT_PACKAGE_ROOT, package);
-    }
+
+    firmware_status_t status = verify_current_root();
+    return FirmwareStatus_IsError(status) ? status : verify_root(CURRENT_PACKAGE_ROOT, package);
 }
 
 firmware_status_t CurrentStore_Commit(const update_package_t *package,

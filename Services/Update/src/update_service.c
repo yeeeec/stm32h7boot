@@ -602,18 +602,21 @@ static update_result_t UpdateService_ProcessFileBoot(void)
     update_request_presence_t request_presence;
     size_t index;
 
+    /* 初始化文件系统 */
     status = mount_storage();
     if (FirmwareStatus_IsError(status))
     {
         LOG_ERROR("update", "direct update storage unavailable: status=%u", (unsigned) status);
         return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_STORAGE, status);
     }
+    /* 解析请求文件/UPDATE/boot_update_request.json */
     request_presence = UpdateRequest_Load(&request);
     LOG_INFO("update", "upgrade check: %s",
              request_presence == UPDATE_REQUEST_ACTIVE ? "request found" : "no request");
     switch (request_presence)
     {
         case UPDATE_REQUEST_ABSENT:
+            /* 缺失升级请求，清空UPDATE文件夹 */
             status = CurrentStore_CleanupUpdate();
             if (FirmwareStatus_IsOk(status))
                 status = PlatformStorage_SyncVolume();
@@ -622,21 +625,25 @@ static update_result_t UpdateService_ProcessFileBoot(void)
                        ? result(UPDATE_OUTCOME_LAUNCH, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK)
                        : result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_STORAGE, status);
         case UPDATE_REQUEST_INVALID:
+            /* 升级请求无效 */
             (void) PlatformStorage_Unmount();
             return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_REQUEST_PARSE,
                           FIRMWARE_STATUS_INVALID_ARGUMENT);
         case UPDATE_REQUEST_ACTIVE:
+            /* 升级请求有效！ */
             break;
         default:
             (void) PlatformStorage_Unmount();
             return result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_REQUEST_PARSE,
                           FIRMWARE_STATUS_INVALID_STATE);
     }
-
-    validation = PackageReader_ValidateRequest(UPDATE_PACKAGE_ROOT, &request, NULL, 1, &package);
+    /* 验证Manifest.json和firmware是否存在 */
+    validation.status = PackageReader_ValidateUpdateRoot();
     if (FirmwareStatus_IsOk(validation.status))
     {
-        validation.status = PackageReader_ValidateUpdateRoot();
+        /* 验证Manifest.json与boot_update_request.json是否匹配 */
+        validation =
+            PackageReader_ValidateRequest(UPDATE_PACKAGE_ROOT, &request, NULL, 1, &package);
         if (FirmwareStatus_IsError(validation.status))
             validation.failure = UPDATE_FAILURE_FILE_SET;
     }
@@ -650,6 +657,7 @@ static update_result_t UpdateService_ProcessFileBoot(void)
              (unsigned long) package.manifest.release.minor,
              (unsigned long) package.manifest.release.patch,
              (unsigned long) package.manifest.component_count);
+    /* 识别CURRENT历史版本是否倒置 */
     {
         update_package_t current;
         firmware_status_t current_status = CurrentStore_Read(&current);

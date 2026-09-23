@@ -98,16 +98,15 @@ static update_operation_result_t validate_file_set(const char *root,
 {
     platform_dir_handle_t directory;
     platform_dir_entry_t entry;
-    uint32_t found           = 0U;
+    /* 打开目录 */
     firmware_status_t status = PlatformStorage_DirOpen(root, &directory);
-
     if (FirmwareStatus_IsError(status))
         return package_result(UPDATE_FAILURE_FILE_SET, status);
+    /* 读取目录每一项 */
     while ((status = PlatformStorage_DirRead(directory, &entry)) == FIRMWARE_STATUS_OK)
     {
         size_t index;
-        int allowed             = 0;
-        int protected_duplicate = 0;
+        int allowed = 0;
 
         if (entry.is_directory != 0U)
         {
@@ -116,30 +115,17 @@ static update_operation_result_t validate_file_set(const char *root,
         }
         if (strcmp(entry.name, UPDATE_MANIFEST_FILE) == 0)
         {
-            if ((found & 1U) != 0U)
-                allowed = 0;
-            else
-            {
-                found |= 1U;
-                allowed = 1;
-            }
+            allowed = 1;
         }
-        for (index = 0U; index < manifest->component_count; ++index)
+        else
         {
-            uint32_t bit = 1UL << (index + 1U);
-            const update_component_descriptor_t *descriptor =
-                UpdateComponent_Find(manifest->components[index].name);
-            if (strcmp(entry.name, manifest->components[index].file) == 0)
+            for (index = 0U; index < manifest->component_count; ++index)
             {
-                allowed = 1;
-                if ((found & bit) != 0U)
+                if (strcmp(entry.name, manifest->components[index].file) == 0)
                 {
-                    protected_duplicate =
-                        descriptor != NULL && UpdateComponent_IsEnabled(descriptor);
+                    allowed = 1;
+                    break;
                 }
-                else if (descriptor != NULL && UpdateComponent_IsEnabled(descriptor))
-                    found |= bit;
-                break;
             }
         }
         if (!allowed)
@@ -147,31 +133,12 @@ static update_operation_result_t validate_file_set(const char *root,
             (void) PlatformStorage_DirClose(directory);
             return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_INVALID_STATE);
         }
-        if (protected_duplicate != 0)
-        {
-            (void) PlatformStorage_DirClose(directory);
-            return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_INVALID_STATE);
-        }
     }
-    {
-        firmware_status_t close_status = PlatformStorage_DirClose(directory);
-        if (status != FIRMWARE_STATUS_NOT_FOUND)
-            return package_result(UPDATE_FAILURE_FILE_SET, status);
-        if (FirmwareStatus_IsError(close_status))
-            return package_result(UPDATE_FAILURE_FILE_SET, close_status);
-    }
-    {
-        uint32_t expected = 1U;
-        for (size_t index = 0U; index < manifest->component_count; ++index)
-        {
-            const update_component_descriptor_t *descriptor =
-                UpdateComponent_Find(manifest->components[index].name);
-            if (descriptor != NULL && UpdateComponent_IsEnabled(descriptor))
-                expected |= 1UL << (index + 1U);
-        }
-        if ((found & expected) != expected)
-            return package_result(UPDATE_FAILURE_FILE_SET, FIRMWARE_STATUS_NOT_FOUND);
-    }
+    if (status != FIRMWARE_STATUS_NOT_FOUND)
+        return package_result(UPDATE_FAILURE_FILE_SET, status);
+    status = PlatformStorage_DirClose(directory);
+    if (FirmwareStatus_IsError(status))
+        return package_result(UPDATE_FAILURE_FILE_SET, status);
 
     for (size_t index = 0U; index < manifest->component_count; ++index)
     {
@@ -282,26 +249,27 @@ update_operation_result_t PackageReader_Validate(const char *root,
     result = read_manifest(root, &manifest_length);
     if (FirmwareStatus_IsError(result.status))
         return result;
-    if (Crypto_Sha256(s_manifest_buffer, manifest_length, package->raw_manifest_sha256) != 0)
-        return package_result(UPDATE_FAILURE_MANIFEST_DIGEST, FIRMWARE_STATUS_IO_ERROR);
-
+    /* 解析 manifest */
     result.status = UpdateManifest_Parse(s_manifest_buffer, manifest_length, &package->manifest);
     if (FirmwareStatus_IsError(result.status))
         return package_result(UPDATE_FAILURE_MANIFEST_PARSE, result.status);
-    result.status = UpdateManifest_ValidateTarget(&package->manifest);
-    if (FirmwareStatus_IsError(result.status))
-        return package_result(UPDATE_FAILURE_TARGET, result.status);
+    /* 计算HASH值 manifest */
     if (UpdateManifest_Digest(&package->manifest, package->manifest_sha256) != FIRMWARE_STATUS_OK)
         return package_result(UPDATE_FAILURE_MANIFEST_DIGEST, FIRMWARE_STATUS_IO_ERROR);
     if (expected_manifest_digest != NULL &&
         memcmp(package->manifest_sha256, expected_manifest_digest, 32U) != 0)
         return package_result(UPDATE_FAILURE_MANIFEST_DIGEST,
                               FIRMWARE_STATUS_AUTHENTICATION_FAILED);
+    /* 校验内容合法性 manifest */
+    result.status = UpdateManifest_ValidateTarget(&package->manifest);
+    if (FirmwareStatus_IsError(result.status))
+        return package_result(UPDATE_FAILURE_TARGET, result.status);
+    /* 检查最低Bootloader版本支持 */
     result.status = VersionPolicy_ValidateMinimumBootloader(
         &package->manifest.minimum_bootloader_version, &bootloader_version);
     if (FirmwareStatus_IsError(result.status))
         return package_result(UPDATE_FAILURE_VERSION, result.status);
-
+    /* 检测fimrware各个文件.bin是否属性匹配manifest */
     result = validate_file_set(root, &package->manifest);
     if (FirmwareStatus_IsError(result.status))
         return result;
@@ -310,10 +278,6 @@ update_operation_result_t PackageReader_Validate(const char *root,
         size_t index;
         for (index = 0U; index < package->manifest.component_count; ++index)
         {
-            const update_component_descriptor_t *descriptor =
-                UpdateComponent_Find(package->manifest.components[index].name);
-            if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
-                continue;
             result = verify_payload(root, &package->manifest.components[index]);
             if (FirmwareStatus_IsError(result.status))
                 return result;
