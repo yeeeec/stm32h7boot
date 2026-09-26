@@ -8,7 +8,6 @@
 #include "firmware/update_journal.h"
 #include "update/component_registry.h"
 #include "update/update_types.h"
-#include "update/update_request.h"
 
 #define UPDATE_MANIFEST_MAX_SIZE       8192U
 #define UPDATE_MANIFEST_MAX_COMPONENTS 16U
@@ -92,15 +91,9 @@ update_operation_result_t PackageReader_Validate(const char *root,
                                                  const uint8_t *expected_manifest_digest,
                                                  int verify_payload_hashes,
                                                  update_package_t *package);
-update_operation_result_t PackageReader_ValidateRequest(const char *root,
-                                                        const update_request_t *request,
-                                                        const uint8_t *expected_manifest_digest,
-                                                        int verify_payload_hashes,
-                                                        update_package_t *package);
-firmware_status_t PackageReader_ValidateUpdateRoot(void);
-
 const update_component_descriptor_t *UpdateComponent_Find(const char *name);
 const update_component_descriptor_t *UpdateComponent_FindByTarget(image_target_t target);
+uint32_t UpdateComponent_RequiredMask(void);
 uint32_t UpdateComponent_DeriveMask(const update_manifest_t *manifest);
 firmware_status_t UpdateComponent_ValidateRanges(const update_manifest_t *manifest);
 
@@ -108,9 +101,10 @@ update_operation_result_t ImageInstaller_Install(const char *root,
                                                  const update_manifest_component_t *component);
 
 firmware_status_t CurrentStore_Verify(void);
+firmware_status_t CurrentStore_VerifyLast(void);
 firmware_status_t CurrentStore_Read(update_package_t *package);
-firmware_status_t CurrentStore_Commit(const update_package_t *package,
-                                      const uint8_t expected_manifest_sha256[32]);
+firmware_status_t CurrentStore_SaveLast(void);
+firmware_status_t CurrentStore_RebuildFrom(const char *source_root);
 firmware_status_t CurrentStore_CleanupUpdate(void);
 firmware_status_t RuntimeVerifier_Validate(void);
 

@@ -8,6 +8,16 @@
 #define PLATFORM_JOURNAL_SLOT1_ADDRESS 0x081E0000UL
 #define PLATFORM_JOURNAL_PROGRAM_UNIT  32U
 
+static void invalidate_flash_cache(uint32_t address, size_t size)
+{
+    uintptr_t aligned_address;
+    size_t aligned_size;
+
+    aligned_address = (uintptr_t) address & ~(uintptr_t) 31U;
+    aligned_size = ((uintptr_t) address + size - aligned_address + 31U) & ~(uintptr_t) 31U;
+    SCB_InvalidateDCache_by_Addr((volatile void *) aligned_address, (int32_t) aligned_size);
+}
+
 static uint32_t slot_address(uint32_t slot)
 {
     return slot == 0U ? PLATFORM_JOURNAL_SLOT0_ADDRESS : PLATFORM_JOURNAL_SLOT1_ADDRESS;
@@ -24,6 +34,7 @@ firmware_status_t PlatformJournalStorage_Read(uint32_t slot, void *data, size_t 
         size > PLATFORM_JOURNAL_SLOT_SIZE)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
 
+    invalidate_flash_cache(slot_address(slot), size);
     (void) memcpy(data, (const void *)(uintptr_t)slot_address(slot), size);
     return FIRMWARE_STATUS_OK;
 }
@@ -65,6 +76,8 @@ firmware_status_t PlatformJournalStorage_Write(uint32_t slot, const void *data, 
         size_t chunk = remaining < sizeof(program_buffer) ? remaining : sizeof(program_buffer);
         (void) memset(program_buffer, 0xFF, sizeof(program_buffer));
         (void) memcpy(program_buffer, source, chunk);
+        SCB_CleanDCache_by_Addr((volatile void *) program_buffer,
+                                (int32_t) sizeof(program_buffer));
         hal_status = HAL_FLASH_Program(FLASH_TYPEPROGRAM_FLASHWORD, address,
                                        (uint32_t)(uintptr_t)program_buffer);
         if (hal_status != HAL_OK)

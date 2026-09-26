@@ -1,13 +1,13 @@
 #ifndef UPDATE_CONFIG_H
 #define UPDATE_CONFIG_H
 
-#include "update/update_request.h"
-
 #define UPDATE_PACKAGE_ROOT  "/UPDATE/firmware"
-#define UPDATE_ROOT          "/UPDATE"
-#define UPDATE_REQUEST_PATH  UPDATE_REQUEST_FILE_PATH
 #define CURRENT_ROOT         "/CURRENT"
 #define CURRENT_PACKAGE_ROOT "/CURRENT/firmware"
+#define CURRENT_PACKAGE_PART "/CURRENT/firmware.part"
+#define LAST_ROOT            "/LAST"
+#define LAST_PACKAGE_ROOT    "/LAST/firmware"
+#define LAST_PACKAGE_PART    "/LAST/firmware.part"
 
 #define UPDATE_MANIFEST_FILE "manifest.json"
 

@@ -48,6 +48,17 @@ int UpdateComponent_IsEnabled(const update_component_descriptor_t *descriptor)
     return 1;
 }
 
+uint32_t UpdateComponent_RequiredMask(void)
+{
+    uint32_t mask = 0U;
+    size_t index;
+
+    for (index = 0U; index < sizeof(s_components) / sizeof(s_components[0]); ++index)
+        if (UpdateComponent_IsEnabled(&s_components[index]))
+            mask |= s_components[index].mask_bit;
+    return mask;
+}
+
 uint32_t UpdateComponent_DeriveMask(const update_manifest_t *manifest)
 {
     uint32_t mask = 0U;

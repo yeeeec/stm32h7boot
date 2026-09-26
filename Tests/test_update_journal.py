@@ -86,5 +86,95 @@ class JournalRulesTest(unittest.TestCase):
         self.assertEqual(read_latest(["torn", sealed(sequence=2)]), sealed(sequence=2))
 
 
+class SnapshotFlow:
+    """Small host model for the phase-two ownership and recovery rules."""
+
+    def __init__(self, state=IDLE, target=NONE, current="v1", update="v2", last=None):
+        self.state = state
+        self.target = target
+        self.current = current
+        self.update = update
+        self.last = last
+        self.sd_mounts = 0
+        self.last_saves = 0
+        self.installs = []
+        self.update_removed = False
+        self.fail_last = False
+        self.fail_current = False
+
+    def process(self):
+        if self.state == IDLE and self.target == NONE:
+            return "launch"
+        self.sd_mounts += 1
+        if self.state == PENDING and self.target == UPDATE:
+            if self.fail_last:
+                return "error-pending"
+            self.last = self.current
+            self.last_saves += 1
+            self.state = WRITING
+        elif self.state == PENDING and self.target == ROLLBACK:
+            if self.last is None:
+                return "error-pending"
+            self.state = WRITING
+        elif self.state == JUMPING:
+            self.state = WRITING
+        if self.state != WRITING:
+            return "error"
+        source = self.update if self.target == UPDATE else self.last
+        if source is None or self.fail_current:
+            return "error-writing"
+        self.installs.append(source)
+        self.current = source
+        self.state = JUMPING
+        if self.target == UPDATE and self.update_removed:
+            return "error-source"
+        return "launch"
+
+
+class SnapshotFlowTest(unittest.TestCase):
+    def test_idle_is_short_path_without_sd(self):
+        flow = SnapshotFlow()
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.sd_mounts, 0)
+
+    def test_pending_update_saves_last_once(self):
+        flow = SnapshotFlow(state=PENDING, target=UPDATE)
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.last, "v1")
+        self.assertEqual(flow.last_saves, 1)
+        flow.process()
+        self.assertEqual(flow.last_saves, 1)
+
+    def test_writing_update_does_not_overwrite_last(self):
+        flow = SnapshotFlow(state=WRITING, target=UPDATE, last="old")
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.last, "old")
+        self.assertEqual(flow.last_saves, 0)
+
+    def test_jumping_update_reuses_update_source(self):
+        flow = SnapshotFlow(state=JUMPING, target=UPDATE, last="v1")
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.installs, ["v2"])
+        self.assertFalse(flow.update_removed)
+
+    def test_rollback_reuses_last_source(self):
+        flow = SnapshotFlow(state=PENDING, target=ROLLBACK, current="v2", last="v1")
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.installs, ["v1"])
+        self.assertEqual(flow.current, "v1")
+
+    def test_last_failure_keeps_pending(self):
+        flow = SnapshotFlow(state=PENDING, target=UPDATE)
+        flow.fail_last = True
+        self.assertEqual(flow.process(), "error-pending")
+        self.assertEqual((flow.state, flow.target), (PENDING, UPDATE))
+
+    def test_current_rebuild_failure_keeps_writing(self):
+        flow = SnapshotFlow(state=WRITING, target=UPDATE)
+        flow.fail_current = True
+        self.assertEqual(flow.process(), "error-writing")
+        self.assertEqual((flow.state, flow.target), (WRITING, UPDATE))
+
+
 if __name__ == "__main__":
     unittest.main()

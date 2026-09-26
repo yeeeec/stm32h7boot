@@ -1,7 +1,5 @@
 #include "update/update_service.h"
 
-#include <string.h>
-
 #include "bootloader_config.h"
 #include "logging.h"
 #include "platform/platform_journal_storage.h"
@@ -46,123 +44,162 @@ static firmware_status_t unmount_update_storage(void)
     return PlatformStorage_Unmount();
 }
 
-static update_result_t install_update(void)
+static update_result_t package_failure(const update_operation_result_t *operation)
 {
-    update_request_t request;
-    update_package_t package;
-    update_operation_result_t operation;
-    firmware_status_t status;
-    firmware_status_t unmount_status;
+    return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, operation->failure, operation->status);
+}
+
+static update_result_t storage_failure(firmware_status_t status)
+{
+    return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_STORAGE, status);
+}
+
+static update_operation_result_t install_all_components(const char *root, update_package_t *package)
+{
+    update_operation_result_t result = {UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK};
     size_t index;
 
-    status = mount_update_storage();
-    if (FirmwareStatus_IsError(status))
-        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_STORAGE, status);
-
-    if (UpdateRequest_Load(&request) != UPDATE_REQUEST_ACTIVE)
-    {
-        (void)unmount_update_storage();
-        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_REQUEST_NOT_ACTIVE,
-                           FIRMWARE_STATUS_NOT_FOUND);
-    }
-
-    operation = PackageReader_ValidateRequest(UPDATE_PACKAGE_ROOT, &request, NULL, 1, &package);
-    if (FirmwareStatus_IsError(operation.status))
-    {
-        (void)unmount_update_storage();
-        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, operation.failure, operation.status);
-    }
-
-    /* Installation order is part of the existing manifest/package contract. */
-    for (index = 0U; index < package.manifest.component_count; ++index)
+    /* Sort a local manifest copy by the existing installation order contract. */
+    for (index = 0U; index < package->manifest.component_count; ++index)
     {
         size_t selected = index;
         size_t candidate;
-        const update_component_descriptor_t *descriptor =
-            UpdateComponent_Find(package.manifest.components[index].name);
-        if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
-            continue;
-        for (candidate = index + 1U; candidate < package.manifest.component_count; ++candidate)
+        for (candidate = index + 1U; candidate < package->manifest.component_count; ++candidate)
         {
-            const update_component_descriptor_t *candidate_descriptor =
-                UpdateComponent_Find(package.manifest.components[candidate].name);
-            if (candidate_descriptor != NULL && UpdateComponent_IsEnabled(candidate_descriptor) &&
-                package.manifest.components[candidate].installation_order <
-                    package.manifest.components[selected].installation_order)
+            if (package->manifest.components[candidate].installation_order <
+                package->manifest.components[selected].installation_order)
                 selected = candidate;
         }
         if (selected != index)
         {
-            update_manifest_component_t temporary = package.manifest.components[index];
-            package.manifest.components[index] = package.manifest.components[selected];
-            package.manifest.components[selected] = temporary;
-        }
-
-        operation = ImageInstaller_Install(UPDATE_PACKAGE_ROOT,
-                                            &package.manifest.components[index]);
-        if (FirmwareStatus_IsError(operation.status))
-        {
-            (void)unmount_update_storage();
-            return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, operation.failure,
-                               operation.status);
+            update_manifest_component_t temporary = package->manifest.components[index];
+            package->manifest.components[index] = package->manifest.components[selected];
+            package->manifest.components[selected] = temporary;
         }
     }
 
-    status = CurrentStore_Commit(&package, package.manifest_sha256);
+    for (index = 0U; index < package->manifest.component_count; ++index)
+    {
+        result = ImageInstaller_Install(root, &package->manifest.components[index]);
+        if (FirmwareStatus_IsError(result.status))
+            return result;
+    }
+    return result;
+}
+
+static update_result_t execute_transaction(update_target_t target)
+{
+    const char *source_root = target == UPDATE_TARGET_UPDATE ? UPDATE_PACKAGE_ROOT : LAST_PACKAGE_ROOT;
+    update_package_t package;
+    update_operation_result_t operation;
+    firmware_status_t status;
+    firmware_status_t unmount_status;
+    update_result_t result;
+
+    status = mount_update_storage();
+    if (FirmwareStatus_IsError(status))
+        return storage_failure(status);
+
+    operation = PackageReader_Validate(source_root, NULL, 1, &package);
+    if (FirmwareStatus_IsError(operation.status))
+    {
+        result = package_failure(&operation);
+        goto cleanup;
+    }
+    operation = install_all_components(source_root, &package);
+    if (FirmwareStatus_IsError(operation.status))
+    {
+        result = package_failure(&operation);
+        goto cleanup;
+    }
+    status = RuntimeVerifier_Validate();
+    if (FirmwareStatus_IsError(status))
+    {
+        result = make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_RUNTIME_VECTOR, status);
+        goto cleanup;
+    }
+    status = CurrentStore_RebuildFrom(source_root);
+    if (FirmwareStatus_IsError(status))
+    {
+        result = make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_CURRENT_VERIFY, status);
+        goto cleanup;
+    }
+    status = CurrentStore_Verify();
+    if (FirmwareStatus_IsError(status))
+    {
+        result = make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_CURRENT_VERIFY, status);
+        goto cleanup;
+    }
+    result = make_result(UPDATE_OUTCOME_INSTALLED, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
+
+cleanup:
+    unmount_status = unmount_update_storage();
+    if (result.outcome == UPDATE_OUTCOME_INSTALLED && FirmwareStatus_IsError(unmount_status))
+        result = storage_failure(unmount_status);
+    return result;
+}
+
+static firmware_status_t prepare_update(void)
+{
+    update_package_t update_package;
+    update_operation_result_t operation;
+    firmware_status_t status;
+    firmware_status_t unmount_status;
+
+    status = mount_update_storage();
+    if (FirmwareStatus_IsError(status))
+        return status;
+    operation = PackageReader_Validate(UPDATE_PACKAGE_ROOT, NULL, 1, &update_package);
+    status = operation.status;
     if (FirmwareStatus_IsOk(status))
-        status = UpdateRequest_Delete();
+        status = CurrentStore_Verify();
     if (FirmwareStatus_IsOk(status))
-        status = PlatformStorage_SyncVolume();
+        status = CurrentStore_SaveLast();
     if (FirmwareStatus_IsOk(status))
-        status = CurrentStore_CleanupUpdate();
+        status = CurrentStore_VerifyLast();
     unmount_status = unmount_update_storage();
     if (FirmwareStatus_IsOk(status) && FirmwareStatus_IsError(unmount_status))
         status = unmount_status;
-    if (FirmwareStatus_IsError(status))
-        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_STORAGE, status);
-    return make_result(UPDATE_OUTCOME_INSTALLED, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
+    return status;
 }
 
-static firmware_status_t validate_pending_update(void)
+static firmware_status_t prepare_rollback(void)
 {
-    update_request_t request;
-    update_package_t package;
-    update_operation_result_t operation;
     firmware_status_t status = mount_update_storage();
+    firmware_status_t unmount_status;
 
     if (FirmwareStatus_IsError(status))
         return status;
-    if (UpdateRequest_Load(&request) != UPDATE_REQUEST_ACTIVE)
+    status = CurrentStore_VerifyLast();
+    unmount_status = unmount_update_storage();
+    if (FirmwareStatus_IsOk(status) && FirmwareStatus_IsError(unmount_status))
+        status = unmount_status;
+    return status;
+}
+
+#if (BOOTLOADER_UPDATE_DEBUG_MODE == 1U)
+static void cleanup_debug_update(void)
+{
+    firmware_status_t status = mount_update_storage();
+    if (FirmwareStatus_IsError(status))
     {
-        (void)unmount_update_storage();
-        return FIRMWARE_STATUS_NOT_FOUND;
+        LOG_ERROR("update", "debug UPDATE cleanup skipped: status=%u", (unsigned) status);
+        return;
     }
-    operation = PackageReader_ValidateRequest(UPDATE_PACKAGE_ROOT, &request, NULL, 1, &package);
-    status = operation.status;
+    status = CurrentStore_CleanupUpdate();
     if (FirmwareStatus_IsOk(status))
-        status = PackageReader_ValidateUpdateRoot();
+        status = PlatformStorage_SyncVolume();
     {
         firmware_status_t unmount_status = unmount_update_storage();
         if (FirmwareStatus_IsOk(status) && FirmwareStatus_IsError(unmount_status))
             status = unmount_status;
     }
-    return status;
+    if (FirmwareStatus_IsError(status))
+        LOG_ERROR("update", "debug UPDATE cleanup failed: status=%u", (unsigned) status);
 }
+#endif
 
-static int update_request_available(void)
-{
-    update_request_t request;
-    firmware_status_t status = mount_update_storage();
-    int available = 0;
-    if (FirmwareStatus_IsOk(status))
-    {
-        available = UpdateRequest_Load(&request) == UPDATE_REQUEST_ACTIVE;
-        (void)unmount_update_storage();
-    }
-    return available;
-}
-
-static update_result_t finish_install(void)
+static update_result_t finish_transaction(update_target_t target)
 {
     firmware_status_t status;
 
@@ -170,42 +207,42 @@ static update_result_t finish_install(void)
     status = UpdateJournal_WriteState(UPDATE_STATE_IDLE, UPDATE_TARGET_NONE);
     if (FirmwareStatus_IsError(status))
         return journal_error(status);
-    LOG_INFO("update", "debug update confirmed: journal=IDLE/NONE");
+    LOG_INFO("update", "debug transaction confirmed: target=%u journal=IDLE/NONE",
+             (unsigned) target);
+    if (target == UPDATE_TARGET_UPDATE)
+        cleanup_debug_update();
 #else
-    status = UpdateJournal_WriteState(UPDATE_STATE_JUMPING, UPDATE_TARGET_UPDATE);
+    status = UpdateJournal_WriteState(UPDATE_STATE_JUMPING, target);
     if (FirmwareStatus_IsError(status))
         return journal_error(status);
-    LOG_INFO("update", "update installed: journal=JUMPING/UPDATE");
+    LOG_INFO("update", "transaction installed: journal=JUMPING/%u", (unsigned) target);
 #endif
     return make_result(UPDATE_OUTCOME_LAUNCH, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
 }
 
-static update_result_t process_update(update_state_t state)
+static update_result_t process_pending(update_target_t target)
 {
     firmware_status_t status;
     update_result_t result;
 
-    if (state == UPDATE_STATE_PENDING)
+    status = target == UPDATE_TARGET_UPDATE ? prepare_update() : prepare_rollback();
+    if (FirmwareStatus_IsError(status))
     {
-        status = validate_pending_update();
-        if (FirmwareStatus_IsError(status))
-            return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_MANIFEST_READ,
-                               status);
-        /* Persist WRITING before the first operation that changes firmware. */
-        status = UpdateJournal_WriteState(UPDATE_STATE_WRITING, UPDATE_TARGET_UPDATE);
-        if (FirmwareStatus_IsError(status))
-            return journal_error(status);
+        LOG_ERROR("update", "transaction preparation failed: target=%u status=%u",
+                  (unsigned) target, (unsigned) status);
+        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_STORAGE, status);
     }
-
-    result = install_update();
+    status = UpdateJournal_WriteState(UPDATE_STATE_WRITING, target);
+    if (FirmwareStatus_IsError(status))
+        return journal_error(status);
+    result = execute_transaction(target);
     if (result.outcome != UPDATE_OUTCOME_INSTALLED)
     {
-        /* WRITING/UPDATE is deliberately retained for the next boot. */
-        LOG_ERROR("update", "update execution failed: failure=%u status=%u",
-                  (unsigned)result.failure, (unsigned)result.status);
+        LOG_ERROR("update", "transaction execution failed: target=%u failure=%u status=%u",
+                  (unsigned) target, (unsigned) result.failure, (unsigned) result.status);
         return result;
     }
-    return finish_install();
+    return finish_transaction(target);
 }
 
 firmware_status_t UpdateService_Init(void)
@@ -238,6 +275,7 @@ update_result_t UpdateService_Process(void)
 {
     update_journal_record_t journal;
     firmware_status_t status;
+    update_result_t result;
 
     if (s_update_initialized == 0U)
     {
@@ -250,43 +288,38 @@ update_result_t UpdateService_Process(void)
         return journal_error(status);
 
     LOG_INFO("update", "process journal: state=%s target=%lu sequence=%lu",
-             state_name((update_state_t)journal.state), (unsigned long)journal.target,
-             (unsigned long)journal.sequence);
+             state_name((update_state_t) journal.state), (unsigned long) journal.target,
+             (unsigned long) journal.sequence);
 
     if (journal.state == UPDATE_STATE_IDLE && journal.target == UPDATE_TARGET_NONE)
-    {
-        /* The request file is the input edge; the Journal remains the only
-         * transaction state source after this transition. */
-        if (update_request_available())
-        {
-            status = UpdateJournal_WriteState(UPDATE_STATE_PENDING, UPDATE_TARGET_UPDATE);
-            if (FirmwareStatus_IsError(status))
-                return journal_error(status);
-            return process_update(UPDATE_STATE_PENDING);
-        }
         return make_result(UPDATE_OUTCOME_LAUNCH, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
-    }
-    if (journal.target == UPDATE_TARGET_ROLLBACK)
-        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_ROLLBACK_UNSUPPORTED,
-                           FIRMWARE_STATUS_NOT_SUPPORTED);
-    if (journal.target != UPDATE_TARGET_UPDATE)
+    if (journal.target != UPDATE_TARGET_UPDATE && journal.target != UPDATE_TARGET_ROLLBACK)
         return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_JOURNAL,
                            FIRMWARE_STATUS_INVALID_STATE);
 
     if (journal.state == UPDATE_STATE_PENDING)
-        return process_update(UPDATE_STATE_PENDING);
+        return process_pending((update_target_t) journal.target);
     if (journal.state == UPDATE_STATE_WRITING)
-        return process_update(UPDATE_STATE_WRITING);
+    {
+        result = execute_transaction((update_target_t) journal.target);
+        if (result.outcome != UPDATE_OUTCOME_INSTALLED)
+            return result;
+        return finish_transaction((update_target_t) journal.target);
+    }
     if (journal.state == UPDATE_STATE_JUMPING)
     {
 #if (BOOTLOADER_UPDATE_DEBUG_MODE == 1U)
         return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_JOURNAL,
                            FIRMWARE_STATUS_INVALID_STATE);
 #else
-        status = UpdateJournal_WriteState(UPDATE_STATE_WRITING, UPDATE_TARGET_UPDATE);
+        status = UpdateJournal_WriteState(UPDATE_STATE_WRITING,
+                                          (update_target_t) journal.target);
         if (FirmwareStatus_IsError(status))
             return journal_error(status);
-        return process_update(UPDATE_STATE_WRITING);
+        result = execute_transaction((update_target_t) journal.target);
+        if (result.outcome != UPDATE_OUTCOME_INSTALLED)
+            return result;
+        return finish_transaction((update_target_t) journal.target);
 #endif
     }
     return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_JOURNAL,

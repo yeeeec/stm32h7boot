@@ -588,7 +588,8 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
             !IsSha256Hex(component->sha256))
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if (expected != manifest->component_mask || UpdateComponent_DeriveMask(manifest) != expected)
+    if (expected != manifest->component_mask || UpdateComponent_DeriveMask(manifest) != expected ||
+        expected != UpdateComponent_RequiredMask())
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     return UpdateComponent_ValidateRanges(manifest);
 }

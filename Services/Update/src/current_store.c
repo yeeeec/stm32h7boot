@@ -21,13 +21,25 @@ static firmware_status_t remove_tree_if_present(const char *path)
     return PlatformStorage_RemoveTree(path);
 }
 
+static firmware_status_t ensure_directory(const char *path)
+{
+    platform_file_info_t info;
+    firmware_status_t status = PlatformStorage_Stat(path, &info);
+
+    if (status == FIRMWARE_STATUS_NOT_FOUND)
+        return PlatformStorage_Mkdir(path);
+    if (FirmwareStatus_IsError(status))
+        return status;
+    return info.is_directory != 0U ? FIRMWARE_STATUS_OK : FIRMWARE_STATUS_INVALID_STATE;
+}
+
 static firmware_status_t copy_file(const char *source, const char *destination)
 {
     platform_file_info_t info;
-    platform_file_handle_t input  = 0U;
+    platform_file_handle_t input = 0U;
     platform_file_handle_t output = 0U;
-    uint32_t total                = 0U;
-    firmware_status_t status      = PlatformStorage_Stat(source, &info);
+    uint32_t total = 0U;
+    firmware_status_t status = PlatformStorage_Stat(source, &info);
 
     if (FirmwareStatus_IsError(status) || info.is_directory != 0U)
         return FirmwareStatus_IsError(status) ? status : FIRMWARE_STATUS_INVALID_STATE;
@@ -43,8 +55,8 @@ static firmware_status_t copy_file(const char *source, const char *destination)
     while (total < info.size)
     {
         size_t requested = info.size - total;
-        size_t actual    = 0U;
-        size_t written   = 0U;
+        size_t actual = 0U;
+        size_t written = 0U;
         if (requested > sizeof(s_copy_buffer))
             requested = sizeof(s_copy_buffer);
         status = PlatformStorage_Read(input, s_copy_buffer, requested, &actual);
@@ -79,7 +91,7 @@ static firmware_status_t copy_file(const char *source, const char *destination)
     return status;
 }
 
-static firmware_status_t verify_root(const char *root, update_package_t *package)
+static firmware_status_t verify_package(const char *root, update_package_t *package)
 {
     update_package_t local;
     update_operation_result_t result =
@@ -87,73 +99,25 @@ static firmware_status_t verify_root(const char *root, update_package_t *package
     return result.status;
 }
 
-static firmware_status_t verify_current_root(void)
-{
-    platform_dir_handle_t directory;
-    platform_dir_entry_t entry;
-    firmware_status_t status = PlatformStorage_DirOpen(CURRENT_ROOT, &directory);
-    if (FirmwareStatus_IsError(status))
-        return status;
-    while ((status = PlatformStorage_DirRead(directory, &entry)) == FIRMWARE_STATUS_OK)
-    {
-        if (strcmp(entry.name, "firmware") != 0 || entry.is_directory == 0U)
-        {
-            (void) PlatformStorage_DirClose(directory);
-            return FIRMWARE_STATUS_INVALID_STATE;
-        }
-    }
-    {
-        firmware_status_t close_status = PlatformStorage_DirClose(directory);
-        if (status != FIRMWARE_STATUS_NOT_FOUND)
-            return status;
-        if (FirmwareStatus_IsError(close_status))
-            return close_status;
-    }
-    return FIRMWARE_STATUS_OK;
-}
-
-firmware_status_t CurrentStore_Verify(void)
-{
-    firmware_status_t status = verify_current_root();
-    return FirmwareStatus_IsError(status) ? status : verify_root(CURRENT_PACKAGE_ROOT, NULL);
-}
-
-firmware_status_t CurrentStore_Read(update_package_t *package)
-{
-    if (package == NULL)
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-
-    firmware_status_t status = verify_current_root();
-    return FirmwareStatus_IsError(status) ? status : verify_root(CURRENT_PACKAGE_ROOT, package);
-}
-
-firmware_status_t CurrentStore_Commit(const update_package_t *package,
-                                      const uint8_t expected_manifest_sha256[32])
+static firmware_status_t copy_package(const char *source_root, const update_package_t *package,
+                                      const char *destination_root)
 {
     char source[UPDATE_PATH_MAX];
     char destination[UPDATE_PATH_MAX];
-    update_package_t verified;
     firmware_status_t status;
     size_t index;
 
-    if (package == NULL || expected_manifest_sha256 == NULL)
-        return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    if (memcmp(package->manifest_sha256, expected_manifest_sha256, 32U) != 0)
-        return FIRMWARE_STATUS_AUTHENTICATION_FAILED;
-
-    status = remove_tree_if_present(CURRENT_ROOT);
+    status = remove_tree_if_present(destination_root);
     if (FirmwareStatus_IsOk(status))
-        status = PlatformStorage_Mkdir(CURRENT_ROOT);
-    if (FirmwareStatus_IsOk(status))
-        status = PlatformStorage_Mkdir(CURRENT_PACKAGE_ROOT);
+        status = PlatformStorage_Mkdir(destination_root);
     if (FirmwareStatus_IsError(status))
         return status;
 
     {
-        int source_length =
-            snprintf(source, sizeof(source), "%s/%s", package->root, UPDATE_MANIFEST_FILE);
+        int source_length = snprintf(source, sizeof(source), "%s/%s", source_root,
+                                     UPDATE_MANIFEST_FILE);
         int destination_length = snprintf(destination, sizeof(destination), "%s/%s",
-                                          CURRENT_PACKAGE_ROOT, UPDATE_MANIFEST_FILE);
+                                          destination_root, UPDATE_MANIFEST_FILE);
         if (source_length <= 0 || (size_t) source_length >= sizeof(source) ||
             destination_length <= 0 || (size_t) destination_length >= sizeof(destination))
             return FIRMWARE_STATUS_BUFFER_TOO_SMALL;
@@ -162,28 +126,85 @@ firmware_status_t CurrentStore_Commit(const update_package_t *package,
     for (index = 0U; FirmwareStatus_IsOk(status) && index < package->manifest.component_count;
          ++index)
     {
-        const update_component_descriptor_t *descriptor =
-            UpdateComponent_Find(package->manifest.components[index].name);
-        int source_length = snprintf(source, sizeof(source), "%s/%s", package->root,
-                                     package->manifest.components[index].file);
+        const update_manifest_component_t *component = &package->manifest.components[index];
+        int source_length = snprintf(source, sizeof(source), "%s/%s", source_root, component->file);
         int destination_length =
-            snprintf(destination, sizeof(destination), "%s/%s", CURRENT_PACKAGE_ROOT,
-                     package->manifest.components[index].file);
-        if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
-            continue;
+            snprintf(destination, sizeof(destination), "%s/%s", destination_root, component->file);
         if (source_length <= 0 || (size_t) source_length >= sizeof(source) ||
             destination_length <= 0 || (size_t) destination_length >= sizeof(destination))
             status = FIRMWARE_STATUS_BUFFER_TOO_SMALL;
         else
             status = copy_file(source, destination);
     }
+    return status;
+}
+
+static firmware_status_t replace_snapshot(const char *destination_root, const char *part_root,
+                                          const char *source_root, const update_package_t *package)
+{
+    update_package_t verified;
+    firmware_status_t status = copy_package(source_root, package, part_root);
+
     if (FirmwareStatus_IsError(status))
         return status;
-    status = verify_root(CURRENT_PACKAGE_ROOT, &verified);
-    if (FirmwareStatus_IsOk(status) &&
-        memcmp(verified.manifest_sha256, expected_manifest_sha256, 32U) != 0)
-        status = FIRMWARE_STATUS_AUTHENTICATION_FAILED;
+    status = PlatformStorage_SyncVolume();
+    if (FirmwareStatus_IsError(status))
+        return status;
+    status = verify_package(part_root, &verified);
+    if (FirmwareStatus_IsError(status))
+        return status;
+    status = remove_tree_if_present(destination_root);
+    if (FirmwareStatus_IsOk(status))
+        status = PlatformStorage_Rename(part_root, destination_root);
+    if (FirmwareStatus_IsOk(status))
+        status = PlatformStorage_SyncVolume();
     return status;
+}
+
+firmware_status_t CurrentStore_Verify(void)
+{
+    return verify_package(CURRENT_PACKAGE_ROOT, NULL);
+}
+
+firmware_status_t CurrentStore_VerifyLast(void)
+{
+    return verify_package(LAST_PACKAGE_ROOT, NULL);
+}
+
+firmware_status_t CurrentStore_Read(update_package_t *package)
+{
+    if (package == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    return verify_package(CURRENT_PACKAGE_ROOT, package);
+}
+
+firmware_status_t CurrentStore_SaveLast(void)
+{
+    update_package_t current;
+    firmware_status_t status = ensure_directory(LAST_ROOT);
+
+    if (FirmwareStatus_IsError(status))
+        return status;
+    status = CurrentStore_Read(&current);
+    if (FirmwareStatus_IsError(status))
+        return status;
+    return replace_snapshot(LAST_PACKAGE_ROOT, LAST_PACKAGE_PART, CURRENT_PACKAGE_ROOT, &current);
+}
+
+firmware_status_t CurrentStore_RebuildFrom(const char *source_root)
+{
+    update_package_t source;
+    firmware_status_t status;
+
+    if (source_root == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+    status = ensure_directory(CURRENT_ROOT);
+    if (FirmwareStatus_IsError(status))
+        return status;
+    status = verify_package(source_root, &source);
+    if (FirmwareStatus_IsError(status))
+        return status;
+    return replace_snapshot(CURRENT_PACKAGE_ROOT, CURRENT_PACKAGE_PART, source_root, &source);
 }
 
 firmware_status_t CurrentStore_CleanupUpdate(void)

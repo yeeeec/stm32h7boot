@@ -52,7 +52,8 @@ static firmware_status_t read_slot(uint32_t slot, update_journal_record_t *recor
 
 static int sequence_newer(uint32_t left, uint32_t right)
 {
-    return left != right && (int32_t)(left - right) > 0;
+    uint32_t delta = left - right;
+    return delta != 0U && delta < 0x80000000UL;
 }
 
 static firmware_status_t read_latest(update_journal_record_t *record, uint32_t *active_slot)

@@ -1,6 +1,5 @@
 add_library(update_service STATIC
     src/package_reader.c
-    src/update_request.c
     src/component_registry.c
     src/runtime_verifier.c
     src/update_manifest.c
