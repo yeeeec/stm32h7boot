@@ -290,5 +290,3 @@ update_operation_result_t PackageReader_Validate(const char *root,
              (unsigned long) package->manifest.component_count);
     return package_result(UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
 }
-
-\n

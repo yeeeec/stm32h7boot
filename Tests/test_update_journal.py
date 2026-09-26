@@ -14,6 +14,11 @@ MAGIC = 0x55524A4C
 VERSION = 1
 
 
+def version_allowed(update, current=None):
+    """Mirror the bootloader policy: first install and equal versions are valid."""
+    return current is None or update >= current
+
+
 @dataclass(frozen=True)
 class Record:
     magic: int = MAGIC
@@ -89,12 +94,21 @@ class JournalRulesTest(unittest.TestCase):
 class SnapshotFlow:
     """Small host model for the phase-two ownership and recovery rules."""
 
-    def __init__(self, state=IDLE, target=NONE, current="v1", update="v2", last=None):
+    def __init__(self, state=IDLE, target=NONE, current="v1", update="v2", last=None,
+                 current_version=(1, 0, 0), update_version=(2, 0, 0), debug=False,
+                 current_present=None):
         self.state = state
         self.target = target
         self.current = current
+        self.current_present = current is not None if current_present is None else current_present
         self.update = update
         self.last = last
+        self.current_version = current_version
+        self.update_version = update_version
+        self.current_corrupt = False
+        self.version_checks = 0
+        self.debug = debug
+        self.runtime_valid = True
         self.sd_mounts = 0
         self.last_saves = 0
         self.installs = []
@@ -107,16 +121,28 @@ class SnapshotFlow:
             return "launch"
         self.sd_mounts += 1
         if self.state == PENDING and self.target == UPDATE:
+            self.version_checks += 1
+            if self.current_corrupt:
+                return "error-pending"
+            if not version_allowed(self.update_version,
+                                   self.current_version if self.current_present else None):
+                return "error-pending"
             if self.fail_last:
                 return "error-pending"
-            self.last = self.current
-            self.last_saves += 1
+            if self.current_present:
+                self.last = self.current
+                self.last_saves += 1
             self.state = WRITING
         elif self.state == PENDING and self.target == ROLLBACK:
             if self.last is None:
                 return "error-pending"
             self.state = WRITING
         elif self.state == JUMPING:
+            if self.debug:
+                if not self.runtime_valid:
+                    return "error-jumping"
+                self.state, self.target = IDLE, NONE
+                return "launch"
             self.state = WRITING
         if self.state != WRITING:
             return "error"
@@ -125,6 +151,7 @@ class SnapshotFlow:
             return "error-writing"
         self.installs.append(source)
         self.current = source
+        self.current_present = True
         self.state = JUMPING
         if self.target == UPDATE and self.update_removed:
             return "error-source"
@@ -168,6 +195,56 @@ class SnapshotFlowTest(unittest.TestCase):
         flow.request_present = False
         self.assertEqual(flow.process(), "launch")
         self.assertEqual(flow.installs, ["v2"])
+
+    def test_first_install_does_not_create_last(self):
+        flow = SnapshotFlow(state=PENDING, target=UPDATE, current=None, last=None)
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.last, None)
+        self.assertEqual(flow.last_saves, 0)
+        self.assertEqual(flow.installs, ["v2"])
+
+    def test_corrupt_current_is_not_first_install(self):
+        flow = SnapshotFlow(state=PENDING, target=UPDATE, current=None, current_present=True)
+        flow.current_corrupt = True
+        self.assertEqual(flow.process(), "error-pending")
+        self.assertEqual((flow.state, flow.target), (PENDING, UPDATE))
+
+    def test_upgrade_policy_allows_new_and_equal_versions(self):
+        for update_version in ((1, 0, 1), (1, 0, 0)):
+            flow = SnapshotFlow(state=PENDING, target=UPDATE, current="v1",
+                                update_version=update_version)
+            self.assertEqual(flow.process(), "launch")
+            self.assertEqual(flow.last_saves, 1)
+
+    def test_upgrade_policy_rejects_downgrade(self):
+        flow = SnapshotFlow(state=PENDING, target=UPDATE, current="v2",
+                            current_version=(2, 0, 0), update_version=(1, 0, 0))
+        self.assertEqual(flow.process(), "error-pending")
+        self.assertEqual(flow.last_saves, 0)
+        self.assertEqual((flow.state, flow.target), (PENDING, UPDATE))
+
+    def test_rollback_does_not_run_upgrade_policy(self):
+        flow = SnapshotFlow(state=PENDING, target=ROLLBACK, current="v2", last="v1",
+                            current_version=(2, 0, 0), update_version=(1, 0, 0))
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.version_checks, 0)
+
+    def test_writing_does_not_run_upgrade_policy_again(self):
+        flow = SnapshotFlow(state=WRITING, target=UPDATE, current="v2", last="v1",
+                            current_version=(2, 0, 0), update_version=(1, 0, 0))
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.version_checks, 0)
+
+    def test_debug_jumping_confirms_idle(self):
+        flow = SnapshotFlow(state=JUMPING, target=UPDATE, debug=True)
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual((flow.state, flow.target), (IDLE, NONE))
+
+    def test_debug_jumping_keeps_journal_when_runtime_is_invalid(self):
+        flow = SnapshotFlow(state=JUMPING, target=ROLLBACK, debug=True)
+        flow.runtime_valid = False
+        self.assertEqual(flow.process(), "error-jumping")
+        self.assertEqual((flow.state, flow.target), (JUMPING, ROLLBACK))
 
     def test_rollback_reuses_last_source(self):
         flow = SnapshotFlow(state=PENDING, target=ROLLBACK, current="v2", last="v1")

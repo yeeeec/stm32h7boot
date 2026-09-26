@@ -173,9 +173,33 @@ firmware_status_t CurrentStore_VerifyLast(void)
 
 firmware_status_t CurrentStore_Read(update_package_t *package)
 {
+    platform_file_info_t info;
+    firmware_status_t status;
+
     if (package == NULL)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    return verify_package(CURRENT_PACKAGE_ROOT, package);
+
+    /* A missing CURRENT directory is the only first-install condition.  Once
+     * the directory exists, every incomplete or invalid package is a damaged
+     * snapshot and must not be treated as an empty device. */
+    status = PlatformStorage_Stat(CURRENT_ROOT, &info);
+    if (status == FIRMWARE_STATUS_NOT_FOUND)
+        return FIRMWARE_STATUS_NOT_FOUND;
+    if (FirmwareStatus_IsError(status))
+        return status;
+    if (info.is_directory == 0U)
+        return FIRMWARE_STATUS_INVALID_STATE;
+
+    status = PlatformStorage_Stat(CURRENT_PACKAGE_ROOT, &info);
+    if (status == FIRMWARE_STATUS_NOT_FOUND)
+        return FIRMWARE_STATUS_INVALID_STATE;
+    if (FirmwareStatus_IsError(status))
+        return status;
+    if (info.is_directory == 0U)
+        return FIRMWARE_STATUS_INVALID_STATE;
+
+    status = verify_package(CURRENT_PACKAGE_ROOT, package);
+    return status == FIRMWARE_STATUS_NOT_FOUND ? FIRMWARE_STATUS_INVALID_STATE : status;
 }
 
 firmware_status_t CurrentStore_SaveLast(void)

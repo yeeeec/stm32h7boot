@@ -27,7 +27,8 @@ firmware_status_t RuntimeVerifier_Validate(void)
     reset_handler_raw = vectors[1];
     reset_handler     = reset_handler_raw & ~1UL;
     if (stack_pointer == UINT32_MAX || reset_handler_raw == UINT32_MAX ||
-        !PlatformCpu_IsValidStackPointer(stack_pointer) || (reset_handler_raw & 1U) == 0U ||
+        !PlatformCpu_IsValidStackPointer(stack_pointer) || (stack_pointer & 7U) != 0U ||
+        (reset_handler_raw & 1U) == 0U ||
         reset_handler < address || reset_handler >= address + PLATFORM_APP_MAX_SIZE)
         return FIRMWARE_STATUS_INVALID_STATE;
     return FIRMWARE_STATUS_OK;
