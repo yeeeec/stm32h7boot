@@ -157,6 +157,18 @@ class SnapshotFlowTest(unittest.TestCase):
         self.assertEqual(flow.installs, ["v2"])
         self.assertFalse(flow.update_removed)
 
+    def test_request_file_is_not_an_idle_trigger(self):
+        flow = SnapshotFlow()
+        flow.request_present = True
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.sd_mounts, 0)
+
+    def test_pending_transaction_does_not_require_request_file(self):
+        flow = SnapshotFlow(state=PENDING, target=UPDATE)
+        flow.request_present = False
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.installs, ["v2"])
+
     def test_rollback_reuses_last_source(self):
         flow = SnapshotFlow(state=PENDING, target=ROLLBACK, current="v2", last="v1")
         self.assertEqual(flow.process(), "launch")
