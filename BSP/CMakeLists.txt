@@ -1,5 +1,4 @@
 set(BOARD_BSP_SOURCES
-    src/bsp_at24_bus.c
     src/bsp_log_uart.c
     src/bsp_therapy_uart.c
     src/bsp_qspi_flash.c

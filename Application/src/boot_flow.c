@@ -8,7 +8,8 @@
 
 boot_flow_result_t BootFlow_Run(uint32_t *vector_address)
 {
-    update_result_t result;
+    update_result_t update_result;
+    firmware_status_t status;
 
     if (vector_address == NULL)
     {
@@ -16,31 +17,22 @@ boot_flow_result_t BootFlow_Run(uint32_t *vector_address)
         return BOOT_FLOW_FATAL;
     }
 
-    LOG_INFO("boot", "startup update check");
-    result = UpdateService_Process();
-    if (result.outcome == UPDATE_OUTCOME_RUNTIME_UNSAFE)
-    {
-        LOG_ERROR("boot", "update flow failed: failure=%u status=%u", (unsigned) result.failure,
-                  (unsigned) result.status);
-        // return BOOT_FLOW_FATAL;
-    }
-    if (result.outcome == UPDATE_OUTCOME_RESET)
+    update_result = UpdateService_Process();
+    if (update_result.outcome == UPDATE_OUTCOME_RESET)
         return BOOT_FLOW_RESET;
-
-    LOG_INFO("boot", "runtime image check start");
-    firmware_status_t status = RuntimeImage_Prepare(vector_address);
-    if (FirmwareStatus_IsError(status) && result.outcome == UPDATE_OUTCOME_LAUNCH)
+    if (update_result.outcome == UPDATE_OUTCOME_RUNTIME_UNSAFE)
     {
-        update_result_t runtime_failure = UpdateService_ReportRuntimeFailure(status);
-        if (runtime_failure.outcome == UPDATE_OUTCOME_RESET)
-            return BOOT_FLOW_RESET;
+        LOG_ERROR("boot", "update flow failed: failure=%u status=%u",
+                  (unsigned)update_result.failure, (unsigned)update_result.status);
         return BOOT_FLOW_FATAL;
     }
+
+    status = RuntimeImage_Prepare(vector_address);
     if (FirmwareStatus_IsError(status))
     {
-        LOG_ERROR("boot", "runtime image check failed: status=%u", (unsigned) status);
+        LOG_ERROR("boot", "runtime image check failed: status=%u", (unsigned)status);
         return BOOT_FLOW_FATAL;
     }
-    LOG_INFO("boot", "runtime image ready: vector=0x%08lx", (unsigned long) *vector_address);
+    LOG_INFO("boot", "runtime image ready: vector=0x%08lx", (unsigned long)*vector_address);
     return BOOT_FLOW_LAUNCH;
 }

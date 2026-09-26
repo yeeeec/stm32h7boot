@@ -28,11 +28,16 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 project(${CMAKE_PROJECT_NAME})
 message("Build type: " ${CMAKE_BUILD_TYPE})
 
-set(BOOTLOADER_UPDATE_USE_JOURNAL "0" CACHE STRING
-    "Bootloader update mode: 1 for production journal, 0 for debug file flow")
-if(NOT BOOTLOADER_UPDATE_USE_JOURNAL STREQUAL "0" AND
-   NOT BOOTLOADER_UPDATE_USE_JOURNAL STREQUAL "1")
-    message(FATAL_ERROR "BOOTLOADER_UPDATE_USE_JOURNAL must be 0 or 1")
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    set(BOOTLOADER_UPDATE_DEBUG_MODE_DEFAULT "1")
+else()
+    set(BOOTLOADER_UPDATE_DEBUG_MODE_DEFAULT "0")
+endif()
+set(BOOTLOADER_UPDATE_DEBUG_MODE "${BOOTLOADER_UPDATE_DEBUG_MODE_DEFAULT}" CACHE STRING
+    "Enable the one-time debug update request/confirmation behavior")
+if(NOT BOOTLOADER_UPDATE_DEBUG_MODE STREQUAL "0" AND
+   NOT BOOTLOADER_UPDATE_DEBUG_MODE STREQUAL "1")
+    message(FATAL_ERROR "BOOTLOADER_UPDATE_DEBUG_MODE must be 0 or 1")
 endif()
 
 # Enable CMake support for ASM and C languages
@@ -56,9 +61,9 @@ add_subdirectory(Services)
 add_subdirectory(Application)
 
 target_compile_definitions(update_service PRIVATE
-    BOOTLOADER_UPDATE_USE_JOURNAL=${BOOTLOADER_UPDATE_USE_JOURNAL})
+    BOOTLOADER_UPDATE_DEBUG_MODE=${BOOTLOADER_UPDATE_DEBUG_MODE})
 target_compile_definitions(firmware_application PRIVATE
-    BOOTLOADER_UPDATE_USE_JOURNAL=${BOOTLOADER_UPDATE_USE_JOURNAL})
+    BOOTLOADER_UPDATE_DEBUG_MODE=${BOOTLOADER_UPDATE_DEBUG_MODE})
 
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE

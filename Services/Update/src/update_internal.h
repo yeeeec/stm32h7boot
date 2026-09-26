@@ -115,7 +115,7 @@ firmware_status_t CurrentStore_CleanupUpdate(void);
 firmware_status_t RuntimeVerifier_Validate(void);
 
 firmware_status_t UpdateJournal_Read(update_journal_record_t *record);
-firmware_status_t UpdateJournal_Write(const update_journal_record_t *record);
+firmware_status_t UpdateJournal_WriteState(update_state_t state, update_target_t target);
 
 typedef enum
 {
