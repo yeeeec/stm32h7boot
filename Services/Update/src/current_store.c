@@ -1,4 +1,4 @@
-#include "update_internal.h"
+#include "current_store.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -7,6 +7,7 @@
 #include "platform/platform_storage.h"
 #include "platform/platform_system.h"
 #include "update_config.h"
+#include "update_package.h"
 
 static FIRMWARE_STORAGE_RAM uint8_t s_copy_buffer[UPDATE_IO_BLOCK_SIZE];
 
@@ -94,9 +95,7 @@ static firmware_status_t copy_file(const char *source, const char *destination)
 static firmware_status_t verify_package(const char *root, update_package_t *package)
 {
     update_package_t local;
-    update_operation_result_t result =
-        PackageReader_Validate(root, NULL, 1, package != NULL ? package : &local);
-    return result.status;
+    return PackageReader_Validate(root, package != NULL ? package : &local);
 }
 
 static firmware_status_t copy_package(const char *source_root, const update_package_t *package,

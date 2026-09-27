@@ -1,4 +1,4 @@
-#include "update_internal.h"
+#include "update_journal_internal.h"
 
 #include <stddef.h>
 #include <string.h>

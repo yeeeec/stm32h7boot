@@ -49,12 +49,6 @@ firmware_status_t Application_Run(void)
         return FIRMWARE_STATUS_INVALID_STATE;
 
     result = BootFlow_Run(&vector_address);
-    if (result == BOOT_FLOW_RESET)
-    {
-        LOG_INFO("boot", "update flow requests reset");
-        PlatformSystem_Reset();
-        return FIRMWARE_STATUS_OK;
-    }
     if (result == BOOT_FLOW_LAUNCH)
     {
         LOG_INFO("boot", "jumping to application: vector=0x%08lx", (unsigned long) vector_address);

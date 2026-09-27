@@ -18,12 +18,9 @@ boot_flow_result_t BootFlow_Run(uint32_t *vector_address)
     }
 
     update_result = UpdateService_Process();
-    if (update_result.outcome == UPDATE_OUTCOME_RESET)
-        return BOOT_FLOW_RESET;
     if (update_result.outcome == UPDATE_OUTCOME_RUNTIME_UNSAFE)
     {
-        LOG_ERROR("boot", "update flow failed: failure=%u status=%u",
-                  (unsigned)update_result.failure, (unsigned)update_result.status);
+        LOG_ERROR("boot", "update flow failed: status=%u", (unsigned)update_result.status);
         return BOOT_FLOW_FATAL;
     }
 

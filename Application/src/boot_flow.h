@@ -6,7 +6,6 @@
 typedef enum
 {
     BOOT_FLOW_LAUNCH = 0,
-    BOOT_FLOW_RESET,
     BOOT_FLOW_FATAL
 } boot_flow_result_t;
 

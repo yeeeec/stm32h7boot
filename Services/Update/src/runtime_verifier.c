@@ -1,4 +1,4 @@
-#include "update_internal.h"
+#include "runtime_verifier.h"
 
 #include <string.h>
 
@@ -10,6 +10,8 @@
 #include "platform/platform_memory_map.h"
 #include "platform/platform_system.h"
 #include "platform/platform_therapy.h"
+#include "update/component_registry.h"
+#include "update_package.h"
 
 #define RUNTIME_VERIFY_BLOCK_SIZE 4096U
 

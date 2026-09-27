@@ -1,4 +1,4 @@
-#include "update_internal.h"
+#include "update_package.h"
 
 #include <string.h>
 

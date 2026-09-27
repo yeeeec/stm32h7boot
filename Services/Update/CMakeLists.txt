@@ -3,7 +3,6 @@ add_library(update_service STATIC
     src/component_registry.c
     src/runtime_verifier.c
     src/update_manifest.c
-    src/version_policy.c
     src/image_installer.c
     src/current_store.c
     src/update_journal.c
