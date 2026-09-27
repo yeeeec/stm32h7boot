@@ -26,7 +26,9 @@ static int state_target_valid(uint32_t state, uint32_t target)
 {
     if (state == UPDATE_STATE_IDLE)
         return target == UPDATE_TARGET_NONE;
-    if (state > UPDATE_STATE_JUMPING)
+    if (state == UPDATE_STATE_JUMPING)
+        return target == UPDATE_TARGET_UPDATE;
+    if (state > UPDATE_STATE_WRITING)
         return 0;
     return target == UPDATE_TARGET_UPDATE || target == UPDATE_TARGET_ROLLBACK;
 }

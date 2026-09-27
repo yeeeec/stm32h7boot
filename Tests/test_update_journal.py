@@ -31,7 +31,11 @@ class Record:
 
 
 def valid_pair(state, target):
-    return target == NONE if state == IDLE else state <= JUMPING and target in (UPDATE, ROLLBACK)
+    if state == IDLE:
+        return target == NONE
+    if state == JUMPING:
+        return target == UPDATE
+    return state in (PENDING, WRITING) and target in (UPDATE, ROLLBACK)
 
 
 def valid(record):
@@ -69,6 +73,17 @@ def read_latest(slots):
 
 
 class JournalRulesTest(unittest.TestCase):
+    def test_legal_state_target_pairs(self):
+        self.assertTrue(valid_pair(IDLE, NONE))
+        self.assertTrue(valid_pair(PENDING, UPDATE))
+        self.assertTrue(valid_pair(PENDING, ROLLBACK))
+        self.assertTrue(valid_pair(WRITING, UPDATE))
+        self.assertTrue(valid_pair(WRITING, ROLLBACK))
+        self.assertTrue(valid_pair(JUMPING, UPDATE))
+        self.assertFalse(valid_pair(JUMPING, ROLLBACK))
+        self.assertFalse(valid_pair(IDLE, UPDATE))
+        self.assertFalse(valid_pair(IDLE, ROLLBACK))
+
     def test_empty_and_single_valid_slots(self):
         self.assertIsNone(read_latest([None, None]))
         record = sealed()
@@ -115,8 +130,22 @@ class SnapshotFlow:
         self.update_removed = False
         self.fail_last = False
         self.fail_current = False
+        self.package_valid = True
+        self.journal_writes = 0
 
     def process(self):
+        if self.debug:
+            self.sd_mounts += 1
+            if not self.package_valid:
+                return "launch"
+            if self.fail_current:
+                return "error-writing"
+            self.installs.append(self.update)
+            self.current = self.update
+            self.current_present = True
+            self.update_removed = True
+            return "launch"
+
         if self.state == IDLE and self.target == NONE:
             return "launch"
         self.sd_mounts += 1
@@ -133,17 +162,21 @@ class SnapshotFlow:
                 self.last = self.current
                 self.last_saves += 1
             self.state = WRITING
+            self.journal_writes += 1
         elif self.state == PENDING and self.target == ROLLBACK:
             if self.last is None:
                 return "error-pending"
             self.state = WRITING
+            self.journal_writes += 1
         elif self.state == JUMPING:
-            if self.debug:
-                if not self.runtime_valid:
-                    return "error-jumping"
-                self.state, self.target = IDLE, NONE
-                return "launch"
-            self.state = WRITING
+            if self.target != UPDATE or self.last is None or not self.runtime_valid:
+                return "error-jumping"
+            self.installs.append(self.last)
+            self.current = self.last
+            self.current_present = True
+            self.state, self.target = IDLE, NONE
+            self.journal_writes += 1
+            return "launch"
         if self.state != WRITING:
             return "error"
         source = self.update if self.target == UPDATE else self.last
@@ -152,7 +185,11 @@ class SnapshotFlow:
         self.installs.append(source)
         self.current = source
         self.current_present = True
-        self.state = JUMPING
+        if self.target == UPDATE:
+            self.state = JUMPING
+        else:
+            self.state, self.target = IDLE, NONE
+        self.journal_writes += 1
         if self.target == UPDATE and self.update_removed:
             return "error-source"
         return "launch"
@@ -178,10 +215,11 @@ class SnapshotFlowTest(unittest.TestCase):
         self.assertEqual(flow.last, "old")
         self.assertEqual(flow.last_saves, 0)
 
-    def test_jumping_update_reuses_update_source(self):
+    def test_jumping_update_restores_last_source(self):
         flow = SnapshotFlow(state=JUMPING, target=UPDATE, last="v1")
         self.assertEqual(flow.process(), "launch")
-        self.assertEqual(flow.installs, ["v2"])
+        self.assertEqual(flow.installs, ["v1"])
+        self.assertEqual((flow.state, flow.target), (IDLE, NONE))
         self.assertFalse(flow.update_removed)
 
     def test_request_file_is_not_an_idle_trigger(self):
@@ -235,22 +273,33 @@ class SnapshotFlowTest(unittest.TestCase):
         self.assertEqual(flow.process(), "launch")
         self.assertEqual(flow.version_checks, 0)
 
-    def test_debug_jumping_confirms_idle(self):
+    def test_debug_ignores_journal(self):
         flow = SnapshotFlow(state=JUMPING, target=UPDATE, debug=True)
         self.assertEqual(flow.process(), "launch")
-        self.assertEqual((flow.state, flow.target), (IDLE, NONE))
+        self.assertEqual((flow.state, flow.target), (JUMPING, UPDATE))
+        self.assertEqual(flow.journal_writes, 0)
 
-    def test_debug_jumping_keeps_journal_when_runtime_is_invalid(self):
-        flow = SnapshotFlow(state=JUMPING, target=ROLLBACK, debug=True)
-        flow.runtime_valid = False
-        self.assertEqual(flow.process(), "error-jumping")
-        self.assertEqual((flow.state, flow.target), (JUMPING, ROLLBACK))
+    def test_debug_missing_or_invalid_update_launches(self):
+        for package_valid in (False,):
+            flow = SnapshotFlow(debug=True)
+            flow.package_valid = package_valid
+            self.assertEqual(flow.process(), "launch")
+            self.assertEqual(flow.journal_writes, 0)
+
+    def test_debug_allows_downgrade_and_cleans_update(self):
+        flow = SnapshotFlow(debug=True, current_version=(2, 0, 0), update_version=(1, 0, 0))
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.installs, ["v2"])
+        self.assertTrue(flow.update_removed)
+        self.assertEqual(flow.version_checks, 0)
+        self.assertEqual(flow.last_saves, 0)
 
     def test_rollback_reuses_last_source(self):
         flow = SnapshotFlow(state=PENDING, target=ROLLBACK, current="v2", last="v1")
         self.assertEqual(flow.process(), "launch")
         self.assertEqual(flow.installs, ["v1"])
         self.assertEqual(flow.current, "v1")
+        self.assertEqual((flow.state, flow.target), (IDLE, NONE))
 
     def test_last_failure_keeps_pending(self):
         flow = SnapshotFlow(state=PENDING, target=UPDATE)
