@@ -27,5 +27,6 @@
         ]
     },
     "cortex-debug.variableUseNaturalFormat": true,
-    "editor.rename.enablePreview": false
+    "editor.rename.enablePreview": false,
+    "commentTranslate.source": "Bing"
 }

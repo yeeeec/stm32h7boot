@@ -96,13 +96,12 @@ class SnapshotFlow:
 
     def __init__(self, state=IDLE, target=NONE, current="v1", update="v2", last=None,
                  current_version=(1, 0, 0), update_version=(2, 0, 0), debug=False,
-                 current_present=None, update_present=None):
+                 current_present=None):
         self.state = state
         self.target = target
         self.current = current
         self.current_present = current is not None if current_present is None else current_present
         self.update = update
-        self.update_present = update is not None if update_present is None else update_present
         self.last = last
         self.current_version = current_version
         self.update_version = update_version
@@ -119,17 +118,9 @@ class SnapshotFlow:
 
     def process(self):
         if self.state == IDLE and self.target == NONE:
-            if not self.debug:
-                return "launch"
-            self.sd_mounts += 1
-            if not self.update_present:
-                return "launch"
-            self.state, self.target = PENDING, UPDATE
+            return "launch"
         self.sd_mounts += 1
         if self.state == PENDING and self.target == UPDATE:
-            if self.debug and not self.update_present:
-                self.state, self.target = IDLE, NONE
-                return "launch"
             self.version_checks += 1
             if self.current_corrupt:
                 return "error-pending"
@@ -172,22 +163,6 @@ class SnapshotFlowTest(unittest.TestCase):
         flow = SnapshotFlow()
         self.assertEqual(flow.process(), "launch")
         self.assertEqual(flow.sd_mounts, 0)
-
-    def test_debug_without_update_manifest_skips_update(self):
-        flow = SnapshotFlow(debug=True, update_present=False)
-        self.assertEqual(flow.process(), "launch")
-        self.assertEqual(flow.sd_mounts, 1)
-
-    def test_debug_detects_update_manifest_from_idle(self):
-        flow = SnapshotFlow(debug=True, update_present=True)
-        self.assertEqual(flow.process(), "launch")
-        self.assertEqual(flow.installs, ["v2"])
-
-    def test_debug_pending_without_update_manifest_returns_to_idle(self):
-        flow = SnapshotFlow(state=PENDING, target=UPDATE, debug=True, update_present=False)
-        self.assertEqual(flow.process(), "launch")
-        self.assertEqual((flow.state, flow.target), (IDLE, NONE))
-        self.assertEqual(flow.version_checks, 0)
 
     def test_pending_update_saves_last_once(self):
         flow = SnapshotFlow(state=PENDING, target=UPDATE)
