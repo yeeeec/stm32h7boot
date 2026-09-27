@@ -133,6 +133,66 @@ static update_result_t execute_transaction(update_target_t target)
     return result;
 }
 
+static update_result_t recover_current_runtime(void)
+{
+    update_package_t current_package;
+    update_operation_result_t operation;
+    firmware_status_t status;
+    firmware_status_t unmount_status;
+    int runtime_validated = 0;
+
+    status = mount_update_storage();
+    if (FirmwareStatus_IsError(status))
+        return storage_failure(status);
+
+    status = CurrentStore_Read(&current_package);
+    if (FirmwareStatus_IsError(status))
+    {
+        (void) unmount_update_storage();
+        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_CURRENT_VERIFY, status);
+    }
+
+    status = RuntimeVerifier_VerifyPackage(&current_package);
+    if (status == FIRMWARE_STATUS_AUTHENTICATION_FAILED)
+    {
+        operation = install_all_components(CURRENT_PACKAGE_ROOT, &current_package);
+        if (FirmwareStatus_IsError(operation.status))
+        {
+            (void) unmount_update_storage();
+            return package_failure(&operation);
+        }
+        status = RuntimeVerifier_Validate();
+        if (FirmwareStatus_IsOk(status))
+        {
+            runtime_validated = 1;
+            status = RuntimeVerifier_VerifyPackage(&current_package);
+        }
+    }
+    if (FirmwareStatus_IsError(status))
+    {
+        (void) unmount_update_storage();
+        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE,
+                           UPDATE_FAILURE_CURRENT_VERIFY,
+                           status);
+    }
+
+    if (runtime_validated == 0)
+        status = RuntimeVerifier_Validate();
+    if (FirmwareStatus_IsError(status))
+    {
+        (void) unmount_update_storage();
+        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, UPDATE_FAILURE_RUNTIME_VECTOR, status);
+    }
+    unmount_status = unmount_update_storage();
+    if (FirmwareStatus_IsError(unmount_status))
+        return storage_failure(unmount_status);
+
+    status = UpdateJournal_ResetIdle();
+    if (FirmwareStatus_IsError(status))
+        return journal_error(status);
+    return make_result(UPDATE_OUTCOME_LAUNCH, UPDATE_FAILURE_NONE, FIRMWARE_STATUS_OK);
+}
+
 static firmware_status_t prepare_update(update_failure_t *failure)
 {
     update_package_t update_package;
@@ -324,6 +384,8 @@ static update_result_t process_production_update(void)
     update_result_t result;
 
     status = UpdateJournal_Read(&journal);
+    if (status == FIRMWARE_STATUS_NOT_FOUND || status == FIRMWARE_STATUS_INVALID_STATE)
+        return recover_current_runtime();
     if (FirmwareStatus_IsError(status))
         return journal_error(status);
 
@@ -360,7 +422,6 @@ static update_result_t process_production_update(void)
 firmware_status_t UpdateService_Init(void)
 {
 #if (BOOTLOADER_UPDATE_DEBUG_MODE == 0U)
-    update_journal_record_t journal;
     firmware_status_t status;
 #endif
 
@@ -369,11 +430,6 @@ firmware_status_t UpdateService_Init(void)
 
 #if (BOOTLOADER_UPDATE_DEBUG_MODE == 0U)
     status = PlatformJournalStorage_Init();
-    if (FirmwareStatus_IsError(status))
-        return status;
-    status = UpdateJournal_Read(&journal);
-    if (status == FIRMWARE_STATUS_NOT_FOUND)
-        status = UpdateJournal_WriteState(UPDATE_STATE_IDLE, UPDATE_TARGET_NONE);
     if (FirmwareStatus_IsError(status))
         return status;
 #endif

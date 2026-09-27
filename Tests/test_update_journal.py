@@ -72,6 +72,18 @@ def read_latest(slots):
     return right if newer(right.sequence, left.sequence) else left
 
 
+def reset_idle(slots):
+    if "io" in slots:
+        raise OSError("journal storage I/O")
+    valid_slots = [record for record in slots if isinstance(record, Record) and valid(record)]
+    newest = None
+    for record in valid_slots:
+        if newest is None or newer(record.sequence, newest.sequence):
+            newest = record
+    sequence = 1 if newest is None else (newest.sequence + 1) & 0xFFFFFFFF
+    return sealed(sequence=sequence, state=IDLE, target=NONE)
+
+
 class JournalRulesTest(unittest.TestCase):
     def test_legal_state_target_pairs(self):
         self.assertTrue(valid_pair(IDLE, NONE))
@@ -104,6 +116,24 @@ class JournalRulesTest(unittest.TestCase):
         invalid = sealed(state=IDLE, target=UPDATE)
         self.assertEqual(read_latest([invalid, sealed(sequence=2)]), sealed(sequence=2))
         self.assertEqual(read_latest(["torn", sealed(sequence=2)]), sealed(sequence=2))
+
+    def test_reset_idle_rebuilds_erased_and_invalid_slots(self):
+        self.assertEqual(reset_idle([None, None]).sequence, 1)
+        self.assertEqual(reset_idle(["invalid", "invalid"]).sequence, 1)
+
+    def test_reset_idle_wins_equal_sequence_conflict(self):
+        first = sealed(state=PENDING, target=UPDATE, sequence=9)
+        second = sealed(state=WRITING, target=UPDATE, sequence=9)
+        reset = reset_idle([first, second])
+        self.assertEqual((reset.sequence, reset.state, reset.target), (10, IDLE, NONE))
+
+    def test_reset_idle_wraps_after_newest_record(self):
+        reset = reset_idle([sealed(sequence=0xFFFFFFFF), None])
+        self.assertEqual((reset.sequence, reset.state, reset.target), (0, IDLE, NONE))
+
+    def test_reset_idle_propagates_storage_io_error(self):
+        with self.assertRaises(OSError):
+            reset_idle(["io", None])
 
 
 class SnapshotFlow:
@@ -312,6 +342,81 @@ class SnapshotFlowTest(unittest.TestCase):
         flow.fail_current = True
         self.assertEqual(flow.process(), "error-writing")
         self.assertEqual((flow.state, flow.target), (WRITING, UPDATE))
+
+
+class RecoveryFlow:
+    """Host model for production recovery when Journal cannot be trusted."""
+
+    def __init__(self, journal="invalid", current="valid", runtime_match=True):
+        self.journal = journal
+        self.current = current
+        self.runtime_match = runtime_match
+        self.install_fail = False
+        self.runtime_fail = False
+        self.post_hash_fail = False
+        self.reset_fail = False
+        self.mounts = 0
+        self.installs = []
+        self.journal_reset = False
+        self.source_used = None
+
+    def process(self):
+        if self.journal == "io":
+            return "error"
+        if self.journal not in ("missing", "invalid"):
+            return "launch"
+        self.mounts += 1
+        if self.current != "valid":
+            return "error"
+        self.source_used = "CURRENT"
+        if not self.runtime_match:
+            self.installs = ["app", "gui", "therapy", "voice", "config"]
+            if self.install_fail:
+                return "error"
+            if self.runtime_fail or self.post_hash_fail:
+                return "error"
+        if self.runtime_fail:
+            return "error"
+        if self.reset_fail:
+            return "error"
+        self.journal_reset = True
+        return "launch"
+
+
+class RecoveryFlowTest(unittest.TestCase):
+    def test_missing_or_invalid_journal_uses_current_only(self):
+        for journal in ("missing", "invalid"):
+            flow = RecoveryFlow(journal=journal)
+            self.assertEqual(flow.process(), "launch")
+            self.assertEqual(flow.source_used, "CURRENT")
+            self.assertEqual(flow.installs, [])
+            self.assertTrue(flow.journal_reset)
+
+    def test_journal_io_error_does_not_enter_recovery(self):
+        flow = RecoveryFlow(journal="io")
+        self.assertEqual(flow.process(), "error")
+        self.assertEqual(flow.mounts, 0)
+        self.assertFalse(flow.journal_reset)
+
+    def test_current_hash_mismatch_reinstalls_all_components(self):
+        flow = RecoveryFlow(runtime_match=False)
+        self.assertEqual(flow.process(), "launch")
+        self.assertEqual(flow.installs, ["app", "gui", "therapy", "voice", "config"])
+        self.assertTrue(flow.journal_reset)
+
+    def test_invalid_current_does_not_fallback_to_last_or_update(self):
+        flow = RecoveryFlow(current="corrupt")
+        self.assertEqual(flow.process(), "error")
+        self.assertEqual(flow.installs, [])
+        self.assertIsNone(flow.source_used)
+        self.assertFalse(flow.journal_reset)
+
+    def test_recovery_failures_keep_journal_invalid(self):
+        for attribute in ("install_fail", "runtime_fail", "post_hash_fail", "reset_fail"):
+            flow = RecoveryFlow(runtime_match=False)
+            setattr(flow, attribute, True)
+            self.assertEqual(flow.process(), "error", attribute)
+            self.assertFalse(flow.journal_reset, attribute)
 
 
 if __name__ == "__main__":

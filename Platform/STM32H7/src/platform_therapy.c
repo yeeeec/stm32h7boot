@@ -220,6 +220,29 @@ firmware_status_t PlatformTherapy_BeginUpdate(platform_therapy_info_t *info)
     return FIRMWARE_STATUS_OK;
 }
 
+firmware_status_t PlatformTherapy_BeginRead(void)
+{
+    stm32_rom_boot_info_t info;
+    stm32_rom_boot_status_t status;
+    int entered = 0;
+
+    if (s_initialized == 0U)
+        return FIRMWARE_STATUS_INVALID_STATE;
+    status = Stm32RomBoot_Enter(&s_target);
+    if (status == STM32_ROM_BOOT_STATUS_OK)
+    {
+        entered = 1;
+        status = Stm32RomBoot_GetInfo(&s_target, &info);
+    }
+    if (status != STM32_ROM_BOOT_STATUS_OK)
+    {
+        if (entered != 0)
+            (void) Stm32RomBoot_Leave(&s_target);
+        return MapRomBootStatus(status);
+    }
+    return FIRMWARE_STATUS_OK;
+}
+
 firmware_status_t PlatformTherapy_Read(uint32_t address, void *data, uint32_t size)
 {
     if (s_initialized == 0U)
@@ -267,5 +290,12 @@ firmware_status_t PlatformTherapy_EndUpdate(void)
         return FIRMWARE_STATUS_INVALID_STATE;
     }
 
+    return MapRomBootStatus(Stm32RomBoot_Leave(&s_target));
+}
+
+firmware_status_t PlatformTherapy_EndRead(void)
+{
+    if (s_initialized == 0U)
+        return FIRMWARE_STATUS_INVALID_STATE;
     return MapRomBootStatus(Stm32RomBoot_Leave(&s_target));
 }

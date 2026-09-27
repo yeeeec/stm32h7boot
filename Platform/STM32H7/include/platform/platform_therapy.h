@@ -18,6 +18,7 @@ extern "C"
 
     firmware_status_t PlatformTherapy_Init(void);
     firmware_status_t PlatformTherapy_BeginUpdate(platform_therapy_info_t *info);
+    firmware_status_t PlatformTherapy_BeginRead(void);
 
     firmware_status_t PlatformTherapy_Read(uint32_t address, void *data, uint32_t size);
 
@@ -28,6 +29,7 @@ extern "C"
     firmware_status_t PlatformTherapy_Verify(uint32_t address, const void *data, uint32_t size);
 
     firmware_status_t PlatformTherapy_EndUpdate(void);
+    firmware_status_t PlatformTherapy_EndRead(void);
 
 #ifdef __cplusplus
 }
