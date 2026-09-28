@@ -3,7 +3,7 @@
 
 /* Keep the development update path enabled unless a build explicitly overrides it. */
 #ifndef BOOTLOADER_UPDATE_DEBUG_MODE_DEFAULT
-#define BOOTLOADER_UPDATE_DEBUG_MODE_DEFAULT 1U
+#define BOOTLOADER_UPDATE_DEBUG_MODE_DEFAULT 0U
 #endif
 
 #ifndef BOOTLOADER_UPDATE_DEBUG_MODE
