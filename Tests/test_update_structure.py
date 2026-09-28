@@ -1,5 +1,4 @@
 from pathlib import Path
-import re
 import unittest
 
 
@@ -35,23 +34,19 @@ class UpdateStructureTest(unittest.TestCase):
         for removed_name in (
             "update_operation_result_t",
             "update_failure_t",
+            "update_result_t",
+            "update_outcome_t",
             "VersionPolicy_Check",
             "VersionPolicy_ValidateMinimumBootloader",
-            "UPDATE_OUTCOME_NO_CHANGE",
-            "UPDATE_OUTCOME_INSTALLED",
-            "UPDATE_OUTCOME_RESET",
+            "UPDATE_OUTCOME_",
+            "boot_flow_result_t",
+            "BOOT_FLOW_LAUNCH",
+            "BOOT_FLOW_FATAL",
             "BOOT_FLOW_RESET",
+            "UpdateComponent_IsEnabled",
+            "IMAGE_TARGET_RESOURCE",
         ):
             self.assertNotIn(removed_name, source)
-
-        types = (UPDATE / "include" / "update" / "update_types.h").read_text(
-            encoding="utf-8", errors="replace"
-        )
-        result = re.search(r"typedef struct\s*\{([^}]*)\}\s*update_result_t", types, re.S)
-        self.assertIsNotNone(result)
-        self.assertRegex(result.group(1), r"update_outcome_t\s+outcome;")
-        self.assertRegex(result.group(1), r"firmware_status_t\s+status;")
-        self.assertNotIn("failure", result.group(1))
 
     def test_update_service_declares_module_dependencies_directly(self):
         source = (UPDATE / "src" / "update_service.c").read_text(encoding="utf-8", errors="replace")
@@ -67,6 +62,26 @@ class UpdateStructureTest(unittest.TestCase):
 
         cmake = (UPDATE / "CMakeLists.txt").read_text(encoding="utf-8", errors="replace")
         self.assertNotIn("version_policy.c", cmake)
+
+    def test_status_based_public_interfaces_and_debug_error_split(self):
+        update_service = (UPDATE / "src" / "update_service.c").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        service_header = (UPDATE / "include" / "update" / "update_service.h").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        boot_flow = (ROOT / "Application" / "src" / "boot_flow.c").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        boot_header = (ROOT / "Application" / "src" / "boot_flow.h").read_text(
+            encoding="utf-8", errors="replace"
+        )
+        self.assertIn("firmware_status_t UpdateService_Process(void);", service_header)
+        self.assertIn("firmware_status_t BootFlow_Run(uint32_t *vector_address);", boot_header)
+        self.assertIn("return FIRMWARE_STATUS_INVALID_STATE;", update_service)
+        self.assertIn("debug_package_status_is_ignorable", update_service)
+        self.assertIn("default:", update_service)
+        self.assertIn("return status;", boot_flow)
 
 
 if __name__ == "__main__":

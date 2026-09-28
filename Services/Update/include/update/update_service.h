@@ -10,7 +10,7 @@ extern "C"
 #endif
 
     firmware_status_t UpdateService_Init(void);
-    update_result_t UpdateService_Process(void);
+    firmware_status_t UpdateService_Process(void);
 
 #ifdef __cplusplus
 }

@@ -3,12 +3,8 @@
 
 #include <stdint.h>
 
-typedef enum
-{
-    BOOT_FLOW_LAUNCH = 0,
-    BOOT_FLOW_FATAL
-} boot_flow_result_t;
+#include "firmware/status.h"
 
-boot_flow_result_t BootFlow_Run(uint32_t *vector_address);
+firmware_status_t BootFlow_Run(uint32_t *vector_address);
 
 #endif /* APPLICATION_BOOT_FLOW_H */

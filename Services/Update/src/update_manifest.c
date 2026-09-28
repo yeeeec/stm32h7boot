@@ -1,9 +1,9 @@
 /**
  * @file update_manifest.c
- * @brief 无堆内存的升级 manifest JSON 解析、规范化和摘要计算。
+ * @brief Parse and validate the bootloader update manifest.
  *
- * 解析器只接受定义好的升级 schema，并在复制字符串/数字前执行边界检查；
- * 签名验证由独立的静态信任库模块完成。
+ * Signing fields remain part of the manifest ABI. ECDSA authenticity is established by the
+ * trusted host-side packaging flow; this bootloader does not verify ECDSA signatures.
  */
 
 #include "update_package.h"
@@ -581,8 +581,6 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
         for (size_t previous = 0U; previous < i; ++previous)
             if (strcmp(component->file, manifest->components[previous].file) == 0)
                 return FIRMWARE_STATUS_INVALID_ARGUMENT;
-        if (!UpdateComponent_IsEnabled(descriptor))
-            continue;
         if (component->size == 0U || strcmp(component->format, descriptor->format) != 0 ||
             !IsSha256Hex(component->sha256))
             return FIRMWARE_STATUS_INVALID_ARGUMENT;

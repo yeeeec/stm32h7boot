@@ -6,30 +6,29 @@
 #include "logging.h"
 #include "update/update_service.h"
 
-boot_flow_result_t BootFlow_Run(uint32_t *vector_address)
+firmware_status_t BootFlow_Run(uint32_t *vector_address)
 {
-    update_result_t update_result;
     firmware_status_t status;
 
     if (vector_address == NULL)
     {
         LOG_ERROR("boot", "boot flow cannot start: vector address is null");
-        return BOOT_FLOW_FATAL;
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
 
-    update_result = UpdateService_Process();
-    if (update_result.outcome == UPDATE_OUTCOME_RUNTIME_UNSAFE)
+    status = UpdateService_Process();
+    if (FirmwareStatus_IsError(status))
     {
-        LOG_ERROR("boot", "update flow failed: status=%u", (unsigned)update_result.status);
-        return BOOT_FLOW_FATAL;
+        LOG_ERROR("boot", "update flow failed: status=%u", (unsigned)status);
+        return status;
     }
 
     status = RuntimeImage_Prepare(vector_address);
     if (FirmwareStatus_IsError(status))
     {
         LOG_ERROR("boot", "runtime image check failed: status=%u", (unsigned)status);
-        return BOOT_FLOW_FATAL;
+        return status;
     }
     LOG_INFO("boot", "runtime image ready: vector=0x%08lx", (unsigned long)*vector_address);
-    return BOOT_FLOW_LAUNCH;
+    return FIRMWARE_STATUS_OK;
 }

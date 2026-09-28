@@ -42,19 +42,16 @@ firmware_status_t Application_Init(void)
 
 firmware_status_t Application_Run(void)
 {
-    boot_flow_result_t result;
     uint32_t vector_address = 0U;
+    firmware_status_t status;
 
     if (s_initialized == 0U)
         return FIRMWARE_STATUS_INVALID_STATE;
 
-    result = BootFlow_Run(&vector_address);
-    if (result == BOOT_FLOW_LAUNCH)
-    {
-        LOG_INFO("boot", "jumping to application: vector=0x%08lx", (unsigned long) vector_address);
-        PlatformCpu_Jump(vector_address);
-    }
+    status = BootFlow_Run(&vector_address);
+    if (FirmwareStatus_IsError(status))
+        return status;
 
-    LOG_ERROR("boot", "boot flow stopped without application jump: result=%u", (unsigned) result);
-    return FIRMWARE_STATUS_INVALID_STATE;
+    LOG_INFO("boot", "jumping to application: vector=0x%08lx", (unsigned long) vector_address);
+    PlatformCpu_Jump(vector_address);
 }

@@ -167,7 +167,7 @@ static firmware_status_t validate_file_set(const char *root,
         platform_file_info_t info;
         int path_length;
 
-        if (descriptor == NULL || !UpdateComponent_IsEnabled(descriptor))
+        if (descriptor == NULL)
             continue;
         path_length = snprintf(path, sizeof(path), "%s/%s", root, manifest->components[index].file);
         if (path_length <= 0 || (size_t) path_length >= sizeof(path))

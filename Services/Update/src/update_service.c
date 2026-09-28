@@ -18,12 +18,6 @@
 
 static uint8_t s_update_initialized;
 
-static update_result_t make_result(update_outcome_t outcome, firmware_status_t status)
-{
-    update_result_t value = {outcome, status};
-    return value;
-}
-
 static firmware_status_t mount_update_storage(void)
 {
     firmware_status_t status = PlatformStorage_Init();
@@ -225,6 +219,23 @@ failed:
 #endif
 
 #if (BOOTLOADER_UPDATE_DEBUG_MODE == 1U)
+static int debug_package_status_is_ignorable(firmware_status_t status)
+{
+    switch (status)
+    {
+        case FIRMWARE_STATUS_NOT_FOUND:
+        case FIRMWARE_STATUS_INVALID_ARGUMENT:
+        case FIRMWARE_STATUS_INVALID_STATE:
+        case FIRMWARE_STATUS_NOT_SUPPORTED:
+        case FIRMWARE_STATUS_OUT_OF_RANGE:
+        case FIRMWARE_STATUS_BUFFER_TOO_SMALL:
+        case FIRMWARE_STATUS_AUTHENTICATION_FAILED:
+            return 1;
+        default:
+            return 0;
+    }
+}
+
 static void cleanup_debug_update(void)
 {
     firmware_status_t status = mount_update_storage();
@@ -245,20 +256,23 @@ static void cleanup_debug_update(void)
         LOG_ERROR("update", "debug UPDATE cleanup failed: status=%u", (unsigned) status);
 }
 
-static update_result_t process_debug_update(void)
+static firmware_status_t process_debug_update(void)
 {
     update_package_t package;
     firmware_status_t status = mount_update_storage();
     firmware_status_t unmount_status;
 
     if (FirmwareStatus_IsError(status))
-        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, status);
+        return status;
 
     status = PackageReader_Validate(UPDATE_PACKAGE_ROOT, &package);
     if (FirmwareStatus_IsError(status))
     {
-        (void) unmount_update_storage();
-        return make_result(UPDATE_OUTCOME_LAUNCH, FIRMWARE_STATUS_OK);
+        firmware_status_t unmount_status = unmount_update_storage();
+        LOG_INFO("update", "debug UPDATE ignored: status=%u", (unsigned) status);
+        if (!debug_package_status_is_ignorable(status))
+            return status;
+        return FirmwareStatus_IsError(unmount_status) ? unmount_status : FIRMWARE_STATUS_OK;
     }
 
     status = execute_validated_package(UPDATE_PACKAGE_ROOT, &package);
@@ -266,10 +280,10 @@ static update_result_t process_debug_update(void)
     if (FirmwareStatus_IsOk(status) && FirmwareStatus_IsError(unmount_status))
         status = unmount_status;
     if (FirmwareStatus_IsError(status))
-        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, status);
+        return status;
 
     cleanup_debug_update();
-    return make_result(UPDATE_OUTCOME_LAUNCH, FIRMWARE_STATUS_OK);
+    return FIRMWARE_STATUS_OK;
 }
 #else
 static firmware_status_t finish_transaction(update_target_t target)
@@ -319,22 +333,17 @@ static firmware_status_t process_pending(update_target_t target)
     return finish_transaction(target);
 }
 
-static update_result_t process_production_update(void)
+static firmware_status_t process_production_update(void)
 {
     update_journal_record_t journal;
     firmware_status_t status = UpdateJournal_Read(&journal);
 
     if (status == FIRMWARE_STATUS_NOT_FOUND || status == FIRMWARE_STATUS_INVALID_STATE)
-    {
-        status = recover_current_runtime();
-        return FirmwareStatus_IsError(status)
-                   ? make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, status)
-                   : make_result(UPDATE_OUTCOME_LAUNCH, FIRMWARE_STATUS_OK);
-    }
+        return recover_current_runtime();
     if (FirmwareStatus_IsError(status))
     {
         LOG_ERROR("update", "Journal read failed: status=%u", (unsigned) status);
-        return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, status);
+        return status;
     }
 
     LOG_INFO("update", "process journal: state=%lu target=%lu sequence=%lu",
@@ -342,7 +351,7 @@ static update_result_t process_production_update(void)
              (unsigned long) journal.sequence);
 
     if (journal.state == UPDATE_STATE_IDLE && journal.target == UPDATE_TARGET_NONE)
-        return make_result(UPDATE_OUTCOME_LAUNCH, FIRMWARE_STATUS_OK);
+        return FIRMWARE_STATUS_OK;
 
     if (journal.state == UPDATE_STATE_PENDING)
     {
@@ -351,9 +360,9 @@ static update_result_t process_production_update(void)
         {
             LOG_ERROR("update", "pending transaction failed: target=%u status=%u",
                       (unsigned) journal.target, (unsigned) status);
-            return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, status);
+            return status;
         }
-        return make_result(UPDATE_OUTCOME_LAUNCH, FIRMWARE_STATUS_OK);
+        return FIRMWARE_STATUS_OK;
     }
     if (journal.state == UPDATE_STATE_WRITING)
     {
@@ -364,9 +373,9 @@ static update_result_t process_production_update(void)
         {
             LOG_ERROR("update", "interrupted transaction failed: target=%u status=%u",
                       (unsigned) journal.target, (unsigned) status);
-            return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, status);
+            return status;
         }
-        return make_result(UPDATE_OUTCOME_LAUNCH, FIRMWARE_STATUS_OK);
+        return FIRMWARE_STATUS_OK;
     }
     if (journal.state == UPDATE_STATE_JUMPING && journal.target == UPDATE_TARGET_UPDATE)
     {
@@ -376,14 +385,14 @@ static update_result_t process_production_update(void)
         if (FirmwareStatus_IsError(status))
         {
             LOG_ERROR("update", "JUMPING recovery failed: status=%u", (unsigned) status);
-            return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, status);
+            return status;
         }
-        return make_result(UPDATE_OUTCOME_LAUNCH, FIRMWARE_STATUS_OK);
+        return FIRMWARE_STATUS_OK;
     }
 
     LOG_ERROR("update", "Journal state unsupported: state=%lu target=%lu",
               (unsigned long) journal.state, (unsigned long) journal.target);
-    return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, FIRMWARE_STATUS_INVALID_STATE);
+    return FIRMWARE_STATUS_INVALID_STATE;
 }
 #endif
 
@@ -406,16 +415,10 @@ firmware_status_t UpdateService_Init(void)
     return FIRMWARE_STATUS_OK;
 }
 
-update_result_t UpdateService_Process(void)
+firmware_status_t UpdateService_Process(void)
 {
-    firmware_status_t status;
-
     if (s_update_initialized == 0U)
-    {
-        status = UpdateService_Init();
-        if (FirmwareStatus_IsError(status))
-            return make_result(UPDATE_OUTCOME_RUNTIME_UNSAFE, status);
-    }
+        return FIRMWARE_STATUS_INVALID_STATE;
 
 #if (BOOTLOADER_UPDATE_DEBUG_MODE == 1U)
     return process_debug_update();

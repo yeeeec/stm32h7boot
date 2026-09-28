@@ -32,8 +32,6 @@ static const char *target_name(image_target_t target)
             return "voice";
         case IMAGE_TARGET_CONFIG:
             return "config";
-        case IMAGE_TARGET_RESOURCE:
-            return "resource";
         default:
             return "unknown";
     }
@@ -52,19 +50,7 @@ static firmware_status_t target_limits(image_target_t target, uint32_t *address,
     *address = descriptor->address;
     *maximum_size = descriptor->maximum_size;
 
-    switch (target)
-    {
-        case IMAGE_TARGET_THERAPY:
-        case IMAGE_TARGET_APP:
-        case IMAGE_TARGET_GUI:
-        case IMAGE_TARGET_VOICE:
-        case IMAGE_TARGET_CONFIG:
-            return FIRMWARE_STATUS_OK;
-        case IMAGE_TARGET_RESOURCE:
-            return FIRMWARE_STATUS_NOT_SUPPORTED;
-        default:
-            return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    }
+    return FIRMWARE_STATUS_OK;
 }
 
 static firmware_status_t target_erase(image_target_t target, uint32_t address, uint32_t size)

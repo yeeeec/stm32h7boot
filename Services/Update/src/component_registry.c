@@ -41,21 +41,13 @@ const update_component_descriptor_t *UpdateComponent_FindByTarget(image_target_t
     return NULL;
 }
 
-int UpdateComponent_IsEnabled(const update_component_descriptor_t *descriptor)
-{
-    if (descriptor == NULL)
-        return 0;
-    return 1;
-}
-
 uint32_t UpdateComponent_RequiredMask(void)
 {
     uint32_t mask = 0U;
     size_t index;
 
     for (index = 0U; index < sizeof(s_components) / sizeof(s_components[0]); ++index)
-        if (UpdateComponent_IsEnabled(&s_components[index]))
-            mask |= s_components[index].mask_bit;
+        mask |= s_components[index].mask_bit;
     return mask;
 }
 
@@ -83,8 +75,6 @@ firmware_status_t UpdateComponent_ValidateRanges(const update_manifest_t *manife
         size_t right;
         if (a == NULL)
             return FIRMWARE_STATUS_NOT_SUPPORTED;
-        if (!UpdateComponent_IsEnabled(a))
-            continue;
         if (manifest->components[left].size == 0U ||
             manifest->components[left].size > a->maximum_size)
             return FIRMWARE_STATUS_OUT_OF_RANGE;
@@ -107,8 +97,6 @@ firmware_status_t UpdateComponent_ValidateRanges(const update_manifest_t *manife
             uint64_t b_end;
             if (b == NULL)
                 return FIRMWARE_STATUS_NOT_SUPPORTED;
-            if (!UpdateComponent_IsEnabled(b))
-                continue;
             b_end = (uint64_t) b->address + manifest->components[right].size;
             if (a->target != IMAGE_TARGET_THERAPY && b->target != IMAGE_TARGET_THERAPY &&
                 (uint64_t) a->address < b_end && (uint64_t) b->address < a_end)
