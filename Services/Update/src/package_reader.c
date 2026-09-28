@@ -10,6 +10,7 @@
 #include "logging.h"
 #include "platform/platform_storage.h"
 #include "platform/platform_system.h"
+#include "update/component_registry.h"
 #include "update_config.h"
 
 static FIRMWARE_STORAGE_RAM uint8_t s_manifest_buffer[UPDATE_MANIFEST_MAX_SIZE];

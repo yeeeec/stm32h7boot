@@ -60,8 +60,9 @@ RAM (xrw)      : ORIGIN = 0x24000000, LENGTH = 512K
 RAM_D2 (xrw)      : ORIGIN = 0x30000000, LENGTH = 288K
 RAM_D3 (xrw)      : ORIGIN = 0x38000000, LENGTH = 64K
 ITCMRAM (xrw)      : ORIGIN = 0x00000000, LENGTH = 64K
-/* The final 256 KiB (sectors 6 and 7 of bank 2) belongs to Journal A/B. */
-FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 1792K
+/* Bootloader: first 256 KiB. The middle region is reserved for the internal APP;
+ * the final two 128 KiB sectors are reserved for Journal A/B storage. */
+FLASH (rx)      : ORIGIN = 0x8000000, LENGTH = 256K
 }
 
 /* Highest address of the user mode stack */

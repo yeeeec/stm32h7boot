@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #include "firmware/status.h"
-#include "update/component_registry.h"
 #include "update_model.h"
 
 firmware_status_t PackageReader_Validate(const char *root, update_package_t *package);
@@ -16,9 +15,5 @@ int UpdateVersion_Compare(const update_version_t *left, const update_version_t *
 int UpdatePackage_IsValidId(const char *package_id);
 int UpdatePackage_IsValidComponentFileName(const char *file_name);
 int UpdateHex_DecodeSha256(const char *text, uint8_t digest[32]);
-
-uint32_t UpdateComponent_RequiredMask(void);
-uint32_t UpdateComponent_DeriveMask(const update_manifest_t *manifest);
-firmware_status_t UpdateComponent_ValidateRanges(const update_manifest_t *manifest);
 
 #endif /* UPDATE_PACKAGE_H */

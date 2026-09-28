@@ -1,9 +1,13 @@
 #ifndef BOOTLOADER_CONFIG_H
 #define BOOTLOADER_CONFIG_H
 
-/* Debug owns the initial update request and confirms it after installation. */
+/* Keep the development update path enabled unless a build explicitly overrides it. */
+#ifndef BOOTLOADER_UPDATE_DEBUG_MODE_DEFAULT
+#define BOOTLOADER_UPDATE_DEBUG_MODE_DEFAULT 1U
+#endif
+
 #ifndef BOOTLOADER_UPDATE_DEBUG_MODE
-#define BOOTLOADER_UPDATE_DEBUG_MODE 0U
+#define BOOTLOADER_UPDATE_DEBUG_MODE BOOTLOADER_UPDATE_DEBUG_MODE_DEFAULT
 #endif
 
 #if (BOOTLOADER_UPDATE_DEBUG_MODE != 0U) && (BOOTLOADER_UPDATE_DEBUG_MODE != 1U)

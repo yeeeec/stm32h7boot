@@ -25,6 +25,7 @@ extern "C"
 
     const update_component_descriptor_t *UpdateComponent_Find(const char *name);
     const update_component_descriptor_t *UpdateComponent_FindByTarget(image_target_t target);
+    uint32_t UpdateComponent_RequiredMask(void);
 
 #ifdef __cplusplus
 }

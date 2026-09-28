@@ -7,6 +7,7 @@
  */
 
 #include "update_package.h"
+#include "update/component_registry.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -557,6 +558,56 @@ int UpdatePackage_IsValidComponentFileName(const char *value)
     return i != 0U && i < UPDATE_COMPONENT_FILE_MAX;
 }
 
+static firmware_status_t ValidateComponentRanges(const update_manifest_t *manifest)
+{
+    size_t left;
+
+    if (manifest == NULL)
+        return FIRMWARE_STATUS_INVALID_ARGUMENT;
+
+    for (left = 0U; left < manifest->component_count; ++left)
+    {
+        const update_manifest_component_t *component = &manifest->components[left];
+        const update_component_descriptor_t *descriptor = UpdateComponent_Find(component->name);
+        uint64_t component_end;
+        size_t right;
+
+        if (descriptor == NULL)
+            return FIRMWARE_STATUS_NOT_SUPPORTED;
+        if (component->size == 0U || component->size > descriptor->maximum_size)
+            return FIRMWARE_STATUS_OUT_OF_RANGE;
+        if ((descriptor->address % descriptor->erase_size) != 0U ||
+            (((uint64_t) component->size + descriptor->erase_size - 1U) /
+                 descriptor->erase_size) * descriptor->erase_size > descriptor->maximum_size)
+            return FIRMWARE_STATUS_OUT_OF_RANGE;
+
+        component_end = (uint64_t) descriptor->address + component->size;
+        if (component_end > (uint64_t) descriptor->address + descriptor->maximum_size)
+            return FIRMWARE_STATUS_OUT_OF_RANGE;
+        if ((component->size % descriptor->write_alignment) != 0U &&
+            descriptor->target != IMAGE_TARGET_APP && descriptor->target != IMAGE_TARGET_GUI &&
+            descriptor->target != IMAGE_TARGET_VOICE && descriptor->target != IMAGE_TARGET_CONFIG)
+            return FIRMWARE_STATUS_INVALID_ARGUMENT;
+
+        for (right = left + 1U; right < manifest->component_count; ++right)
+        {
+            const update_component_descriptor_t *other =
+                UpdateComponent_Find(manifest->components[right].name);
+            uint64_t other_end;
+
+            if (other == NULL)
+                return FIRMWARE_STATUS_NOT_SUPPORTED;
+            other_end = (uint64_t) other->address + manifest->components[right].size;
+            if (descriptor->target != IMAGE_TARGET_THERAPY &&
+                other->target != IMAGE_TARGET_THERAPY &&
+                (uint64_t) descriptor->address < other_end &&
+                (uint64_t) other->address < component_end)
+                return FIRMWARE_STATUS_OUT_OF_RANGE;
+        }
+    }
+    return FIRMWARE_STATUS_OK;
+}
+
 firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifest)
 {
     size_t i;
@@ -585,10 +636,9 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
             !IsSha256Hex(component->sha256))
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if (expected != manifest->component_mask || UpdateComponent_DeriveMask(manifest) != expected ||
-        expected != UpdateComponent_RequiredMask())
+    if (expected != manifest->component_mask || expected != UpdateComponent_RequiredMask())
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
-    return UpdateComponent_ValidateRanges(manifest);
+    return ValidateComponentRanges(manifest);
 }
 
 /** 解析完整 manifest 并执行 schema、范围和规范性校验。 */

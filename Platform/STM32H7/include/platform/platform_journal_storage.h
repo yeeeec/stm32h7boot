@@ -5,14 +5,14 @@
 #include <stdint.h>
 
 #include "firmware/status.h"
+#include "platform/platform_memory_map.h"
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-/* Each A/B record has its own STM32H7 internal-flash erase sector. */
-#define PLATFORM_JOURNAL_SLOT_COUNT 2U
+/* A/B each own one of the final two 128 KiB internal-flash sectors. */
 #define PLATFORM_JOURNAL_SLOT_SIZE  (128UL * 1024UL)
 
 firmware_status_t PlatformJournalStorage_Init(void);
