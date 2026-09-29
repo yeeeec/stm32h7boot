@@ -567,7 +567,7 @@ static firmware_status_t ValidateComponentRanges(const update_manifest_t *manife
 
     for (left = 0U; left < manifest->component_count; ++left)
     {
-        const update_manifest_component_t *component = &manifest->components[left];
+        const update_manifest_component_t *component    = &manifest->components[left];
         const update_component_descriptor_t *descriptor = UpdateComponent_Find(component->name);
         uint64_t component_end;
         size_t right;
@@ -577,8 +577,9 @@ static firmware_status_t ValidateComponentRanges(const update_manifest_t *manife
         if (component->size == 0U || component->size > descriptor->maximum_size)
             return FIRMWARE_STATUS_OUT_OF_RANGE;
         if ((descriptor->address % descriptor->erase_size) != 0U ||
-            (((uint64_t) component->size + descriptor->erase_size - 1U) /
-                 descriptor->erase_size) * descriptor->erase_size > descriptor->maximum_size)
+            (((uint64_t) component->size + descriptor->erase_size - 1U) / descriptor->erase_size) *
+                    descriptor->erase_size >
+                descriptor->maximum_size)
             return FIRMWARE_STATUS_OUT_OF_RANGE;
 
         component_end = (uint64_t) descriptor->address + component->size;
@@ -636,7 +637,8 @@ firmware_status_t UpdateManifest_ValidateTarget(const update_manifest_t *manifes
             !IsSha256Hex(component->sha256))
             return FIRMWARE_STATUS_INVALID_ARGUMENT;
     }
-    if (expected != manifest->component_mask || expected != UpdateComponent_RequiredMask())
+    // if (expected != manifest->component_mask || expected != UpdateComponent_RequiredMask())
+    if (expected != manifest->component_mask)
         return FIRMWARE_STATUS_INVALID_ARGUMENT;
     return ValidateComponentRanges(manifest);
 }
